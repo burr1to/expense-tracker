@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id              String           @id @default(cuid())
+  name            String
+  email           String           @unique
+  emailVerified   Boolean          @default(false)
+  image           String?
+  currency        String           @default("NPR")
+  theme           String           @default("system")
+  hideAmounts     Boolean          @default(false)
+  autoLockMinutes Int              @default(5)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  sessions        Session[]
+  accounts        Account[]
+  transactions    Transaction[]
+  budgets         Budget[]
+  recurring       RecurringEntry[]
+  goals           SavingsGoal[]
+  categories      CustomCategory[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  userId      String
+  kind        String
+  category    String
+  amountMinor Int
+  occurredOn  DateTime @db.Date
+  note        String   @default("")
+  tags        String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, occurredOn])
+}
+
+model Budget {
+  id          String   @id @default(cuid())
+  userId      String
+  monthKey    String
+  category    String
+  amountMinor Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, monthKey, category])
+}
+
+model RecurringEntry {
+  id          String   @id @default(cuid())
+  userId      String
+  kind        String
+  category    String
+  amountMinor Int
+  note        String   @default("")
+  tags        String[] @default([])
+  dayOfMonth  Int
+  nextDueOn   DateTime @db.Date
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, nextDueOn])
+}
+
+model SavingsGoal {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String
+  targetMinor Int
+  savedMinor  Int       @default(0)
+  targetDate  DateTime? @db.Date
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model CustomCategory {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  kind      String
+  color     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
+}
