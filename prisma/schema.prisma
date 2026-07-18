@@ -8,24 +8,29 @@ datasource db {
 }
 
 model User {
-  id              String           @id @default(cuid())
+  id              String              @id @default(cuid())
   name            String
-  email           String           @unique
-  emailVerified   Boolean          @default(false)
+  email           String              @unique
+  emailVerified   Boolean             @default(false)
   image           String?
-  currency        String           @default("NPR")
-  theme           String           @default("system")
-  hideAmounts     Boolean          @default(false)
-  autoLockMinutes Int              @default(5)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  currency        String              @default("NPR")
+  theme           String              @default("system")
+  hideAmounts     Boolean             @default(false)
+  autoLockMinutes Int                 @default(0)
+  pinHash         String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
   sessions        Session[]
   accounts        Account[]
+  paymentAccounts PaymentAccount[]
   transactions    Transaction[]
   budgets         Budget[]
   recurring       RecurringEntry[]
   goals           SavingsGoal[]
   categories      CustomCategory[]
+  dueItems        DueItem[]
+  duePayments     DuePayment[]
+  receipts        ReceiptAttachment[]
 }
 
 model Session {
@@ -73,19 +78,39 @@ model Verification {
 }
 
 model Transaction {
-  id          String   @id @default(cuid())
+  id          String             @id @default(cuid())
   userId      String
   kind        String
   category    String
   amountMinor Int
-  occurredOn  DateTime @db.Date
-  note        String   @default("")
-  tags        String[] @default([])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  occurredOn  DateTime           @db.Date
+  note        String             @default("")
+  subcategory String?
+  area        String?
+  paymentMode String             @default("cash")
+  paymentAccountId String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paymentAccount PaymentAccount? @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
+  receipt     ReceiptAttachment?
 
   @@index([userId, occurredOn])
+  @@index([paymentAccountId])
+}
+
+model PaymentAccount {
+  id           String        @id @default(cuid())
+  userId       String
+  type         String
+  provider     String
+  label        String        @default("")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([userId])
 }
 
 model Budget {
@@ -144,4 +169,61 @@ model CustomCategory {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, name])
+}
+
+model DueItem {
+  id          String             @id @default(cuid())
+  userId      String
+  kind        String
+  title       String
+  person      String             @default("")
+  amountMinor Int
+  category    String
+  occurredOn  DateTime?          @db.Date
+  dueOn       DateTime           @db.Date
+  remindOn    DateTime?          @db.Date
+  note        String             @default("")
+  status      String             @default("open")
+  completedOn DateTime?          @db.Date
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments    DuePayment[]
+  receipt     ReceiptAttachment?
+
+  @@index([userId, dueOn])
+  @@index([userId, remindOn])
+}
+
+model DuePayment {
+  id            String   @id @default(cuid())
+  userId        String
+  dueItemId     String
+  amountMinor   Int
+  occurredOn    DateTime @db.Date
+  note          String   @default("")
+  transactionId String?
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dueItem       DueItem  @relation(fields: [dueItemId], references: [id], onDelete: Cascade)
+
+  @@index([userId, dueItemId])
+}
+
+model ReceiptAttachment {
+  id            String       @id @default(cuid())
+  userId        String
+  transactionId String?      @unique
+  dueItemId     String?      @unique
+  name          String
+  mimeType      String
+  size          Int
+  storagePath   String?      @unique
+  data          Bytes?
+  createdAt     DateTime     @default(now())
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  dueItem       DueItem?     @relation(fields: [dueItemId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

@@ -1,6 +1,14 @@
 # Paper Ledger
 
-A mobile-first personal income and expense tracker with monthly reporting, planning, CSV import/export, privacy controls, and database-backed email/password authentication.
+A mobile-first personal income and expense tracker with monthly reporting, planning, dues and repayment tracking, reminders, optional receipt attachments, a financial milestone timeline, CSV import/export, privacy controls, and database-backed email/password authentication.
+
+## Dues and reminders
+
+- Track one-off payments and expected income separately from repeating entries.
+- Keep lent and borrowed money by person, due date, partial repayment, and remaining balance.
+- Reminder dates feed the always-visible bell on desktop and mobile.
+- Settling an item can optionally create the matching income or expense ledger entry.
+- JPG, PNG, WebP, and PDF receipts up to 3 MB can be kept privately with a transaction or due.
 
 ## Stack
 
@@ -10,15 +18,16 @@ A mobile-first personal income and expense tracker with monthly reporting, plann
 - React Hook Form + Zod, Recharts, Phosphor Icons
 - Vitest + ESLint
 
-Supabase is the PostgreSQL host only. The browser never connects to Supabase and there is no local-storage database. All private data goes through authenticated server routes and user-owned Prisma queries.
+Supabase hosts PostgreSQL and the private receipt Storage bucket. The browser uploads receipt bytes directly to Storage only with a short-lived, server-issued upload token; all authorization and ownership checks still go through authenticated server routes and user-owned Prisma queries.
 
 ## Configure
 
 1. Create a Supabase project and copy its PostgreSQL pooler connection string.
 2. Copy `.env.example` to `.env.local`.
 3. Set `DATABASE_URL`, `BETTER_AUTH_SECRET`, and `BETTER_AUTH_URL`.
-4. For production password-reset mail, set `RESEND_API_KEY` and `AUTH_EMAIL_FROM`. In development, reset links are printed in the server terminal when Resend is not configured.
-5. Apply the checked-in schema and generate the client:
+4. Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and the server-only `SUPABASE_SECRET_KEY`. A legacy `SUPABASE_SERVICE_ROLE_KEY` is also accepted. `SUPABASE_RECEIPTS_BUCKET` defaults to `receipts`; the private bucket is created on the first upload with the app's 3 MB and MIME-type restrictions.
+5. For production password-reset mail, set `RESEND_API_KEY` and `AUTH_EMAIL_FROM`. In development, reset links are printed in the server terminal when Resend is not configured.
+6. Apply the checked-in schema and generate the client:
 
 ```bash
 npm install
@@ -49,12 +58,12 @@ The app requires a working PostgreSQL connection. Sign-up creates the user, cred
 
 ## CSV import format
 
-Required columns are `date`, `type`, `category`, and `amount`. Optional columns are `note` and `tags`.
+Required columns are `date`, `type`, `category`, and `amount`. Optional columns are `subcategory`, `area`, `note`, `payment mode`, and `payment account id`. Payment mode accepts `cash`, `cheque`, or `online` and defaults to cash when left blank. Online rows must use an account ID from the user's configured payment accounts.
 
 ```csv
-date,type,category,note,amount,tags
-2026-07-11,expense,Food & Dining,"Lunch, team",1250,"work, food"
-2026-07-10,income,Salary,Monthly salary,85400,work
+date,type,category,subcategory,area,note,amount,payment mode,payment account id
+2026-07-15,expense,Food & Dining,Lunch,Thamel,"Lunch, team",1250,cash,
+2026-07-15,income,Salary,Salary,,Monthly salary,85000,cash,
 ```
 
 ## Quality checks

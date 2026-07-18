@@ -1,6 +1,7 @@
 import {
   ChartPieSlice,
   Flag,
+  HandCoins,
   House,
   ListBullets,
   Plus,
@@ -13,6 +14,7 @@ import type { AppView } from "../types";
 const navItems: { id: AppView; label: string; icon: typeof House }[] = [
   { id: "home", label: "Home", icon: House },
   { id: "plan", label: "Plan", icon: Flag },
+  { id: "dues", label: "Dues", icon: HandCoins },
   { id: "reports", label: "Reports", icon: ChartPieSlice },
   { id: "transactions", label: "Transactions", icon: ListBullets },
   { id: "settings", label: "Profile", icon: UserCircle },
@@ -26,7 +28,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ view, onNavigate, onAdd, children }: AppShellProps) {
-  const mobileItems = navItems.filter((item) => item.id !== "reports");
+  const mobileItems = navItems.filter((item) => item.id !== "reports" && item.id !== "dues");
   return (
     <div className="app-frame">
       <aside className="desktop-sidebar" aria-label="Primary navigation">

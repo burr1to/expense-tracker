@@ -10,7 +10,10 @@ const transaction = (overrides: Partial<LedgerTransaction>): LedgerTransaction =
   amountMinor: 10000,
   occurredOn: "2026-07-11",
   note: "",
-  tags: [],
+  subcategory: null,
+  area: null,
+  paymentMode: "cash",
+  paymentAccountId: null,
   createdAt: "2026-07-11T09:00:00Z",
   ...overrides,
 });

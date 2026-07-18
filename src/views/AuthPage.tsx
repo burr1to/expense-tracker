@@ -1,4 +1,5 @@
 import { ArrowRight, ChartLineUp, CheckCircle, Eye, EyeSlash, Wallet } from "@phosphor-icons/react";
+import { PasswordInput, TextInput } from "@mantine/core";
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
@@ -68,10 +69,10 @@ export function AuthPage() {
           <p>{mode === "signin" ? "Pick up where you left off." : mode === "signup" ? "A clean money habit starts here." : mode === "new-password" ? "Use at least eight characters." : "We’ll email you a secure reset link."}</p>
 
           <form onSubmit={submit} className="auth-form">
-            {mode === "signup" && <label><span>Your name</span><input value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required placeholder="Suman" /></label>}
-            {mode !== "new-password" && <label><span>Email address</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required placeholder="you@example.com" /></label>}
+            {mode === "signup" && <TextInput label="Your name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required placeholder="Suman" />}
+            {mode !== "new-password" && <TextInput label="Email address" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required placeholder="you@example.com" />}
             {(mode !== "reset") && (
-              <label><span>Password</span><div className="password-field"><input type={showPassword ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} minLength={8} autoComplete={mode === "signin" ? "current-password" : "new-password"} required placeholder="At least 8 characters" /><button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeSlash size={19} /> : <Eye size={19} />}</button></div></label>
+              <PasswordInput label="Password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={8} autoComplete={mode === "signin" ? "current-password" : "new-password"} required placeholder="At least 8 characters" visible={showPassword} onVisibilityChange={setShowPassword} visibilityToggleIcon={({ reveal }) => reveal ? <EyeSlash size={19} /> : <Eye size={19} />} />
             )}
             {mode === "signin" && <button type="button" className="text-button align-right" onClick={() => switchMode("reset")}>Forgot password?</button>}
             {error && <div className="form-error" role="alert">{error}</div>}

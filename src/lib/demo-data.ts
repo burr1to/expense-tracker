@@ -8,26 +8,28 @@ export const DEMO_PROFILE: Profile = {
   theme: "light",
   hideAmounts: false,
   autoLockMinutes: 0,
+  hasPin: false,
 };
 
 const now = new Date();
 const year = now.getFullYear();
 const month = String(now.getMonth() + 1).padStart(2, "0");
 const date = (day: number) => `${year}-${month}-${String(day).padStart(2, "0")}`;
+const cashPayment = { subcategory: null, area: null, paymentMode: "cash", paymentAccountId: null } as const;
 
 export const DEMO_TRANSACTIONS: LedgerTransaction[] = [
-  { id: "d1", userId: "demo-user", kind: "income", category: "salary", amountMinor: 8540000, occurredOn: date(10), note: "Monthly salary", tags: ["work"], createdAt: new Date().toISOString() },
-  { id: "d2", userId: "demo-user", kind: "expense", category: "housing", amountMinor: 2000000, occurredOn: date(2), note: "Apartment rent", tags: ["essential"], createdAt: new Date().toISOString() },
-  { id: "d3", userId: "demo-user", kind: "expense", category: "food", amountMinor: 165000, occurredOn: date(11), note: "Groceries", tags: ["essential"], createdAt: new Date().toISOString() },
-  { id: "d4", userId: "demo-user", kind: "expense", category: "transport", amountMinor: 21000, occurredOn: date(11), note: "Pathao ride", tags: [], createdAt: new Date().toISOString() },
-  { id: "d5", userId: "demo-user", kind: "expense", category: "utilities", amountMinor: 425000, occurredOn: date(8), note: "Electricity and internet", tags: ["essential"], createdAt: new Date().toISOString() },
-  { id: "d6", userId: "demo-user", kind: "expense", category: "shopping", amountMinor: 112000, occurredOn: date(10), note: "Sastodeal", tags: [], createdAt: new Date().toISOString() },
-  { id: "d7", userId: "demo-user", kind: "expense", category: "food", amountMinor: 28000, occurredOn: date(10), note: "Coffee", tags: [], createdAt: new Date().toISOString() },
-  { id: "d8", userId: "demo-user", kind: "expense", category: "food", amountMinor: 840000, occurredOn: date(5), note: "Weekly groceries", tags: ["essential"], createdAt: new Date().toISOString() },
-  { id: "d9", userId: "demo-user", kind: "expense", category: "transport", amountMinor: 510000, occurredOn: date(6), note: "Fuel and taxis", tags: [], createdAt: new Date().toISOString() },
-  { id: "d10", userId: "demo-user", kind: "expense", category: "entertainment", amountMinor: 735000, occurredOn: date(7), note: "Weekend", tags: ["fun"], createdAt: new Date().toISOString() },
-  { id: "d11", userId: "demo-user", kind: "expense", category: "health", amountMinor: 640000, occurredOn: date(9), note: "Pharmacy", tags: ["medical"], createdAt: new Date().toISOString() },
-  { id: "d12", userId: "demo-user", kind: "expense", category: "other", amountMinor: 459000, occurredOn: date(4), note: "Household", tags: [], createdAt: new Date().toISOString() },
+  { id: "d1", userId: "demo-user", kind: "income", category: "salary", amountMinor: 8540000, occurredOn: date(10), note: "Monthly salary", ...cashPayment, createdAt: new Date().toISOString() },
+  { id: "d2", userId: "demo-user", kind: "expense", category: "housing", amountMinor: 2000000, occurredOn: date(2), note: "Apartment rent", ...cashPayment, subcategory: "Rent", createdAt: new Date().toISOString() },
+  { id: "d3", userId: "demo-user", kind: "expense", category: "food", amountMinor: 165000, occurredOn: date(11), note: "Groceries", ...cashPayment, subcategory: "Groceries", area: "Bhatbhateni", createdAt: new Date().toISOString() },
+  { id: "d4", userId: "demo-user", kind: "expense", category: "transport", amountMinor: 21000, occurredOn: date(11), note: "Pathao ride", ...cashPayment, subcategory: "Taxi / ride", createdAt: new Date().toISOString() },
+  { id: "d5", userId: "demo-user", kind: "expense", category: "utilities", amountMinor: 425000, occurredOn: date(8), note: "Electricity and internet", ...cashPayment, subcategory: "Electricity", createdAt: new Date().toISOString() },
+  { id: "d6", userId: "demo-user", kind: "expense", category: "shopping", amountMinor: 112000, occurredOn: date(10), note: "Sastodeal", ...cashPayment, createdAt: new Date().toISOString() },
+  { id: "d7", userId: "demo-user", kind: "expense", category: "food", amountMinor: 28000, occurredOn: date(10), note: "Coffee", ...cashPayment, subcategory: "Cafe", createdAt: new Date().toISOString() },
+  { id: "d8", userId: "demo-user", kind: "expense", category: "food", amountMinor: 840000, occurredOn: date(5), note: "Weekly groceries", ...cashPayment, subcategory: "Groceries", createdAt: new Date().toISOString() },
+  { id: "d9", userId: "demo-user", kind: "expense", category: "transport", amountMinor: 510000, occurredOn: date(6), note: "Fuel and taxis", ...cashPayment, subcategory: "Fuel", createdAt: new Date().toISOString() },
+  { id: "d10", userId: "demo-user", kind: "expense", category: "entertainment", amountMinor: 735000, occurredOn: date(7), note: "Weekend", ...cashPayment, createdAt: new Date().toISOString() },
+  { id: "d11", userId: "demo-user", kind: "expense", category: "health", amountMinor: 640000, occurredOn: date(9), note: "Pharmacy", ...cashPayment, subcategory: "Medicine", createdAt: new Date().toISOString() },
+  { id: "d12", userId: "demo-user", kind: "expense", category: "other", amountMinor: 459000, occurredOn: date(4), note: "Household", ...cashPayment, createdAt: new Date().toISOString() },
 ];
 
 export const DEMO_BUDGETS: Budget[] = [

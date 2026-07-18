@@ -2,6 +2,7 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { betterAuth } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
 import { getPrisma } from "./prisma";
+import { removeStoredReceipts } from "./receipt-storage";
 
 async function sendResetEmail(email: string, url: string) {
   if (process.env.NODE_ENV === "development" && !process.env.RESEND_API_KEY) {
@@ -29,7 +30,15 @@ export const auth = betterAuth({
     revokeSessionsOnPasswordReset: true,
     sendResetPassword: async ({ user, url }) => sendResetEmail(user.email, url),
   },
-  user: { deleteUser: { enabled: true } },
+  user: {
+    deleteUser: {
+      enabled: true,
+      beforeDelete: async (user) => {
+        const receipts = await getPrisma().receiptAttachment.findMany({ where: { userId: user.id }, select: { storagePath: true } });
+        await removeStoredReceipts(receipts.map((receipt) => receipt.storagePath));
+      },
+    },
+  },
   session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 },
   plugins: [nextCookies()],
 });

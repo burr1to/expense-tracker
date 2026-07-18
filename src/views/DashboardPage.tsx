@@ -1,7 +1,11 @@
-import { ArrowRight, CalendarBlank, Check, Lightbulb, Plus } from "@phosphor-icons/react";
-import { format } from "date-fns";
+import { ArrowRight, CalendarBlank, CaretDown, Check, Flag, Lightbulb, Plus, Repeat } from "@phosphor-icons/react";
+import { Popover } from "@mantine/core";
+import { DatePicker } from "@mantine/dates";
+import { format, isSameMonth, parseISO, startOfMonth } from "date-fns";
+import { useEffect, useState } from "react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { EmptyState } from "../components/EmptyState";
+import { ButtonSpinner } from "../components/ButtonSpinner";
 import { MonthPicker } from "../components/MonthPicker";
 import { TransactionRow } from "../components/TransactionRow";
 import { getCategory } from "../lib/categories";
@@ -9,14 +13,16 @@ import { formatMoney } from "../lib/currency";
 import { isInMonth } from "../lib/dates";
 import { dailyExpenseSeries, summarizeLedger } from "../lib/ledger";
 import { generateInsights } from "../lib/insights";
-import type { AppView, Budget, CurrencyCode, CustomCategory, LedgerTransaction, RecurringEntry } from "../types";
+import type { AppView, Budget, CurrencyCode, CustomCategory, LedgerTransaction, RecurringEntry, SavingsGoal } from "../types";
 
 interface DashboardPageProps {
   month: Date;
+  focus: { date: string; revision: number } | null;
   currency: CurrencyCode;
   transactions: LedgerTransaction[];
   budgets: Budget[];
   recurringEntries: RecurringEntry[];
+  goals: SavingsGoal[];
   customCategories: CustomCategory[];
   onMonthChange: (date: Date) => void;
   onAdd: () => void;
@@ -24,25 +30,65 @@ interface DashboardPageProps {
   onConfirmRecurring: (id: string) => Promise<void>;
 }
 
-export function DashboardPage({ month, currency, transactions, budgets, recurringEntries, customCategories, onMonthChange, onAdd, onNavigate, onConfirmRecurring }: DashboardPageProps) {
+export function DashboardPage({ month, focus, currency, transactions, budgets, recurringEntries, goals, customCategories, onMonthChange, onAdd, onNavigate, onConfirmRecurring }: DashboardPageProps) {
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [selectedDay, setSelectedDay] = useState<Date>(() => isSameMonth(month, new Date()) ? new Date() : startOfMonth(month));
+  useEffect(() => {
+    if (focus) setSelectedDay(parseISO(focus.date));
+  }, [focus]);
   const monthTransactions = transactions.filter((item) => isInMonth(item.occurredOn, month));
   const summary = summarizeLedger(monthTransactions, customCategories);
   const chartData = dailyExpenseSeries(monthTransactions).slice(-7);
-  const recent = [...monthTransactions].sort((a, b) => `${b.occurredOn}${b.createdAt}`.localeCompare(`${a.occurredOn}${a.createdAt}`)).slice(0, 5);
+  const selectedDayKey = format(selectedDay, "yyyy-MM-dd");
+  const dayTransactions = transactions
+    .filter((item) => item.occurredOn === selectedDayKey)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const insights = generateInsights(transactions, month, currency, customCategories);
   const currentBudgets = budgets.filter((item) => item.monthKey === format(month, "yyyy-MM"));
   const budgetTotal = currentBudgets.reduce((sum, item) => sum + item.amountMinor, 0);
   const budgetSpent = monthTransactions.filter((item) => item.kind === "expense" && currentBudgets.some((budget) => budget.category === item.category)).reduce((sum, item) => sum + item.amountMinor, 0);
+  const budgetPercentage = budgetTotal > 0 ? Math.round((budgetSpent / budgetTotal) * 100) : 0;
+  const upcomingEntries = recurringEntries.filter((entry) => entry.active).sort((a, b) => a.nextDueOn.localeCompare(b.nextDueOn));
+  const highlightedGoal = [...goals].sort((a, b) => {
+    if (!a.targetDate) return 1;
+    if (!b.targetDate) return -1;
+    return a.targetDate.localeCompare(b.targetDate);
+  })[0];
+  const goalPercentage = highlightedGoal?.targetMinor ? Math.round((highlightedGoal.savedMinor / highlightedGoal.targetMinor) * 100) : 0;
+  const hasPlans = currentBudgets.length > 0 || goals.length > 0 || upcomingEntries.length > 0;
   const dueEntries = recurringEntries.filter((entry) => entry.active && entry.nextDueOn <= format(new Date(), "yyyy-MM-dd"));
+  const confirmRecurring = async (id: string) => { if (confirmingId) return; setConfirmingId(id); try { await onConfirmRecurring(id); } finally { setConfirmingId(null); } };
+  const changeMonth = (nextMonth: Date) => {
+    onMonthChange(nextMonth);
+    if (!isSameMonth(selectedDay, nextMonth)) setSelectedDay(isSameMonth(nextMonth, new Date()) ? new Date() : startOfMonth(nextMonth));
+  };
+  const selectDay = (value: string | null) => {
+    if (!value) return;
+    const nextDay = parseISO(value);
+    setSelectedDay(nextDay);
+    if (!isSameMonth(month, nextDay)) onMonthChange(nextDay);
+  };
 
   return (
     <div className="page dashboard-page">
       <header className="dashboard-header">
-        <div><MonthPicker month={month} onChange={onMonthChange} /><span className="current-date">{format(new Date(), "EEEE, MMMM d")}</span></div>
+        <div>
+          <MonthPicker month={month} onChange={changeMonth} />
+          <Popover position="bottom-start" shadow="md" withArrow>
+            <Popover.Target>
+              <button className="current-date" aria-label={`Choose day. Selected ${format(selectedDay, "EEEE, MMMM d, yyyy")}`}>
+                {format(selectedDay, "EEEE, MMMM d")} <CaretDown size={13} weight="bold" />
+              </button>
+            </Popover.Target>
+            <Popover.Dropdown className="day-picker-popover">
+              <DatePicker value={selectedDayKey} onChange={selectDay} firstDayOfWeek={0} />
+            </Popover.Dropdown>
+          </Popover>
+        </div>
         <button className="desktop-quick-add primary-button" onClick={onAdd}><Plus size={18} />Add transaction</button>
       </header>
 
-      {dueEntries.length > 0 && <section className="due-strip"><div><CalendarBlank size={23} weight="duotone" /><div><strong>{dueEntries.length} recurring {dueEntries.length === 1 ? "entry is" : "entries are"} ready</strong><span>Confirm before adding anything to your ledger.</span></div></div><div>{dueEntries.slice(0, 2).map((entry) => <button key={entry.id} onClick={() => void onConfirmRecurring(entry.id)}><Check size={15} />{entry.note || getCategory(entry.category, customCategories).label}</button>)}</div></section>}
+      {dueEntries.length > 0 && <section className="due-strip"><div><CalendarBlank size={23} weight="duotone" /><div><strong>{dueEntries.length} recurring {dueEntries.length === 1 ? "entry is" : "entries are"} ready</strong><span>Confirm before adding anything to your ledger.</span></div></div><div>{dueEntries.slice(0, 2).map((entry) => { const confirming = confirmingId === entry.id; return <button key={entry.id} disabled={Boolean(confirmingId)} onClick={() => void confirmRecurring(entry.id)}>{confirming ? <ButtonSpinner /> : <Check size={15} />}{confirming ? "Confirming…" : entry.note || getCategory(entry.category, customCategories).label}</button>; })}</div></section>}
 
       <section className="summary-strip" aria-label="Monthly summary">
         <div><span>Income</span><strong className="income">{formatMoney(summary.income, currency)}</strong></div>
@@ -52,7 +98,7 @@ export function DashboardPage({ month, currency, transactions, budgets, recurrin
 
       <section className="savings-hero">
         <div className="savings-copy">
-          <span className="section-label">NET SAVED</span>
+          <span className="section-label">Net saved</span>
           <h1 className={summary.saved < 0 ? "negative" : ""}>{formatMoney(summary.saved, currency)}</h1>
           <p>{summary.income > 0 ? summary.saved >= 0 ? <>You’ve saved <strong>{summary.savedPercentage}%</strong> of your income this month.</> : <>Spending is <strong>{Math.abs(summary.savedPercentage)}%</strong> above this month’s income.</> : "Log income to see your savings rate."}</p>
         </div>
@@ -65,7 +111,7 @@ export function DashboardPage({ month, currency, transactions, budgets, recurrin
 
       <section className="dashboard-grid">
         <div className="chart-section">
-          <div className="section-heading"><div><span className="section-label">SPENDING OVERVIEW</span><h2>Daily rhythm</h2></div><span>{chartData.length ? `${chartData[0].label} – ${chartData[chartData.length - 1].label}` : format(month, "MMMM yyyy")}</span></div>
+          <div className="section-heading"><div><span className="section-label">Spending overview</span><h2>Daily rhythm</h2></div><span>{chartData.length ? `${chartData[0].label} – ${chartData[chartData.length - 1].label}` : format(month, "MMMM yyyy")}</span></div>
           {chartData.length ? (
             <div className="chart-wrap" aria-label="Daily expense chart">
               <ResponsiveContainer width="100%" height="100%">
@@ -73,7 +119,7 @@ export function DashboardPage({ month, currency, transactions, budgets, recurrin
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#dedbd4" />
                   <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#77736c", fontSize: 11 }} />
                   <YAxis tickFormatter={(value) => formatMoney(Number(value), currency, true)} axisLine={false} tickLine={false} tick={{ fill: "#77736c", fontSize: 10 }} />
-                  <Tooltip formatter={(value) => formatMoney(Number(value), currency)} contentStyle={{ borderRadius: 12, border: "1px solid #e5e1da", boxShadow: "0 12px 35px rgba(30,35,44,.12)" }} />
+                  <Tooltip cursor={false} formatter={(value) => formatMoney(Number(value), currency)} contentStyle={{ borderRadius: 12, border: "1px solid #e5e1da", boxShadow: "0 12px 35px rgba(30,35,44,.12)" }} />
                   <Bar dataKey="amount" fill="#ebe8e1" radius={[7, 7, 0, 0]} barSize={28} isAnimationActive={false} />
                   <Line type="monotone" dataKey="amount" stroke="#135dea" strokeWidth={2.6} dot={{ r: 3.5, fill: "#135dea", strokeWidth: 0 }} activeDot={{ r: 5 }} isAnimationActive={false} />
                 </ComposedChart>
@@ -83,7 +129,7 @@ export function DashboardPage({ month, currency, transactions, budgets, recurrin
         </div>
 
         <div className="category-section">
-          <div className="section-heading"><div><span className="section-label">WHERE IT WENT</span><h2>Top categories</h2></div><button className="text-button" onClick={() => onNavigate("reports")}>Full report <ArrowRight size={16} /></button></div>
+          <div className="section-heading"><div><span className="section-label">Where it went</span><h2>Top categories</h2></div><button className="text-button" onClick={() => onNavigate("reports")}>Full report <ArrowRight size={16} /></button></div>
           <div className="category-bars">
             {summary.categories.slice(0, 5).map((item) => (
               <div className="category-bar" key={item.category}>
@@ -97,17 +143,24 @@ export function DashboardPage({ month, currency, transactions, budgets, recurrin
         </div>
       </section>
 
-      <section className="recent-section">
-        <div className="section-heading"><div><span className="section-label">RECENT TRANSACTIONS</span><h2>Latest activity</h2></div><button className="text-button" onClick={() => onNavigate("transactions")}>View all <ArrowRight size={16} /></button></div>
-        <div className="transaction-list">
-          {recent.map((transaction) => <TransactionRow key={transaction.id} transaction={transaction} currency={currency} customCategories={customCategories} compact />)}
-          {!recent.length && <EmptyState action={<button className="primary-button small" onClick={onAdd}><CalendarBlank size={17} />Log today</button>} />}
-        </div>
+      <section className="dashboard-planning">
+        <article className="plan-snapshot">
+          <div className="section-heading"><div><span className="section-label">Your plans</span><h2>{hasPlans ? "What you’re working toward" : "Make a plan for your money"}</h2></div><button className="text-button" onClick={() => onNavigate("plan")}>{hasPlans ? "View all" : "Get started"} <ArrowRight size={16} /></button></div>
+          {hasPlans ? <div className="home-plan-list">
+            {currentBudgets.length > 0 && <div className="home-plan-row"><span className="home-plan-icon budget"><Flag size={17} weight="duotone" /></span><div><span><strong>{format(month, "MMMM")} budgets</strong><small>{budgetPercentage}% used</small></span><div className="bar-track"><span style={{ width: `${Math.min(100, budgetPercentage)}%` }} /></div><p>{formatMoney(budgetSpent, currency)} of {formatMoney(budgetTotal, currency)} across {currentBudgets.length} {currentBudgets.length === 1 ? "category" : "categories"}</p></div></div>}
+            {highlightedGoal && <div className="home-plan-row"><span className="home-plan-icon goal"><Check size={17} weight="bold" /></span><div><span><strong>{highlightedGoal.name}</strong><small>{goalPercentage}% saved</small></span><div className="bar-track"><span style={{ width: `${Math.min(100, goalPercentage)}%` }} /></div><p>{formatMoney(highlightedGoal.savedMinor, currency)} of {formatMoney(highlightedGoal.targetMinor, currency)}{goals.length > 1 ? ` · +${goals.length - 1} more ${goals.length === 2 ? "goal" : "goals"}` : ""}</p></div></div>}
+            {upcomingEntries[0] && <div className="home-plan-row recurring"><span className="home-plan-icon recurring"><Repeat size={17} weight="duotone" /></span><div><span><strong>{upcomingEntries[0].note || getCategory(upcomingEntries[0].category, customCategories).label}</strong><small>{format(parseISO(upcomingEntries[0].nextDueOn), "MMM d")}</small></span><p>{formatMoney(upcomingEntries[0].amountMinor, currency)} scheduled{upcomingEntries.length > 1 ? ` · +${upcomingEntries.length - 1} more` : ""}</p></div></div>}
+          </div> : <p className="plan-empty-copy">Add a budget, savings goal, or recurring entry and its progress will stay visible here.</p>}
+        </article>
+        <article className="insight-snapshot"><div className="section-heading"><div><span className="section-label">Smart insights</span><h2>Your month, explained</h2></div><Lightbulb size={22} weight="duotone" /></div><div>{insights.slice(0, 3).map((insight) => <div key={insight.id} className={insight.tone}><strong>{insight.title}</strong><span>{insight.detail}</span></div>)}</div></article>
       </section>
 
-      <section className="dashboard-planning">
-        <article className="plan-snapshot"><div className="section-heading"><div><span className="section-label">BUDGET PULSE</span><h2>{currentBudgets.length ? `${Math.round((budgetSpent / Math.max(1, budgetTotal)) * 100)}% used` : "Set your first budget"}</h2></div><button className="text-button" onClick={() => onNavigate("plan")}>Open plan <ArrowRight size={16} /></button></div>{currentBudgets.length > 0 && <><div className="bar-track"><span style={{ width: `${Math.min(100, (budgetSpent / budgetTotal) * 100)}%` }} /></div><p>{formatMoney(budgetSpent, currency)} spent across {currentBudgets.length} category budgets.</p></>}</article>
-        <article className="insight-snapshot"><div className="section-heading"><div><span className="section-label">SMART INSIGHTS</span><h2>Your month, explained</h2></div><Lightbulb size={22} weight="duotone" /></div><div>{insights.slice(0, 3).map((insight) => <div key={insight.id} className={insight.tone}><strong>{insight.title}</strong><span>{insight.detail}</span></div>)}</div></article>
+      <section className="recent-section">
+        <div className="section-heading"><div><span className="section-label">{format(selectedDay, "MMMM d")} transactions</span><h2>{dayTransactions.length ? `${dayTransactions.length} ${dayTransactions.length === 1 ? "entry" : "entries"}` : "No activity"}</h2></div><button className="text-button" onClick={() => onNavigate("transactions")}>Full history <ArrowRight size={16} /></button></div>
+        <div className="transaction-list">
+          {dayTransactions.map((transaction) => <TransactionRow key={transaction.id} transaction={transaction} currency={currency} customCategories={customCategories} compact />)}
+          {!dayTransactions.length && <EmptyState title="No transactions this day" message="Choose another day or add an entry for this date." action={<button className="primary-button small" onClick={onAdd}><CalendarBlank size={17} />Add transaction</button>} />}
+        </div>
       </section>
     </div>
   );

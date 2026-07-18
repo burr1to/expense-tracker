@@ -27,3 +27,25 @@ export function categoriesFor(kind: "income" | "expense"): readonly CategoryDefi
 export function allCategoriesFor(kind: "income" | "expense", custom: readonly CustomCategory[] = []): readonly CategoryDefinition[] {
   return [...categoriesFor(kind), ...custom.filter((category) => category.kind === kind || category.kind === "both")];
 }
+
+export interface SubcategoryDefinition { label: string; options: readonly string[]; areaLabel?: string; areaPlaceholder?: string }
+
+export const SUBCATEGORIES: Readonly<Record<string, SubcategoryDefinition>> = {
+  salary: { label: "Income type", options: ["Salary", "Bonus", "Allowance", "Reimbursement"] },
+  freelance: { label: "Work type", options: ["Project", "Consulting", "Contract", "Commission"] },
+  gift: { label: "Gift type", options: ["Cash gift", "Festival", "Wedding", "Prize"] },
+  housing: { label: "Housing type", options: ["Rent", "Maintenance", "Furniture", "Home supplies", "Property tax"] },
+  food: { label: "Food type", options: ["Lunch", "Groceries", "Snacks", "Cafe", "Restaurant"], areaLabel: "Food area", areaPlaceholder: "Where was it purchased?" },
+  transport: { label: "Transport type", options: ["Public transport", "Taxi / ride", "Fuel", "Parking", "Repairs"] },
+  utilities: { label: "Utility type", options: ["Electricity", "Water", "Internet", "Mobile", "Gas"] },
+  shopping: { label: "Shopping type", options: ["Clothing", "Electronics", "Household", "Personal care", "Gifts"] },
+  health: { label: "Health type", options: ["Doctor", "Medicine", "Dental", "Lab test", "Insurance"] },
+  entertainment: { label: "Entertainment type", options: ["Movies", "Music", "Games", "Events", "Subscriptions"] },
+  education: { label: "Education type", options: ["Tuition", "Books", "Courses", "Supplies", "Exam fees"] },
+  travel: { label: "Travel type", options: ["Transport", "Stay", "Food", "Activities", "Visa / fees"] },
+  other: { label: "Subcategory", options: [] },
+};
+
+export function subcategoriesFor(category: TransactionCategory): SubcategoryDefinition {
+  return SUBCATEGORIES[category] ?? { label: "Subcategory", options: [] };
+}
