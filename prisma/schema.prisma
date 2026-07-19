@@ -8,29 +8,30 @@ datasource db {
 }
 
 model User {
-  id              String              @id @default(cuid())
-  name            String
-  email           String              @unique
-  emailVerified   Boolean             @default(false)
-  image           String?
-  currency        String              @default("NPR")
-  theme           String              @default("system")
-  hideAmounts     Boolean             @default(false)
-  autoLockMinutes Int                 @default(0)
-  pinHash         String?
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  sessions        Session[]
-  accounts        Account[]
-  paymentAccounts PaymentAccount[]
-  transactions    Transaction[]
-  budgets         Budget[]
-  recurring       RecurringEntry[]
-  goals           SavingsGoal[]
-  categories      CustomCategory[]
-  dueItems        DueItem[]
-  duePayments     DuePayment[]
-  receipts        ReceiptAttachment[]
+  id                String                    @id @default(cuid())
+  name              String
+  email             String                    @unique
+  emailVerified     Boolean                   @default(false)
+  image             String?
+  currency          String                    @default("NPR")
+  theme             String                    @default("system")
+  hideAmounts       Boolean                   @default(false)
+  autoLockMinutes   Int                       @default(0)
+  pinHash           String?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  sessions          Session[]
+  accounts          Account[]
+  paymentAccounts   PaymentAccount[]
+  transactions      Transaction[]
+  budgets           Budget[]
+  recurring         RecurringEntry[]
+  goals             SavingsGoal[]
+  goalContributions SavingsGoalContribution[]
+  categories        CustomCategory[]
+  dueItems          DueItem[]
+  duePayments       DuePayment[]
+  receipts          ReceiptAttachment[]
 }
 
 model Session {
@@ -78,22 +79,22 @@ model Verification {
 }
 
 model Transaction {
-  id          String             @id @default(cuid())
-  userId      String
-  kind        String
-  category    String
-  amountMinor Int
-  occurredOn  DateTime           @db.Date
-  note        String             @default("")
-  subcategory String?
-  area        String?
-  paymentMode String             @default("cash")
+  id               String             @id @default(cuid())
+  userId           String
+  kind             String
+  category         String
+  amountMinor      Int
+  occurredOn       DateTime           @db.Date
+  note             String             @default("")
+  subcategory      String?
+  area             String?
+  paymentMode      String             @default("cash")
   paymentAccountId String?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  paymentAccount PaymentAccount? @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
-  receipt     ReceiptAttachment?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paymentAccount   PaymentAccount?    @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
+  receipt          ReceiptAttachment?
 
   @@index([userId, occurredOn])
   @@index([paymentAccountId])
@@ -145,17 +146,32 @@ model RecurringEntry {
 }
 
 model SavingsGoal {
-  id          String    @id @default(cuid())
-  userId      String
-  name        String
-  targetMinor Int
-  savedMinor  Int       @default(0)
-  targetDate  DateTime? @db.Date
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id            String                    @id @default(cuid())
+  userId        String
+  name          String
+  targetMinor   Int
+  savedMinor    Int                       @default(0)
+  targetDate    DateTime?                 @db.Date
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  user          User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contributions SavingsGoalContribution[]
 
   @@index([userId])
+}
+
+model SavingsGoalContribution {
+  id               String      @id @default(cuid())
+  userId           String
+  goalId           String
+  amountMinor      Int
+  isOpeningBalance Boolean     @default(false)
+  createdAt        DateTime    @default(now())
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goal             SavingsGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([goalId, createdAt])
 }
 
 model CustomCategory {

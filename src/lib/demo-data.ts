@@ -39,7 +39,13 @@ export const DEMO_BUDGETS: Budget[] = [
 ];
 
 export const DEMO_GOALS: SavingsGoal[] = [
-  { id: "g1", userId: "demo-user", name: "Emergency fund", targetMinor: 30000000, savedMinor: 12800000, targetDate: `${year + 1}-01-31` },
+  {
+    id: "g1", userId: "demo-user", name: "Emergency fund", targetMinor: 30000000, savedMinor: 12800000, targetDate: `${year + 1}-01-31`,
+    contributions: [
+      { id: "gc2", userId: "demo-user", goalId: "g1", amountMinor: 4800000, isOpeningBalance: false, createdAt: new Date(year, now.getMonth(), 12, 9, 30).toISOString() },
+      { id: "gc1", userId: "demo-user", goalId: "g1", amountMinor: 8000000, isOpeningBalance: false, createdAt: new Date(year, now.getMonth() - 1, 10, 9, 30).toISOString() },
+    ],
+  },
 ];
 
 export const DEMO_RECURRING: RecurringEntry[] = [

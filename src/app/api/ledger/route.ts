@@ -50,7 +50,11 @@ function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
     transactions: data.transactions.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn), createdAt: item.createdAt.toISOString(), paymentAccount: item.paymentAccount ? { ...item.paymentAccount, createdAt: item.paymentAccount.createdAt.toISOString() } : null })),
     budgets: data.budgets,
     recurringEntries: data.recurring.map((item) => ({ ...item, nextDueOn: dateOnly(item.nextDueOn) })),
-    goals: data.goals.map((item) => ({ ...item, targetDate: dateOnly(item.targetDate) })),
+    goals: data.goals.map((item) => ({
+      ...item,
+      targetDate: dateOnly(item.targetDate),
+      contributions: item.contributions.map((contribution) => ({ ...contribution, createdAt: contribution.createdAt.toISOString() })),
+    })),
     customCategories: data.categories.map((item) => ({ ...item, label: item.name, custom: true })),
     paymentAccounts: data.paymentAccounts.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })),
     dueItems: data.dueItems.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn), dueOn: dateOnly(item.dueOn), remindOn: dateOnly(item.remindOn), completedOn: dateOnly(item.completedOn), createdAt: item.createdAt.toISOString(), payments: item.payments.map((payment) => ({ ...payment, occurredOn: dateOnly(payment.occurredOn), createdAt: payment.createdAt.toISOString() })) })),
@@ -64,7 +68,7 @@ async function loadLedger(id: string) {
     db.transaction.findMany({ where: { userId: id }, orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }], include: { receipt: { select: receiptSelect }, paymentAccount: true } }),
     db.budget.findMany({ where: { userId: id }, orderBy: { monthKey: "desc" } }),
     db.recurringEntry.findMany({ where: { userId: id }, orderBy: { nextDueOn: "asc" } }),
-    db.savingsGoal.findMany({ where: { userId: id }, orderBy: { createdAt: "asc" } }),
+    db.savingsGoal.findMany({ where: { userId: id }, orderBy: { createdAt: "asc" }, include: { contributions: { orderBy: { createdAt: "desc" } } } }),
     db.customCategory.findMany({ where: { userId: id }, orderBy: { name: "asc" } }),
     db.paymentAccount.findMany({ where: { userId: id }, orderBy: { createdAt: "asc" } }),
     db.dueItem.findMany({ where: { userId: id }, orderBy: [{ status: "asc" }, { dueOn: "asc" }], include: { payments: { orderBy: { occurredOn: "desc" } }, receipt: { select: receiptSelect } } }),
@@ -152,15 +156,34 @@ export async function POST(request: Request) {
       case "saveGoal": {
         const value = goalSchema.parse(input.payload);
         const data = { ...value, savedMinor: Math.min(value.savedMinor, value.targetMinor), targetDate: value.targetDate ? asDate(value.targetDate) : null };
-        if (recordId) await db.savingsGoal.updateMany({ where: { id: recordId, userId: id }, data });
-        else await db.savingsGoal.create({ data: { ...data, userId: id } });
+        if (recordId) {
+          const details = { name: data.name, targetMinor: data.targetMinor, targetDate: data.targetDate };
+          await db.savingsGoal.updateMany({ where: { id: recordId, userId: id }, data: details });
+        } else {
+          await db.savingsGoal.create({
+            data: {
+              ...data,
+              userId: id,
+              contributions: data.savedMinor > 0 ? { create: { userId: id, amountMinor: data.savedMinor, isOpeningBalance: true } } : undefined,
+            },
+          });
+        }
         break;
       }
       case "contributeToGoal": {
         if (!recordId) throw new Error("Missing goal id.");
         const amountMinor = z.object({ amountMinor: z.number().int().positive() }).parse(input.payload).amountMinor;
-        const goal = await db.savingsGoal.findFirstOrThrow({ where: { id: recordId, userId: id } });
-        await db.savingsGoal.update({ where: { id: goal.id }, data: { savedMinor: Math.min(goal.targetMinor, goal.savedMinor + amountMinor) } });
+        await db.$transaction(async (transaction) => {
+          const goal = await transaction.savingsGoal.findFirstOrThrow({ where: { id: recordId, userId: id } });
+          const addedMinor = Math.min(amountMinor, goal.targetMinor - goal.savedMinor);
+          if (addedMinor <= 0) throw new Error("This goal is already complete.");
+          const updated = await transaction.savingsGoal.updateMany({
+            where: { id: goal.id, userId: id, savedMinor: goal.savedMinor },
+            data: { savedMinor: { increment: addedMinor } },
+          });
+          if (!updated.count) throw new Error("The goal changed while this contribution was being added. Please try again.");
+          await transaction.savingsGoalContribution.create({ data: { userId: id, goalId: goal.id, amountMinor: addedMinor } });
+        });
         break;
       }
       case "deleteGoal": await db.savingsGoal.deleteMany({ where: { id: recordId, userId: id } }); break;

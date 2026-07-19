@@ -92,6 +92,16 @@ export interface SavingsGoal {
   targetMinor: number;
   savedMinor: number;
   targetDate: string | null;
+  contributions: SavingsGoalContribution[];
+}
+
+export interface SavingsGoalContribution {
+  id: string;
+  userId: string;
+  goalId: string;
+  amountMinor: number;
+  isOpeningBalance: boolean;
+  createdAt: string;
 }
 
 export interface CustomCategory extends CategoryDefinition {
