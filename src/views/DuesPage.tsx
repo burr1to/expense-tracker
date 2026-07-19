@@ -59,7 +59,7 @@ function DueForm({ item, currency, customCategories, onSave, onCancel }: { item:
     <SegmentedControl fullWidth value={kind} onChange={changeKind} disabled={Boolean(item?.payments.length)} data={[{ value: "payment", label: "Pay" }, { value: "receivable", label: "Receive" }, { value: "lent", label: "Lent" }, { value: "borrowed", label: "Borrowed" }]} />
     <TextInput label={labels[kind].title} value={title} onChange={(event) => setTitle(event.currentTarget.value)} required maxLength={100} />
     {(kind === "lent" || kind === "borrowed") && <TextInput label="Person" leftSection={<User size={15} />} value={person} onChange={(event) => setPerson(event.currentTarget.value)} required maxLength={80} />}
-    <NumberInput label={labels[kind].amount} leftSection={currency} value={amount} onChange={setAmount} min={0.01} decimalScale={2} thousandSeparator="," required />
+    <NumberInput label={labels[kind].amount} leftSection={currency} leftSectionWidth={58} value={amount} onChange={setAmount} min={0.01} decimalScale={2} thousandSeparator="," required />
     <Select label="Ledger category" value={category} onChange={(value) => value && setCategory(value)} data={categories.map((item) => ({ value: item.id, label: item.label }))} allowDeselect={false} searchable />
     {(kind === "lent" || kind === "borrowed") && <TextInput label="Date money changed hands" type="date" value={occurredOn} onChange={(event) => setOccurredOn(event.currentTarget.value)} required />}
     <TextInput label="Due date" type="date" value={dueOn} onChange={(event) => setDueOn(event.currentTarget.value)} required />

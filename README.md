@@ -24,7 +24,7 @@ Supabase hosts PostgreSQL and the private receipt Storage bucket. The browser up
 
 1. Create a Supabase project and copy its PostgreSQL pooler connection string.
 2. Copy `.env.example` to `.env.local`.
-3. Set `DATABASE_URL`, `BETTER_AUTH_SECRET`, and `BETTER_AUTH_URL`.
+3. Set `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and the comma-separated `BETA_ALLOWED_EMAILS` allowlist.
 4. Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and the server-only `SUPABASE_SECRET_KEY`. A legacy `SUPABASE_SERVICE_ROLE_KEY` is also accepted. `SUPABASE_RECEIPTS_BUCKET` defaults to `receipts`; the private bucket is created on the first upload with the app's 3 MB and MIME-type restrictions.
 5. For production password-reset mail, set `RESEND_API_KEY` and `AUTH_EMAIL_FROM`. In development, reset links are printed in the server terminal when Resend is not configured.
 6. Apply the checked-in schema and generate the client:
@@ -55,6 +55,7 @@ The app requires a working PostgreSQL connection. Sign-up creates the user, cred
 - Password verification for the privacy lock
 - Password-confirmed account deletion, cascading through all ledger data
 - Server-side session validation plus `userId` ownership filtering on every ledger mutation
+- Server-side beta allowlisting for sign-up, sign-in, password resets, and every protected data endpoint
 
 ## CSV import format
 

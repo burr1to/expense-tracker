@@ -5,11 +5,13 @@ import {
   House,
   ListBullets,
   Plus,
+  SignOut,
   UserCircle,
   Wallet,
 } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import type { AppView } from "../types";
+import { ButtonSpinner } from "./ButtonSpinner";
 
 const navItems: { id: AppView; label: string; icon: typeof House }[] = [
   { id: "home", label: "Home", icon: House },
@@ -24,10 +26,12 @@ interface AppShellProps {
   view: AppView;
   onNavigate: (view: AppView) => void;
   onAdd: () => void;
+  onSignOut: () => void;
+  signingOut: boolean;
   children: ReactNode;
 }
 
-export function AppShell({ view, onNavigate, onAdd, children }: AppShellProps) {
+export function AppShell({ view, onNavigate, onAdd, onSignOut, signingOut, children }: AppShellProps) {
   const mobileItems = navItems.filter((item) => item.id !== "reports" && item.id !== "dues");
   return (
     <div className="app-frame">
@@ -41,7 +45,13 @@ export function AppShell({ view, onNavigate, onAdd, children }: AppShellProps) {
             </button>
           ))}
         </nav>
-        <button className="sidebar-add" onClick={onAdd}><Plus size={20} weight="bold" />Add transaction</button>
+        <div className="sidebar-actions">
+          <button className="sidebar-add" onClick={onAdd}><Plus size={20} weight="bold" />Add transaction</button>
+          <button className="sidebar-signout" disabled={signingOut} onClick={onSignOut}>
+            {signingOut ? <ButtonSpinner /> : <SignOut size={20} />}
+            {signingOut ? "Signing out…" : "Sign out"}
+          </button>
+        </div>
       </aside>
 
       <main className="app-main">{children}</main>

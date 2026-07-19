@@ -1,11 +1,11 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { auth } from "../../../../lib/auth";
+import { getBetaSession } from "../../../../lib/auth";
 import { getPrisma } from "../../../../lib/prisma";
 import { ensureReceiptsBucket, getSupabaseStorageAdmin, RECEIPTS_BUCKET } from "../../../../lib/receipt-storage";
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await getBetaSession(await headers());
   if (!session?.user.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const receipt = await getPrisma().receiptAttachment.findFirst({ where: { id: (await params).id, userId: session.user.id } });
   if (!receipt) return NextResponse.json({ error: "Receipt not found" }, { status: 404 });

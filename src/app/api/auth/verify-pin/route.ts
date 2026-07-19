@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "../../../../lib/auth";
+import { getBetaSession } from "../../../../lib/auth";
 import { getPrisma } from "../../../../lib/prisma";
 import { verifyPin } from "../../../../lib/pin";
 
@@ -12,7 +12,7 @@ const BLOCK_MS = 30_000;
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await getBetaSession(await headers());
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const state = attempts.get(session.user.id);
   if (state && state.blockedUntil > Date.now()) {

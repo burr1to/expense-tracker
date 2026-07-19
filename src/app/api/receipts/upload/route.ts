@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "../../../../lib/auth";
+import { getBetaSession } from "../../../../lib/auth";
 import { getPrisma } from "../../../../lib/prisma";
 import { ensureReceiptsBucket, getStoragePublicConfig, getSupabaseStorageAdmin, isOwnedReceiptPath, newReceiptPath, RECEIPTS_BUCKET, removeStoredReceipts } from "../../../../lib/receipt-storage";
 import { RECEIPT_MAX_BYTES } from "../../../../lib/receipts";
@@ -17,7 +17,7 @@ const uploadSchema = z.object({
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await getBetaSession(await headers());
   if (!session?.user.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
-  const session = await auth.api.getSession({ headers: await headers() });
+  const session = await getBetaSession(await headers());
   if (!session?.user.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {

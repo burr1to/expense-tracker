@@ -26,19 +26,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refreshSession = useCallback(async () => {
-    const response = await fetch("/api/auth/get-session", { cache: "no-store", credentials: "include" });
+    const response = await fetch("/api/auth/beta-access", { cache: "no-store", credentials: "include" });
+    if (response.status === 401 || response.status === 403) {
+      setUser(null);
+      return;
+    }
     if (!response.ok) throw new Error("Could not check your session.");
     const session = await response.json();
-    setUser((session?.user as AppUser | undefined) ?? null);
+    setUser(session.user as AppUser);
   }, []);
 
   useEffect(() => {
     let active = true;
-    void fetch("/api/auth/get-session", { cache: "no-store", credentials: "include" }).then((response) => response.json()).then((session) => {
-      if (active) setUser((session?.user as AppUser | undefined) ?? null);
-    }).finally(() => { if (active) setLoading(false); });
+    void refreshSession().finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [refreshSession]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     const result = await authClient.signIn.email({ email, password });

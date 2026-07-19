@@ -20,12 +20,13 @@ import { TransactionsPage } from "./views/TransactionsPage";
 import type { AppView, LedgerTransaction, TransactionDraft } from "./types";
 
 export default function App() {
-  const { user, isDemo, loading: authLoading } = useAuth();
+  const { user, isDemo, loading: authLoading, signOut } = useAuth();
   const ledger = useLedger();
   const [view, setView] = useState<AppView>("home"); const [month, setMonth] = useState(new Date());
   const [formOpen, setFormOpen] = useState(false); const [editing, setEditing] = useState<LedgerTransaction | null>(null);
   const [homeFocus, setHomeFocus] = useState<{ date: string; revision: number } | null>(null);
   const [locked, setLocked] = useState(false); const [amountsHidden, setAmountsHidden] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => { setAmountsHidden(ledger.profile.hideAmounts); }, [ledger.profile.hideAmounts]);
   useEffect(() => { window.scrollTo({ top: 0, behavior: "auto" }); }, [view]);
@@ -55,6 +56,16 @@ export default function App() {
     }
   };
   const remove = async (transaction: LedgerTransaction) => { if (window.confirm(`Delete “${transaction.note || "this entry"}”? This cannot be undone.`)) await ledger.deleteTransaction(transaction.id); };
+  const logOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await signOut();
+    } catch (caught) {
+      window.alert(caught instanceof Error ? caught.message : "Could not sign out.");
+      setSigningOut(false);
+    }
+  };
   let content: React.ReactNode;
   if (ledger.loading) content = <AppLoader className="page-loading" message="Loading your entries" />;
   else if (ledger.error) content = <div className="page-error"><strong>We couldn’t load your ledger.</strong><p>{ledger.error}</p></div>;
@@ -65,7 +76,7 @@ export default function App() {
   else if (view === "settings") content = <SettingsPage onLock={() => { if (ledger.profile.hasPin) setLocked(true); }} />;
   else content = <DashboardPage month={month} focus={homeFocus} currency={ledger.profile.currency} transactions={ledger.transactions} budgets={ledger.budgets} recurringEntries={ledger.recurringEntries} goals={ledger.goals} customCategories={ledger.customCategories} onMonthChange={setMonth} onAdd={openAdd} onNavigate={setView} onConfirmRecurring={ledger.confirmRecurring} />;
 
-  return <><AppShell view={view} onNavigate={setView} onAdd={openAdd}>{content}</AppShell><ReminderBell items={ledger.dueItems} currency={ledger.profile.currency} onNavigate={setView} /><button className="privacy-toggle" onClick={() => setAmountsHidden((hidden) => !hidden)} aria-label={amountsHidden ? "Reveal amounts" : "Hide amounts"}>{amountsHidden ? <Eye size={19} /> : <EyeSlash size={19} />}</button><TransactionForm open={formOpen} currency={ledger.profile.currency} transaction={editing} customCategories={ledger.customCategories} paymentAccounts={ledger.paymentAccounts} onClose={() => setFormOpen(false)} onSave={saveTransaction} />{locked && ledger.profile.hasPin && <PrivacyLock onUnlock={async (pin) => { await ledger.verifyPin(pin); setLocked(false); }} />}</>;
+  return <><AppShell view={view} onNavigate={setView} onAdd={openAdd} onSignOut={() => void logOut()} signingOut={signingOut}>{content}</AppShell><ReminderBell items={ledger.dueItems} currency={ledger.profile.currency} onNavigate={setView} /><button className="privacy-toggle" onClick={() => setAmountsHidden((hidden) => !hidden)} aria-label={amountsHidden ? "Reveal amounts" : "Hide amounts"}>{amountsHidden ? <Eye size={19} /> : <EyeSlash size={19} />}</button><TransactionForm open={formOpen} currency={ledger.profile.currency} transaction={editing} customCategories={ledger.customCategories} paymentAccounts={ledger.paymentAccounts} onClose={() => setFormOpen(false)} onSave={saveTransaction} />{locked && ledger.profile.hasPin && <PrivacyLock onUnlock={async (pin) => { await ledger.verifyPin(pin); setLocked(false); }} />}</>;
 }
 
 function AppLoader({ className, message }: { className: "boot-screen" | "page-loading"; message: string }) {
