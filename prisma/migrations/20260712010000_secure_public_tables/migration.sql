@@ -1,4 +1,4 @@
--- Paper Ledger uses Better Auth and Prisma exclusively from the trusted server.
+-- SaveYoRupee uses Better Auth and Prisma exclusively from the trusted server.
 -- Block Supabase Data API roles and enable RLS without browser-facing policies.
 ALTER TABLE "User" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "Session" ENABLE ROW LEVEL SECURITY;

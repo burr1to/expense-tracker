@@ -10,3 +10,5 @@ coverage/
 .supabase/
 supabase/.temp/
 *.tsbuildinfo
+*.md 
+artifacts/

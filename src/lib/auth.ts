@@ -8,7 +8,7 @@ import { removeStoredReceipts } from "./receipt-storage";
 
 async function sendResetEmail(email: string, url: string) {
   if (process.env.NODE_ENV === "development" && !process.env.RESEND_API_KEY) {
-    console.info(`[Paper Ledger] Password reset for ${email}: ${url}`);
+    console.info(`[SaveYoRupee] Password reset for ${email}: ${url}`);
     return;
   }
   if (!process.env.RESEND_API_KEY || !process.env.AUTH_EMAIL_FROM) {
@@ -17,7 +17,7 @@ async function sendResetEmail(email: string, url: string) {
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: process.env.AUTH_EMAIL_FROM, to: email, subject: "Reset your Paper Ledger password", html: `<p>Use this secure link to reset your password:</p><p><a href="${url}">Reset password</a></p>` }),
+    body: JSON.stringify({ from: process.env.AUTH_EMAIL_FROM, to: email, subject: "Reset your SaveYoRupee password", html: `<p>Use this secure link to reset your password:</p><p><a href="${url}">Reset password</a></p>` }),
   });
   if (!response.ok) throw new Error("Could not send password reset email.");
 }

@@ -1,6 +1,7 @@
-import { ArrowRight, ChartLineUp, CheckCircle, Eye, EyeSlash, Wallet } from "@phosphor-icons/react";
+import { ArrowRight, ChartLineUp, CheckCircle, Eye, EyeSlash } from "@phosphor-icons/react";
 import { PasswordInput, TextInput } from "@mantine/core";
 import { useEffect, useState } from "react";
+import { BrandIcon } from "../components/BrandIcon";
 import { useAuth } from "../context/AuthContext";
 
 type AuthMode = "signin" | "signup" | "reset" | "new-password";
@@ -52,10 +53,10 @@ export function AuthPage() {
   return (
     <main className="auth-layout">
       <section className="auth-story">
-        <div className="brand-mark"><Wallet size={28} weight="duotone" /><span>Paper Ledger</span></div>
+        <div className="brand-mark"><BrandIcon /><span>SaveYoRupee</span></div>
         <div>
           <span className="eyebrow light">Personal finance, clearly told</span>
-          <h1>Know where your money went—and what stayed.</h1>
+          <h1>Know where your money went, and what stayed.</h1>
           <p>Log the everyday. Understand the month. Keep your financial picture beautifully simple.</p>
           <div className="story-metric"><ChartLineUp size={34} weight="duotone" /><div><strong>One calm view</strong><span>Income, spending and savings without the noise.</span></div></div>
         </div>
@@ -64,7 +65,7 @@ export function AuthPage() {
 
       <section className="auth-panel">
         <div className="auth-card">
-          <span className="eyebrow">Welcome to Paper Ledger</span>
+          <span className="eyebrow">Welcome to SaveYoRupee</span>
           <h2>{mode === "signin" ? "Sign in to your ledger" : mode === "signup" ? "Create your ledger" : mode === "new-password" ? "Choose a new password" : "Reset your password"}</h2>
           <p>{mode === "signin" ? "Pick up where you left off." : mode === "signup" ? "A clean money habit starts here." : mode === "new-password" ? "Use at least eight characters." : "We’ll email you a secure reset link."}</p>
 
@@ -72,7 +73,24 @@ export function AuthPage() {
             {mode === "signup" && <TextInput label="Your name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required placeholder="Suman" />}
             {mode !== "new-password" && <TextInput label="Email address" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required placeholder="you@example.com" />}
             {(mode !== "reset") && (
-              <PasswordInput label="Password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={8} autoComplete={mode === "signin" ? "current-password" : "new-password"} required placeholder="At least 8 characters" visible={showPassword} onVisibilityChange={setShowPassword} visibilityToggleIcon={({ reveal }) => reveal ? <EyeSlash size={19} /> : <Eye size={19} />} />
+              <PasswordInput
+                label="Password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                minLength={8}
+                autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                required
+                placeholder="At least 8 characters"
+                visible={showPassword}
+                onVisibilityChange={setShowPassword}
+                classNames={{ innerInput: "auth-password-input", visibilityToggle: "auth-password-toggle" }}
+                visibilityToggleButtonProps={{
+                  "aria-label": showPassword ? "Hide password" : "Show password",
+                  title: showPassword ? "Hide password" : "Show password",
+                  tabIndex: 0,
+                }}
+                visibilityToggleIcon={({ reveal }) => reveal ? <EyeSlash size={19} /> : <Eye size={19} />}
+              />
             )}
             {mode === "signin" && <button type="button" className="text-button align-right" onClick={() => switchMode("reset")}>Forgot password?</button>}
             {error && <div className="form-error" role="alert">{error}</div>}

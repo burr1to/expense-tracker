@@ -1,5 +1,269 @@
 # Design QA
 
+## Latest QA result — Login password visibility — 2026-07-20
+
+- Source visual truth: `/tmp/codex-clipboard-6a9b21e0-6699-49fe-8ca0-17fe7391ae70.png`
+- Implementation screenshot: unavailable because the in-app browser could not reach the running local preview
+- Intended viewport: 1716 × 620
+- State: sign-in form with an empty password field
+
+### Full-view comparison evidence
+
+Blocked. The source screenshot was opened at its original resolution, but the in-app browser returned a connection error for the running local Next.js preview. A browser-rendered implementation screenshot could not be captured and combined with the source for the required visual comparison.
+
+### Focused-region comparison evidence
+
+Blocked for the same reason. Code inspection confirms the left-side headline now uses a comma, the password field has a password-specific muted placeholder style, and the existing Phosphor eye/eye-slash control has a visible dark-theme color. Code inspection is not a substitute for browser-rendered visual evidence.
+
+### Findings
+
+- [P2] Final password-field contrast and interaction remain visually unverified.
+  - Location: sign-in password field and visibility toggle.
+  - Evidence: the focused source region was inspected, but the implementation could not be captured in the browser.
+  - Impact: the exact placeholder dimness and icon contrast cannot be signed off against the source screenshot.
+  - Fix: capture the sign-in form at 1716 × 620 when the in-app browser can reach the local preview, test both masked and revealed states, and compare the focused password-field region with the source.
+
+### Comparison history
+
+- Pass 1: blocked before visual comparison because the in-app browser could not connect to the local preview.
+
+### Primary interactions tested
+
+- Static component inspection confirms the control switches the input between masked and visible states through Mantine's controlled `visible` API.
+- The visibility control now exposes dynamic `Show password` and `Hide password` accessible names and is keyboard-focusable.
+- ESLint, TypeScript, and the optimized production build passed.
+- Browser interaction and console checks were blocked by the local-preview connection failure.
+
+### Follow-up polish
+
+- None identified without rendered evidence.
+
+final result: blocked
+
+---
+
+## Latest QA result — Compact monthly breathing room — 2026-07-20
+
+- Source visual truth: `/tmp/codex-clipboard-3130656c-2da0-4e2e-b8fb-4337382dfa6b.png`
+- Implementation screenshot: unavailable because the in-app browser could not reach the running local preview
+- Intended viewports: desktop and 390 × 844 mobile
+- State: dashboard with the monthly breathing room summary rendered after the Daily rhythm grid
+
+### Full-view comparison evidence
+
+Blocked. The local Next.js preview returned HTTP 200 and the production build completed, but the in-app browser returned a connection error for the preview. A browser-rendered implementation screenshot could not be captured, so the source and implementation could not be combined into the required visual comparison.
+
+### Focused-region comparison evidence
+
+Blocked for the same reason. Code inspection confirms the section now contains only `Income this month`, `Expenses this month`, `Upcoming in`, and `Upcoming out`; however, code inspection is not a substitute for browser-rendered visual evidence.
+
+### Findings
+
+- [P2] Visual density and responsive layout remain unverified.
+  - Location: dashboard Monthly breathing room section.
+  - Evidence: the component and responsive CSS were updated, but no implementation screenshot could be captured.
+  - Impact: desktop spacing, mobile wrapping, and the neutral surface treatment cannot be signed off visually.
+  - Fix: reopen the local preview when the in-app browser can reach it, capture desktop and 390 × 844 screenshots, compare them with the source, and resolve any visible mismatch.
+
+### Comparison history
+
+- Pass 1: blocked before visual comparison because the browser could not connect to the local preview.
+
+### Primary interactions tested
+
+- No new interactive control remains in this summary.
+- ESLint passed.
+- All 27 Vitest tests passed.
+- The optimized production build and TypeScript checks passed.
+
+### Follow-up polish
+
+- None identified without rendered evidence.
+
+final result: blocked
+
+---
+
+## Latest QA result — Borderless transaction filters — 2026-07-20
+
+- Source visual truth: `/tmp/codex-clipboard-3a70dcb0-1341-4413-8673-20fb2ead1964.png`
+- Desktop implementation screenshot: `/home/burrito/Desktop/Projects/expense-tracker/artifacts/transactions-filters-borderless-desktop.png`
+- Mobile implementation screenshot: `/home/burrito/Desktop/Projects/expense-tracker/artifacts/transactions-filters-borderless-mobile-viewport.png`
+- Side-by-side evidence: `/home/burrito/Desktop/Projects/expense-tracker/artifacts/transactions-filters-borderless-comparison.png`
+- Viewports: 1451 × 800 desktop and 390 × 844 mobile
+- State: July 2026 dark theme; filters cleared
+
+### Full-view comparison evidence
+
+The implementation preserves the source transaction scope, search field, filter heading, six filter controls, clear action, and ledger boundary while removing only the advanced-filter wrapper’s border, background, rounded corners, padding, and mobile negative margin. The result reads as one continuous page section rather than a card nested inside the transaction page.
+
+### Focused-region comparison evidence
+
+- Fonts and typography: existing Manrope labels, control copy, and heading hierarchy are unchanged.
+- Spacing and layout rhythm: the six-column desktop grid and two-column mobile grid remain intact; removing inset padding aligns the filter heading and controls with the surrounding search and ledger content.
+- Colors and visual tokens: individual inputs keep their existing dark surfaces and borders; the redundant outer surface is transparent and borderless.
+- Image quality and asset fidelity: no raster assets are used in this section; the existing Phosphor filter icon remains unchanged.
+- Copy and content: all labels, values, and the `Clear filters` action are unchanged.
+
+### Comparison history
+
+- Pass 1: passed. The focused side-by-side comparison shows the requested outer box removed with no actionable P0, P1, or P2 regressions.
+
+### Primary interactions tested
+
+- Entered a minimum amount of `5000` and verified the result count changed from 12 to 6 entries and `Clear filters` became enabled.
+- Clicked `Clear filters` and verified the amount cleared, the result count returned to 12, and the action became disabled.
+- Verified the mobile filter grid remains two columns with no horizontal overflow at 390 px.
+- Checked browser logs; no application errors or warnings were recorded.
+- ESLint, TypeScript, and the optimized production build passed.
+
+### Follow-up polish
+
+- No remaining P0, P1, P2, or P3 findings.
+
+final result: passed
+
+---
+
+## Latest QA result — Calendar net cells — 2026-07-20
+
+- Source visual truth: `/tmp/codex-clipboard-227e9f4d-336c-4b37-9d6c-dce4eaaae571.png`
+- Implementation screenshot: `/home/burrito/Desktop/Projects/expense-tracker/artifacts/calendar-net-cells-final.png`
+- Side-by-side evidence: `/home/burrito/Desktop/Projects/expense-tracker/artifacts/calendar-net-cells-comparison-final.png`
+- Viewport: 1440 × 900
+- State: July 2026 dark theme; July 18 selected with one expense
+
+### Full-view comparison evidence
+
+The revised calendar keeps the source layout, month navigation, weekday grid, day positioning, dark palette, type hierarchy, and spacious rhythm. Dates with activity now use a full semantic green or red tile, and each tile contains only one signed net value in `NPR …` form. The selected tile retains its semantic fill with a blue focus outline. The selected day’s income, expenses, net, and transaction breakdown appear in the adjacent detail panel.
+
+### Focused-region comparison evidence
+
+- Fonts and typography: existing Manrope hierarchy and compact calendar-label weights remain consistent; the net value is a single compact line without the redundant `Net` label.
+- Spacing and layout rhythm: tile dimensions, radii, calendar grid, date alignment, and side-panel separation remain consistent with the source.
+- Colors and visual tokens: positive and negative tiles use the existing green and coral tokens as full tinted surfaces with readable dark-theme contrast; selection no longer replaces the semantic fill.
+- Image quality and asset fidelity: no raster or custom visual assets are used by this interface; existing Phosphor navigation icons remain unchanged.
+- Copy and content: grid cells show only `NPR 430` or `NPR −23K`; full Income, Expenses, Net, and entry details appear only in the selected-day panel.
+
+### Comparison history
+
+- Pass 1: one P2 copy issue remained in the side panel: a single transaction rendered as `1 entries`.
+- Fix: added singular/plural handling so the panel now renders `1 entry`.
+- Pass 2: passed. The post-fix screenshot and DOM snapshot show the corrected heading, full green/red cell fills, one net amount per date, selected-day totals, and individual entries.
+
+### Primary interactions tested
+
+- Clicked the positive July 16 tile and verified the panel showed two entries plus Income `NPR 3,430`, Expenses `NPR 3,000`, and Net `NPR 430`.
+- Clicked the negative July 18 tile and verified the panel changed to one entry plus Income `NPR 0`, Expenses `NPR 23,000`, and Net `NPR −23K`.
+- Verified the selected outline moved between dates without replacing the semantic tile fill.
+- Checked browser logs; no application errors were recorded. Electron emitted only its environment-level development CSP warning.
+- Calendar unit tests, ESLint, TypeScript, and the optimized production build passed.
+
+### Follow-up polish
+
+- No remaining P0, P1, P2, or P3 visual findings.
+
+final result: passed
+
+---
+
+## Latest QA result — Daily activity placement — 2026-07-19
+
+- Source visual truth: `/tmp/codex-clipboard-164adcdf-73fa-4f0d-b968-c0ac7911adb9.png`
+- Implementation screenshot: `/home/burrito/Desktop/Projects/expense-tracker/artifacts/dashboard-day-activity-desktop.jpg`
+- Mobile screenshot: `/home/burrito/Desktop/Projects/expense-tracker/artifacts/dashboard-day-activity-mobile.jpg`
+- Side-by-side evidence: `/home/burrito/Desktop/Projects/expense-tracker/artifacts/dashboard-day-activity-comparison.jpg`
+- Viewports: 1920 × 1080 desktop target and 390 × 844 mobile target; captured browser content areas were 1905 × 964 and 375 × 812
+- State: local demo ledger, July 10 selected, three transactions visible
+
+### Full-view comparison evidence
+
+The source shows the selected day's transaction block after planning and insights at the bottom of the dashboard. The implementation intentionally moves the entire block directly beneath the large Net saved summary, before spending overview, categories, plans, and insights. The day label, entry count, Full history action, transaction rows, empty state, and date-prefilled add action remain intact.
+
+### Focused-region comparison evidence
+
+- Fonts and typography: existing Manrope display and compact transaction-row hierarchy are unchanged.
+- Spacing and layout rhythm: Net saved now has a 32 px desktop handoff into a divided activity section, followed by a 48 px break before the analytical cards. Mobile uses the existing compact activity treatment with a 16 px break before Spending overview.
+- Colors and visual tokens: the implementation reuses the existing paper, ink, line, blue, green, and coral tokens with no palette changes.
+- Image quality and asset fidelity: this area contains no raster product imagery. Existing Phosphor category and action icons remain unchanged.
+- Copy and content: the selected date, entry count, Full history label, transaction details, and empty-state copy are unchanged.
+- Responsive behavior: the 390 px target shows Net saved, all three selected-day transactions, and the start of Spending overview in the intended order without horizontal overflow.
+
+### Findings
+
+No actionable P0, P1, or P2 differences remain. The information-order change is the requested intentional deviation from the source screenshot.
+
+### Comparison history
+
+- Pass 1: passed. The affected desktop region and focused mobile capture show the selected day's activity directly below Net saved, with no clipping, overlap, or horizontal overflow.
+
+### Primary interactions tested
+
+- Rendered the dashboard with a selected day containing three transactions.
+- Confirmed the DOM and visual order is Net saved → selected-day activity → Spending overview.
+- Confirmed the transaction list remains visible and preserves its Full history action.
+- Checked the mobile breakpoint at 390 × 844.
+- Checked browser console errors; none were recorded.
+- ESLint, all 18 Vitest tests, TypeScript, and the optimized production build passed.
+
+### Follow-up polish
+
+- None.
+
+final result: passed
+
+---
+
+## Latest QA result — Transactions month scope and visible filters — 2026-07-19
+
+- Source visual truth: `/tmp/codex-clipboard-bf1c2dba-e0a3-4c5a-8cce-2f0b34262682.png`
+- Implementation screenshot: `/home/burrito/Desktop/Projects/expense-tracker/artifacts/transactions-month-filters-desktop.png`
+- Mobile screenshot: `/home/burrito/Desktop/Projects/expense-tracker/artifacts/transactions-month-filters-mobile.png`
+- Side-by-side evidence: `/home/burrito/Desktop/Projects/expense-tracker/artifacts/transactions-month-filters-comparison.png`
+- Viewports: 1920 × 1080 desktop and 390 × 844 mobile
+- State: authenticated sample ledger, July 2026, dark theme, Expense tab selected for interaction and mobile checks
+
+### Full-view comparison evidence
+
+The updated screen preserves the reference's Paper Ledger navigation, dark surface, Manrope hierarchy, action placement, transaction rows, semantic income/expense colors, and compact timeline. The intentional changes are clearly separated: month navigation now defines the ledger scope, All/Expense/Income remain visible type tabs, and the six detailed filters are permanently visible in their own panel. The former More disclosure is gone.
+
+### Focused-region comparison evidence
+
+- Fonts and typography: Manrope, display weights, compact metadata, and small filter labels remain consistent with the source. The month is promoted clearly without competing with the Transactions title.
+- Spacing and layout rhythm: month scope and type tabs share one row on desktop; search and the filter panel follow in a predictable vertical sequence. The six fields fit within the desktop card, while mobile uses a two-column filter grid with no page-level horizontal overflow.
+- Colors and visual tokens: the implementation reuses the existing paper, ink, line, blue, green, and coral tokens in both themes. Active type tabs preserve the existing selected treatment.
+- Image quality and asset fidelity: the source contains no raster product imagery. All controls continue to use the existing Phosphor icon family; no custom SVG, CSS-drawn, or placeholder assets were introduced.
+- Copy and content: the search placeholder and result count name the selected month. Empty-state copy identifies both the selected type and month.
+- Accessibility and behavior: month arrows remain visible on mobile, tabs expose `aria-pressed`, filters have a named region, and Clear filters has a meaningful disabled state.
+
+### Findings
+
+No actionable P0, P1, or P2 visual differences remain. The added month row and permanently visible filter panel are intentional product changes requested by the user.
+
+### Comparison history
+
+- Pass 1: blocked by a P1 dark-theme contrast issue. Mantine's default input surface overrode the ledger's dark input token, leaving filter values faint on a light field.
+- Fix: added a dark-theme Mantine input override using the existing paper, line, ink, and muted tokens.
+- Pass 2: passed. The revised desktop capture shows dark, legible search and filter fields. The reference and implementation were combined into one side-by-side comparison, and focused mobile inspection confirmed the month arrows, equal-width tabs, and two-column filter grid remain usable at 390 px.
+
+### Primary interactions tested
+
+- Confirmed the default July scope shows only July transactions.
+- Selected Expense and verified the result count changed from 12 to 11 and the salary entry disappeared.
+- Moved to June and verified the list changed to the June empty state while Expense remained selected.
+- Returned to the current month by clicking the month label.
+- Verified all six detailed filters are visible without opening another menu.
+- Checked the browser console; no application errors were recorded.
+- ESLint, all 18 Vitest tests, TypeScript, and the optimized production build passed.
+
+### Follow-up polish
+
+- P3: very long select values may truncate on the narrowest mobile width, which is preferable to widening the filter card or introducing horizontal scroll.
+
+final result: passed
+
+---
+
 - Source visual truth: `/home/burrito/.codex/generated_images/019f5015-e81c-7be0-a5df-c18f717fb0c6/exec-e2f39938-d3c6-4b99-b858-d28c2d94dc01.png`
 - Implementation screenshot: `/home/burrito/Documents/expense-tracker/artifacts/dashboard-mobile-final.png`
 - Side-by-side evidence: `/home/burrito/Documents/expense-tracker/artifacts/design-comparison-final.png`

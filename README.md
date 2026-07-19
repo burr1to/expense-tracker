@@ -1,4 +1,4 @@
-# Paper Ledger
+# SaveYoRupee
 
 A mobile-first personal income and expense tracker with monthly reporting, planning, dues and repayment tracking, reminders, optional receipt attachments, a financial milestone timeline, CSV import/export, privacy controls, and database-backed email/password authentication.
 

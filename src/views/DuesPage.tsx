@@ -1,5 +1,5 @@
 import { ArrowSquareOut, CalendarBlank, Check, HandCoins, Paperclip, PencilSimple, Plus, Trash, User, Wallet } from "@phosphor-icons/react";
-import { NumberInput, SegmentedControl, Select, TextInput, Textarea } from "@mantine/core";
+import { NumberInput, Select, TextInput, Textarea } from "@mantine/core";
 import { addDays, format, parseISO } from "date-fns";
 import { useMemo, useState } from "react";
 import { ButtonSpinner } from "../components/ButtonSpinner";
@@ -18,6 +18,16 @@ const labels: Record<DueKind, { title: string; amount: string }> = {
   payment: { title: "Payment name", amount: "Amount to pay" }, receivable: { title: "Expected income", amount: "Amount to receive" },
   lent: { title: "What was it for?", amount: "Amount lent" }, borrowed: { title: "What was it for?", amount: "Amount borrowed" },
 };
+
+function DueKindToggle({ value, disabled, onChange }: { value: DueKind; disabled: boolean; onChange: (value: string) => void }) {
+  const options: { value: DueKind; label: string }[] = [
+    { value: "payment", label: "Pay" }, { value: "receivable", label: "Receive" },
+    { value: "lent", label: "Lent" }, { value: "borrowed", label: "Borrowed" },
+  ];
+  return <div className="due-kind-control" role="radiogroup" aria-label="Due type">
+    {options.map((option) => <button key={option.value} type="button" role="radio" aria-checked={value === option.value} className={value === option.value ? "active" : ""} disabled={disabled} onClick={() => onChange(option.value)}>{option.label}</button>)}
+  </div>;
+}
 
 interface Props {
   currency: CurrencyCode; items: DueItem[]; customCategories: CustomCategory[];
@@ -56,14 +66,14 @@ function DueForm({ item, currency, customCategories, onSave, onCancel }: { item:
   const submit = async (event: React.FormEvent) => { event.preventDefault(); setSaving(true); try { setError(null); await onSave({ kind, title, person, amount: String(amount), category, occurredOn: kind === "lent" || kind === "borrowed" ? occurredOn : "", dueOn, remindOn, note, receipt }); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save this due."); } finally { setSaving(false); } };
   const cancel = () => { if (receipt) void discardReceipt(receipt); onCancel(); };
   return <aside className="due-form-panel"><div className="section-heading"><div><span className="section-label">{item ? "Update reminder" : "New reminder"}</span><h2>{item ? "Edit due" : "Add a due"}</h2></div></div><form className="stack-form" onSubmit={submit} aria-busy={saving}>
-    <SegmentedControl fullWidth value={kind} onChange={changeKind} disabled={Boolean(item?.payments.length)} data={[{ value: "payment", label: "Pay" }, { value: "receivable", label: "Receive" }, { value: "lent", label: "Lent" }, { value: "borrowed", label: "Borrowed" }]} />
+    <DueKindToggle value={kind} onChange={changeKind} disabled={Boolean(item?.payments.length)} />
     <TextInput label={labels[kind].title} value={title} onChange={(event) => setTitle(event.currentTarget.value)} required maxLength={100} />
     {(kind === "lent" || kind === "borrowed") && <TextInput label="Person" leftSection={<User size={15} />} value={person} onChange={(event) => setPerson(event.currentTarget.value)} required maxLength={80} />}
     <NumberInput label={labels[kind].amount} leftSection={currency} leftSectionWidth={58} value={amount} onChange={setAmount} min={0.01} decimalScale={2} thousandSeparator="," required />
     <Select label="Ledger category" value={category} onChange={(value) => value && setCategory(value)} data={categories.map((item) => ({ value: item.id, label: item.label }))} allowDeselect={false} searchable />
-    {(kind === "lent" || kind === "borrowed") && <TextInput label="Date money changed hands" type="date" value={occurredOn} onChange={(event) => setOccurredOn(event.currentTarget.value)} required />}
-    <TextInput label="Due date" type="date" value={dueOn} onChange={(event) => setDueOn(event.currentTarget.value)} required />
-    <TextInput label="Remind me on" type="date" value={remindOn} onChange={(event) => setRemindOn(event.currentTarget.value)} description="The bell will show this item from this date." />
+    {(kind === "lent" || kind === "borrowed") && <TextInput label="Date money changed hands" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={occurredOn} onChange={(event) => setOccurredOn(event.currentTarget.value)} required />}
+    <TextInput label="Due date" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={dueOn} onChange={(event) => setDueOn(event.currentTarget.value)} required />
+    <TextInput label="Remind me on" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={remindOn} onChange={(event) => setRemindOn(event.currentTarget.value)} description="The bell will show this item from this date." />
     <Textarea label="Note" value={note} onChange={(event) => setNote(event.currentTarget.value)} maxLength={300} autosize minRows={2} />
     <div className="receipt-field"><label><Paperclip size={17} /><span>{receipt?.name ?? "Attach receipt or document"}</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (!file) return; setError(null); void uploadReceipt(file).then((value) => { if (receipt) void discardReceipt(receipt); setReceipt(value); }).catch((caught) => setError(caught instanceof Error ? caught.message : "Could not attach this file.")); }} /></label>{receipt && <button type="button" className="text-button danger-text" onClick={() => { void discardReceipt(receipt); setReceipt(undefined); }}>Remove</button>}</div>
     <p className="field-hint">Maximum file size: 3 MB.</p>
@@ -85,7 +95,7 @@ function DueCard({ item, currency, customCategories, onEdit, onDelete, onRecordP
       {item.note && <p>{item.note}</p>}
       {item.receipt && <a className="receipt-link" href={`/api/receipts/${item.receipt.id}`} target="_blank" rel="noreferrer"><Paperclip size={14} />{item.receipt.name}<ArrowSquareOut size={13} /></a>}
       {item.status === "open" && <div className="due-actions">{isDebt ? <button className="primary-button small" onClick={() => setRepaying((value) => !value)}><HandCoins size={16} />Record repayment</button> : <><button className="primary-button small" disabled={busy} onClick={() => void complete(true)}>{busy ? <ButtonSpinner /> : <Check size={16} />}{item.kind === "payment" ? "Paid + add to ledger" : "Received + add to ledger"}</button><button className="secondary-button small" disabled={busy} onClick={() => void complete(false)}>Complete only</button></>}<button className="icon-button" disabled={busy} onClick={onEdit} aria-label={`Edit ${item.title}`}><PencilSimple size={16} /></button><button className="icon-button danger" disabled={busy} onClick={() => void remove()} aria-label={`Delete ${item.title}`}><Trash size={16} /></button></div>}
-      {repaying && <form className="repayment-form" onSubmit={record}><NumberInput label="Amount" value={amount} onChange={setAmount} min={0.01} max={remaining / 100} decimalScale={2} thousandSeparator="," required /><TextInput label="Date" type="date" value={date} onChange={(event) => setDate(event.currentTarget.value)} required /><TextInput label="Note" value={note} onChange={(event) => setNote(event.currentTarget.value)} placeholder="Optional" /><label className="ledger-checkbox"><input type="checkbox" checked={addToLedger} onChange={(event) => setAddToLedger(event.currentTarget.checked)} /><span>Add this cash movement to the ledger</span></label>{error && <div className="form-error" role="alert">{error}</div>}<button className="primary-button" disabled={busy}>{busy ? <><ButtonSpinner />Recording…</> : "Record repayment"}</button></form>}
+      {repaying && <form className="repayment-form" onSubmit={record}><NumberInput label="Amount" value={amount} onChange={setAmount} min={0.01} max={remaining / 100} decimalScale={2} thousandSeparator="," required /><TextInput label="Date" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={date} onChange={(event) => setDate(event.currentTarget.value)} required /><TextInput label="Note" value={note} onChange={(event) => setNote(event.currentTarget.value)} placeholder="Optional" /><label className="ledger-checkbox"><input type="checkbox" checked={addToLedger} onChange={(event) => setAddToLedger(event.currentTarget.checked)} /><span>Add this cash movement to the ledger</span></label>{error && <div className="form-error" role="alert">{error}</div>}<button className="primary-button" disabled={busy}>{busy ? <><ButtonSpinner />Recording…</> : "Record repayment"}</button></form>}
       {error && !repaying && <div className="form-error" role="alert">{error}</div>}
     </div>
   </article>;

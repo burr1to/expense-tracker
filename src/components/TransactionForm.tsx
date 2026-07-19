@@ -1,17 +1,20 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { NumberInput, SegmentedControl, Select, TextInput } from "@mantine/core";
-import { DatePickerInput } from "@mantine/dates";
-import { Check, Eye, Paperclip, X } from "@phosphor-icons/react";
+import { Check, ClockCounterClockwise, Eye, MagnifyingGlass, Paperclip, X } from "@phosphor-icons/react";
+import { format, parseISO } from "date-fns";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
-import { allCategoriesFor, subcategoriesFor } from "../lib/categories";
+import { allCategoriesFor, getCategory, subcategoriesFor } from "../lib/categories";
+import { formatMoney } from "../lib/currency";
 import { toDateInput } from "../lib/dates";
 import { discardReceipt, uploadReceipt } from "../lib/receipts";
 import { paymentAccountLabel } from "../lib/payment-accounts";
+import { getTransactionSuggestions, type TransactionSuggestion } from "../lib/transaction-suggestions";
 import type { CurrencyCode, CustomCategory, LedgerTransaction, PaymentAccount, PaymentMode, ReceiptUpload, TransactionDraft, TransactionKind } from "../types";
 import { CategoryIcon } from "./CategoryIcon";
 import { ButtonSpinner } from "./ButtonSpinner";
+import { LedgerDatePickerInput as DatePickerInput } from "./LedgerDatePickerInput";
 import { SubcategoryIcon } from "./SubcategoryIcon";
 import { ReceiptPreview } from "./ReceiptPreview";
 
@@ -33,37 +36,45 @@ interface TransactionFormProps {
   open: boolean;
   currency: CurrencyCode;
   transaction?: LedgerTransaction | null;
+  template?: LedgerTransaction | null;
+  initialOccurredOn?: string;
+  transactions: LedgerTransaction[];
   customCategories: CustomCategory[];
   paymentAccounts: PaymentAccount[];
   onClose: () => void;
   onSave: (draft: TransactionDraft, id?: string) => Promise<void>;
 }
 
-export function TransactionForm({ open, currency, transaction, customCategories, paymentAccounts, onClose, onSave }: TransactionFormProps) {
+export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, transactions, customCategories, paymentAccounts, onClose, onSave }: TransactionFormProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ReceiptUpload | undefined>();
   const [removeReceipt, setRemoveReceipt] = useState(false);
   const [receiptError, setReceiptError] = useState<string | null>(null);
-  const defaults = useMemo<TransactionDraft>(() => ({
-    kind: transaction?.kind ?? "expense",
-    category: transaction?.category ?? "food",
-    amount: transaction ? String(transaction.amountMinor / 100) : "",
-    occurredOn: transaction?.occurredOn ?? toDateInput(),
-    note: transaction?.note ?? "",
-    subcategory: transaction?.subcategory ?? "",
-    area: transaction?.area ?? "",
-    paymentMode: transaction?.paymentMode ?? "cash",
-    paymentAccountId: transaction?.paymentAccountId ?? "",
-  }), [transaction]);
-  const { register, control, handleSubmit, watch, reset, setValue, formState: { errors, isSubmitting } } = useForm<TransactionDraft>({ resolver: zodResolver(schema), defaultValues: defaults });
+  const [suggestionQuery, setSuggestionQuery] = useState("");
+  const [appliedSuggestionId, setAppliedSuggestionId] = useState<string | null>(template?.id ?? null);
+  const defaults = useMemo<TransactionDraft>(() => {
+    const source = transaction ?? template;
+    return {
+    kind: source?.kind ?? "expense",
+    category: source?.category ?? "food",
+    amount: source ? String(source.amountMinor / 100) : "",
+    occurredOn: transaction?.occurredOn ?? initialOccurredOn ?? toDateInput(),
+    note: source?.note ?? "",
+    subcategory: source?.subcategory ?? "",
+    area: source?.area ?? "",
+    paymentMode: source?.paymentMode ?? "cash",
+    paymentAccountId: source?.paymentAccountId ?? "",
+  }; }, [initialOccurredOn, template, transaction]);
+  const { register, control, handleSubmit, watch, reset, setValue, getValues, formState: { errors, isSubmitting } } = useForm<TransactionDraft>({ resolver: zodResolver(schema), defaultValues: defaults });
   const kind = watch("kind");
   const category = watch("category");
   const paymentMode = watch("paymentMode");
+  const suggestions = useMemo(() => getTransactionSuggestions(transactions, kind, suggestionQuery), [kind, suggestionQuery, transactions]);
   const subcategory = subcategoriesFor(category);
-  const categoryColor = allCategoriesFor(kind, customCategories).find((item) => item.id === category)?.color ?? "#135dea";
+  const categoryColor = allCategoriesFor(kind, customCategories).find((item) => item.id === category)?.color ?? "#147a4b";
   const discardAndClose = () => { if (receipt) void discardReceipt(receipt); onClose(); };
 
-  useEffect(() => { reset(defaults); setSubmitError(null); setReceipt(undefined); setRemoveReceipt(false); setReceiptError(null); }, [defaults, open, reset]);
+  useEffect(() => { reset(defaults); setSubmitError(null); setReceipt(undefined); setRemoveReceipt(false); setReceiptError(null); setSuggestionQuery(""); setAppliedSuggestionId(template?.id ?? null); }, [defaults, open, reset, template?.id]);
 
   if (!open) return null;
 
@@ -73,6 +84,23 @@ export function TransactionForm({ open, currency, transaction, customCategories,
     setValue("category", first.id, { shouldValidate: true });
     setValue("subcategory", "");
     setValue("area", "");
+    setAppliedSuggestionId(null);
+  };
+
+  const applySuggestion = ({ transaction: suggestion }: TransactionSuggestion) => {
+    const canUseAccount = suggestion.paymentMode !== "online" || Boolean(suggestion.paymentAccountId && paymentAccounts.some((account) => account.id === suggestion.paymentAccountId));
+    reset({
+      kind: suggestion.kind,
+      category: suggestion.category,
+      amount: String(suggestion.amountMinor / 100),
+      occurredOn: getValues("occurredOn") || initialOccurredOn || toDateInput(),
+      note: suggestion.note,
+      subcategory: suggestion.subcategory ?? "",
+      area: suggestion.area ?? "",
+      paymentMode: canUseAccount ? suggestion.paymentMode : "cash",
+      paymentAccountId: canUseAccount ? suggestion.paymentAccountId ?? "" : "",
+    });
+    setAppliedSuggestionId(suggestion.id);
   };
 
   const submit = handleSubmit(async (draft) => {
@@ -99,6 +127,26 @@ export function TransactionForm({ open, currency, transaction, customCategories,
 
         <form onSubmit={submit} className="transaction-form">
           <SegmentedControl fullWidth value={kind} data={[{ value: "expense", label: "Expense" }, { value: "income", label: "Income" }]} onChange={(value) => chooseKind(value as TransactionKind)} />
+
+          {!transaction && transactions.length > 0 && <section className="repeat-suggestions" aria-labelledby="repeat-suggestions-title">
+            <div className="repeat-suggestions-heading">
+              <div><ClockCounterClockwise size={18} weight="duotone" /><span><strong id="repeat-suggestions-title">Use a previous entry</strong><small>Prefill it, then change anything.</small></span></div>
+              <TextInput aria-label="Search previous transactions" leftSection={<MagnifyingGlass size={15} />} value={suggestionQuery} onChange={(event) => setSuggestionQuery(event.currentTarget.value)} placeholder="Search place or note" size="xs" />
+            </div>
+            <div className="repeat-suggestion-list">
+              {suggestions.map((suggestion) => {
+                const previous = suggestion.transaction;
+                const definition = getCategory(previous.category, customCategories);
+                const payment = previous.paymentMode === "online" ? previous.paymentAccount ? paymentAccountLabel(previous.paymentAccount) : "Online" : previous.paymentMode === "cheque" ? "Cheque" : "Cash";
+                return <button key={previous.id} type="button" className={appliedSuggestionId === previous.id ? "repeat-suggestion selected" : "repeat-suggestion"} aria-pressed={appliedSuggestionId === previous.id} onClick={() => applySuggestion(suggestion)}>
+                  <span className="repeat-suggestion-icon" style={{ "--category-color": definition.color } as CSSProperties}><CategoryIcon category={previous.category} size={18} /></span>
+                  <span className="repeat-suggestion-copy"><strong>{previous.note || previous.subcategory || definition.label}</strong><small>{definition.label}{previous.area ? ` · ${previous.area}` : ""} · {payment}</small></span>
+                  <span className="repeat-suggestion-value"><strong>{formatMoney(previous.amountMinor, currency)}</strong><small>{suggestion.useCount > 1 ? `Used ${suggestion.useCount}×` : format(parseISO(previous.occurredOn), "MMM d")}</small></span>
+                </button>;
+              })}
+              {!suggestions.length && <p className="repeat-suggestion-empty">No matching previous entries.</p>}
+            </div>
+          </section>}
 
           <label className="amount-field">
             <span>Amount in {currency}</span>
