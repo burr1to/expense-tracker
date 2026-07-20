@@ -142,6 +142,7 @@ export interface DueItem {
   occurredOn: string | null;
   dueOn: string;
   remindOn: string | null;
+  snoozedUntil: string | null;
   note: string;
   status: DueStatus;
   completedOn: string | null;

@@ -1,5 +1,50 @@
 # Design QA
 
+## Latest QA result — Mobile reminder action center — 2026-07-20
+
+- Source visual truth: `/tmp/figma-notification-direction.png`
+- Figma source: `https://www.figma.com/board/OrOhAFNp80qoKtBzeO0e9j`
+- Implementation screenshot: `/home/burrito/Desktop/Projects/expense-tracker/artifacts/reminder-action-center-2026-07-20/01-mobile-open.png`
+- Side-by-side evidence: `/home/burrito/Desktop/Projects/expense-tracker/artifacts/reminder-action-center-2026-07-20/04-source-vs-mobile.png`
+- Viewport: 390 × 844
+- State: mobile notification panel open with one overdue, two due-today, and one later reminder
+
+### Full-view comparison evidence
+
+The implementation preserves the source concept’s urgency-first hierarchy and turns it into a mobile-first action sheet. Overdue, Today, and Later groups remain visibly distinct; each reminder keeps its title, relative date, amount, and context-specific primary action. The sheet uses the full available mobile width with safe outer margins and an internal scroll area, while the desktop breakpoint returns it to a compact anchored panel.
+
+### Focused-region comparison evidence
+
+- Fonts and typography: existing Manrope typography is retained, with a compact eyebrow, strong count headline, quieter urgency summary, and scannable item labels.
+- Spacing and layout rhythm: the 390 px layout keeps 8 px viewport margins, clear group separation, and 44 px mobile action targets without horizontal overflow.
+- Colors and visual tokens: the implementation reuses the product’s paper, ink, green, coral, gold, and blue tokens. Overdue receives the strongest warning treatment; Today and Later remain calmer.
+- Image quality and asset fidelity: the interface contains no raster product imagery. Existing Phosphor icons are used consistently for reminders, status actions, snoozing, and repayment.
+- Copy and content: `Paid`, `Record repayment`, `Tomorrow`, and `View all dues` are direct, task-oriented actions. The badge counts urgent reminders only while the panel headline includes all actionable reminders.
+
+### Comparison history
+
+- Pass 1: the action hierarchy and responsive layout matched the design direction, but mobile actions measured 38 px and the bell measured 36 px.
+- Fix: raised mobile reminder actions to 44 px and the bell target to 40 px while preserving the compact desktop treatment.
+- Pass 2: passed. The final capture shows the complete panel at 390 × 844 with no clipping, overlap, or horizontal overflow.
+
+### Primary interactions tested
+
+- Snoozed an overdue reminder until tomorrow and verified both total and urgent counts updated immediately.
+- Completed a due-today payment and verified the reminder disappeared and counts updated.
+- Opened repayment from the panel and verified the dues page can receive the exact due ID and initialize the repayment flow.
+- Pressed Escape and verified the panel closed and focus returned to the reminder bell.
+- Verified outside-click handling, accessible dialog/region labels, an `aria-live` count announcement, and visible keyboard focus.
+- Checked browser logs; no application errors were recorded. Electron emitted only its environment-level development CSP warning.
+- ESLint, all 29 Vitest tests, TypeScript, and the optimized production build passed.
+
+### Follow-up polish
+
+- No remaining P0, P1, P2, or P3 visual findings.
+
+final result: passed
+
+---
+
 ## Latest QA result — Login password visibility — 2026-07-20
 
 - Source visual truth: `/tmp/codex-clipboard-6a9b21e0-6699-49fe-8ca0-17fe7391ae70.png`

@@ -57,7 +57,7 @@ function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
     })),
     customCategories: data.categories.map((item) => ({ ...item, label: item.name, custom: true })),
     paymentAccounts: data.paymentAccounts.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })),
-    dueItems: data.dueItems.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn), dueOn: dateOnly(item.dueOn), remindOn: dateOnly(item.remindOn), completedOn: dateOnly(item.completedOn), createdAt: item.createdAt.toISOString(), payments: item.payments.map((payment) => ({ ...payment, occurredOn: dateOnly(payment.occurredOn), createdAt: payment.createdAt.toISOString() })) })),
+    dueItems: data.dueItems.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn), dueOn: dateOnly(item.dueOn), remindOn: dateOnly(item.remindOn), snoozedUntil: dateOnly(item.snoozedUntil), completedOn: dateOnly(item.completedOn), createdAt: item.createdAt.toISOString(), payments: item.payments.map((payment) => ({ ...payment, occurredOn: dateOnly(payment.occurredOn), createdAt: payment.createdAt.toISOString() })) })),
   };
 }
 
@@ -231,6 +231,14 @@ export async function POST(request: Request) {
         const receipt = await db.receiptAttachment.findFirst({ where: { dueItemId: recordId, userId: id }, select: { storagePath: true } });
         await db.dueItem.deleteMany({ where: { id: recordId, userId: id } });
         await removeStoredReceipts([receipt?.storagePath]);
+        break;
+      }
+      case "snoozeDueItem": {
+        if (!recordId) throw new Error("Missing due item id.");
+        const { until } = z.object({ until: z.string().date() }).parse(input.payload);
+        const due = await db.dueItem.findFirstOrThrow({ where: { id: recordId, userId: id } });
+        if (due.status !== "open") throw new Error("This item is already settled.");
+        await db.dueItem.update({ where: { id: due.id }, data: { snoozedUntil: asDate(until) } });
         break;
       }
       case "recordDuePayment": {

@@ -42,6 +42,7 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--paper);
 button, input, select { font: inherit; }
 button { color: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid rgba(20, 122, 75, .24); outline-offset: 2px; }
+.sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 h1, h2, p { margin-top: 0; }
 h1, h2, strong { letter-spacing: -0.025em; }
 
@@ -522,21 +523,53 @@ h1, h2, strong { letter-spacing: -0.025em; }
 .reminder-bell { position: fixed; top: 18px; right: 68px; z-index: 36; }
 .reminder-trigger { position: relative; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: rgba(250,248,243,.9); backdrop-filter: blur(10px); display: grid; place-items: center; color: var(--muted); cursor: pointer; }
 .reminder-trigger > span { position: absolute; right: -3px; top: -4px; min-width: 18px; height: 18px; padding: 0 4px; display: grid; place-items: center; border: 2px solid var(--paper); border-radius: 20px; background: var(--coral); color: white; font-size: 9px; font-weight: 800; }
-.reminder-panel { position: absolute; right: 0; top: 49px; width: min(390px, calc(100vw - 28px)); border: 1px solid var(--line); border-radius: 16px; background: var(--paper-strong); box-shadow: var(--shadow); overflow: hidden; }
-.reminder-panel header { display: flex; justify-content: space-between; gap: 20px; align-items: start; padding: 20px 20px 12px; }
-.reminder-panel h2 { margin: 0; font-size: 19px; }
-.reminder-list { padding: 0 10px 10px; }
-.reminder-list > button { width: 100%; display: grid; grid-template-columns: 36px minmax(0,1fr) auto; gap: 10px; align-items: center; border: 0; border-radius: 10px; background: transparent; padding: 10px; text-align: left; cursor: pointer; }
-.reminder-list > button:hover { background: rgba(20,122,75,.06); }
-.reminder-kind { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; color: var(--blue); background: #e8f5ed; }
+.reminder-trigger > i { position: absolute; right: 1px; top: 1px; width: 9px; height: 9px; border: 2px solid var(--paper); border-radius: 50%; background: var(--blue); }
+.reminder-panel { position: fixed; top: 58px; right: 8px; left: 8px; width: auto; max-height: calc(100dvh - 122px); display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 20px; background: var(--paper-strong); box-shadow: var(--shadow); overflow: hidden; }
+.reminder-panel header { flex: 0 0 auto; display: flex; justify-content: space-between; gap: 18px; align-items: start; padding: 18px 18px 13px; border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent); }
+.reminder-panel header .section-label { margin-bottom: 5px; }
+.reminder-panel header .icon-button { width: 44px; height: 44px; flex: 0 0 44px; }
+.reminder-panel h2 { margin: 0; font-size: 20px; line-height: 1.15; }
+.reminder-panel header p { margin: 5px 0 0; color: var(--muted); font-size: 11px; }
+.reminder-panel-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 5px 10px 12px; }
+.reminder-group { padding-top: 11px; }
+.reminder-group > h3 { display: flex; align-items: center; gap: 6px; margin: 0 8px 7px; color: var(--blue); font-size: 10px; line-height: 1; letter-spacing: .055em; text-transform: uppercase; }
+.reminder-group.overdue > h3 { color: var(--coral); }
+.reminder-group.today > h3 { color: #aa7610; }
+.reminder-group > h3 span { min-width: 18px; height: 18px; display: inline-grid; place-items: center; border-radius: 20px; background: color-mix(in srgb, currentColor 10%, transparent); font-size: 9px; }
+.reminder-list { display: grid; gap: 7px; }
+.reminder-item { border: 1px solid var(--line); border-radius: 13px; background: color-mix(in srgb, var(--paper-strong) 90%, var(--line)); overflow: hidden; }
+.reminder-group.overdue .reminder-item { border-color: color-mix(in srgb, var(--coral) 38%, var(--line)); }
+.reminder-item-main { width: 100%; min-width: 0; display: grid; grid-template-columns: 34px minmax(0,1fr) auto; gap: 9px; align-items: center; border: 0; background: transparent; padding: 11px 11px 8px; text-align: left; cursor: pointer; }
+.reminder-item-main:hover { background: color-mix(in srgb, var(--blue) 6%, transparent); }
+.reminder-kind { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--blue); background: #e8f5ed; }
 .reminder-kind.lent, .reminder-kind.receivable { color: var(--green); background: #e9f6f0; }
 .reminder-kind.borrowed, .reminder-kind.payment { color: #a65046; background: #faece8; }
-.reminder-list > button > span:nth-child(2) { display: grid; gap: 3px; min-width: 0; }
-.reminder-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.reminder-list small { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 10px; }
-.reminder-list b { font-size: 11px; white-space: nowrap; }
-.reminder-list > p { color: var(--muted); font-size: 12px; text-align: center; padding: 24px 10px; margin: 0; }
-.reminder-view-all { width: 100%; min-height: 43px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--blue); font-size: 11px; font-weight: 750; cursor: pointer; }
+.reminder-copy { min-width: 0; display: grid; gap: 3px; }
+.reminder-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.reminder-copy small { overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.reminder-item-amount { align-self: start; padding-top: 2px; font-size: 11px; white-space: nowrap; }
+.reminder-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 11px 11px 54px; }
+.reminder-action { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper-strong); padding: 0 11px; color: var(--muted); font-size: 10px; font-weight: 760; cursor: pointer; }
+.reminder-action.primary { border-color: color-mix(in srgb, var(--blue) 28%, var(--line)); background: color-mix(in srgb, var(--blue) 10%, var(--paper-strong)); color: var(--blue); }
+.reminder-action:hover { border-color: color-mix(in srgb, var(--blue) 36%, var(--line)); color: var(--ink); }
+.reminder-action:disabled { opacity: .6; cursor: wait; }
+.reminder-action .button-spinner { width: 13px; height: 13px; flex-basis: 13px; }
+.reminder-empty { min-height: 230px; display: grid; place-items: center; align-content: center; gap: 7px; padding: 30px 20px; text-align: center; }
+.reminder-empty > span { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--blue) 10%, transparent); color: var(--blue); }
+.reminder-empty strong { font-size: 14px; }
+.reminder-empty p { max-width: 250px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.reminder-error { margin: 10px 8px 0; border: 1px solid #ffd4ce; border-radius: 9px; background: #fff0ee; color: #9b342e; padding: 10px 11px; font-size: 11px; }
+.reminder-view-all { flex: 0 0 auto; width: 100%; min-height: 48px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--blue); font-size: 11px; font-weight: 780; cursor: pointer; }
+.reminder-view-all:hover { background: color-mix(in srgb, var(--blue) 6%, transparent); }
+.due-card.focused { border-color: var(--blue); box-shadow: 0 0 0 4px color-mix(in srgb, var(--blue) 12%, transparent); }
+
+@media (min-width: 641px) {
+  .reminder-panel { position: absolute; top: 49px; right: 0; left: auto; width: 420px; max-height: calc(100vh - 86px); border-radius: 17px; }
+  .reminder-panel header { padding: 20px 20px 14px; }
+  .reminder-panel header .icon-button { width: 40px; height: 40px; flex-basis: 40px; }
+  .reminder-panel-body { padding-inline: 11px; }
+  .reminder-action { min-height: 38px; }
+}
 
 .dues-summary { display: grid; grid-template-columns: repeat(3, 1fr); margin: -8px 0 28px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.35); overflow: hidden; }
 .dues-summary > div { display: grid; gap: 7px; padding: 17px 20px; border-right: 1px solid var(--line); }
@@ -616,13 +649,13 @@ h1, h2, strong { letter-spacing: -0.025em; }
 .lock-card p { color: var(--muted); font-size: 13px; line-height: 1.5; }
 .lock-card form { display: grid; gap: 12px; margin-top: 20px; }
 .lock-card input { min-height: 46px; border: 1px solid var(--line); border-radius: 9px; padding: 0 12px; background: var(--paper-strong); color: var(--ink); }
-body[data-hide-amounts="true"] :is(.amount, .summary-strip strong, .savings-copy h1, .report-kpis strong, .currency-preview strong, .category-bar strong, .goal-card > strong, .calendar-amount, .calendar-day .income, .calendar-day .expense, .home-plan-row p, .dues-summary strong, .due-card-heading > div:last-child strong, .reminder-list b, .repeat-suggestion-value strong, .breathing-room-heading h2, .breathing-room-breakdown strong, .budget-pacing-copy > div:first-child > span, .budget-pacing-meta span) {
+body[data-hide-amounts="true"] :is(.amount, .summary-strip strong, .savings-copy h1, .report-kpis strong, .currency-preview strong, .category-bar strong, .goal-card > strong, .calendar-amount, .calendar-day .income, .calendar-day .expense, .home-plan-row p, .dues-summary strong, .due-card-heading > div:last-child strong, .reminder-item-amount, .repeat-suggestion-value strong, .breathing-room-heading h2, .breathing-room-breakdown strong, .budget-pacing-copy > div:first-child > span, .budget-pacing-meta span) {
   position: relative;
   color: transparent !important;
   text-shadow: none;
   user-select: none;
 }
-body[data-hide-amounts="true"] :is(.amount, .summary-strip strong, .savings-copy h1, .report-kpis strong, .currency-preview strong, .category-bar strong, .goal-card > strong, .calendar-amount, .calendar-day .income, .calendar-day .expense, .home-plan-row p, .dues-summary strong, .due-card-heading > div:last-child strong, .reminder-list b, .repeat-suggestion-value strong, .breathing-room-heading h2, .breathing-room-breakdown strong, .budget-pacing-copy > div:first-child > span, .budget-pacing-meta span)::after {
+body[data-hide-amounts="true"] :is(.amount, .summary-strip strong, .savings-copy h1, .report-kpis strong, .currency-preview strong, .category-bar strong, .goal-card > strong, .calendar-amount, .calendar-day .income, .calendar-day .expense, .home-plan-row p, .dues-summary strong, .due-card-heading > div:last-child strong, .reminder-item-amount, .repeat-suggestion-value strong, .breathing-room-heading h2, .breathing-room-breakdown strong, .budget-pacing-copy > div:first-child > span, .budget-pacing-meta span)::after {
   content: "*****";
   position: absolute;
   inset: 0;
@@ -641,6 +674,9 @@ html[data-theme="dark"] .home-plan-icon.recurring { background: #41371f; }
 html[data-theme="dark"] .due-strip { background: #1c3328; }
 html[data-theme="dark"] .privacy-toggle { background: rgba(28,34,43,.92); }
 html[data-theme="dark"] .reminder-trigger { background: rgba(28,34,43,.92); }
+html[data-theme="dark"] .reminder-item { background: rgba(255,255,255,.025); }
+html[data-theme="dark"] .reminder-action { background: #222a34; }
+html[data-theme="dark"] .reminder-action.primary { background: #1c382b; }
 html[data-theme="dark"] .dues-summary, html[data-theme="dark"] .due-card, html[data-theme="dark"] .due-form-panel { background: rgba(255,255,255,.025); }
 html[data-theme="dark"] .milestone-panel { background: rgba(255,255,255,.025); }
 html[data-theme="dark"] .breathing-room-card { background: rgba(255,255,255,.025); }
@@ -732,8 +768,8 @@ html[data-theme="dark"] .day-picker-popover .mantine-DatePicker-day:hover:not([d
   .desktop-quick-add { display: none; }
   .privacy-toggle { top: 14px; right: 14px; width: 36px; height: 36px; }
   .reminder-bell { top: 14px; right: 58px; }
-  .reminder-trigger { width: 36px; height: 36px; }
-  .reminder-panel { position: fixed; top: 58px; right: 10px; }
+  .reminder-trigger { width: 40px; height: 40px; }
+  .reminder-panel { top: 58px; right: 8px; left: 8px; }
   .month-picker .icon-button { display: none; }
   .month-label { padding: 0; font-size: 30px; }
   .current-date { margin: 5px 0 0 -4px; font-size: 12px; }
@@ -891,6 +927,7 @@ html[data-theme="dark"] .day-picker-popover .mantine-DatePicker-day:hover:not([d
   textarea:focus, textarea:focus-visible,
   [role="button"]:focus, [role="button"]:focus-visible,
   [role="option"]:focus, [role="option"]:focus-visible { outline: 0 !important; }
+  .reminder-panel button:focus-visible { outline: 3px solid rgba(20,122,75,.34) !important; outline-offset: 2px; }
   .mantine-Input-input:focus, .mantine-Input-input:focus-within { border-color: var(--line); box-shadow: none; }
   .current-date:focus, .current-date:focus-visible { outline: 0; }
 }

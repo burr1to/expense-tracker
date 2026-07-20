@@ -42,6 +42,7 @@ const due = (overrides: Partial<DueItem>): DueItem => ({
   occurredOn: null,
   dueOn: "2026-07-25",
   remindOn: null,
+  snoozedUntil: null,
   note: "",
   status: "open",
   completedOn: null,

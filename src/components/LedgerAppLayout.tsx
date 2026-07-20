@@ -67,6 +67,12 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   }, [ledger.profile.autoLockMinutes, ledger.profile.hasPin, locked, user, isDemo]);
 
   const navigate = (nextView: AppView) => router.push(appRoutes[nextView]);
+  const openDue = (id?: string, action?: "repay") => {
+    const params = new URLSearchParams();
+    if (id) params.set("due", id);
+    if (action) params.set("action", action);
+    router.push(`${appRoutes.dues}${params.size ? `?${params.toString()}` : ""}`);
+  };
   const openAdd = () => {
     setEditing(null);
     setReusing(null);
@@ -141,7 +147,13 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
       <AppShell view={view} onAdd={openAdd} onSignOut={() => void logOut()} signingOut={signingOut}>
         {content}
       </AppShell>
-      <ReminderBell items={ledger.dueItems} currency={ledger.profile.currency} onNavigate={navigate} />
+      <ReminderBell
+        items={ledger.dueItems}
+        currency={ledger.profile.currency}
+        onOpenDue={openDue}
+        onComplete={ledger.completeDueItem}
+        onSnooze={ledger.snoozeDueItem}
+      />
       <button className="privacy-toggle" onClick={() => setAmountsHidden((hidden) => !hidden)} aria-label={amountsHidden ? "Reveal amounts" : "Hide amounts"}>
         {amountsHidden ? <Eye size={19} /> : <EyeSlash size={19} />}
       </button>

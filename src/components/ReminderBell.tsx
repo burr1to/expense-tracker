@@ -1,36 +1,163 @@
-import { Bell, CalendarBlank, HandCoins, X } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
-import { actionableDues, dueDateLabel, dueRemaining } from "../lib/dues";
+import { Bell, CalendarBlank, Check, ClockCountdown, HandCoins, X } from "@phosphor-icons/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { dueDateLabel, dueRemaining, groupActionableDues, urgentDueCount, type DueUrgency } from "../lib/dues";
 import { formatMoney } from "../lib/currency";
-import type { AppView, CurrencyCode, DueItem } from "../types";
+import type { CurrencyCode, DueItem } from "../types";
+import { ButtonSpinner } from "./ButtonSpinner";
 
-export function ReminderBell({ items, currency, onNavigate }: { items: DueItem[]; currency: CurrencyCode; onNavigate: (view: AppView) => void }) {
+type ReminderAction = "complete" | "snooze";
+
+interface ReminderBellProps {
+  items: DueItem[];
+  currency: CurrencyCode;
+  onOpenDue: (id?: string, action?: "repay") => void;
+  onComplete: (id: string, addToLedger: boolean) => Promise<void>;
+  onSnooze: (id: string) => Promise<void>;
+}
+
+const groupLabels: Record<DueUrgency, string> = {
+  overdue: "Overdue",
+  today: "Today",
+  later: "Later",
+};
+
+function completionLabel(item: DueItem) {
+  return item.kind === "payment" ? "Paid" : "Received";
+}
+
+export function ReminderBell({ items, currency, onOpenDue, onComplete, onSnooze }: ReminderBellProps) {
   const [open, setOpen] = useState(false);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const reminders = actionableDues(items);
+  const [pending, setPending] = useState<{ id: string; action: ReminderAction } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const groups = useMemo(() => groupActionableDues(items), [items]);
+  const reminders = useMemo(() => [...groups.overdue, ...groups.today, ...groups.later], [groups]);
+  const urgentCount = useMemo(() => urgentDueCount(items), [items]);
+
+  const closePanel = (restoreFocus = false) => {
+    setOpen(false);
+    setError(null);
+    if (restoreFocus) window.requestAnimationFrame(() => triggerRef.current?.focus());
+  };
+
   useEffect(() => {
     if (!open) return;
-    const close = (event: MouseEvent) => { if (!panelRef.current?.contains(event.target as Node)) setOpen(false); };
-    window.addEventListener("pointerdown", close);
-    return () => window.removeEventListener("pointerdown", close);
+    closeRef.current?.focus();
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) closePanel();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePanel(true);
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
   }, [open]);
-  const goToDues = () => { setOpen(false); onNavigate("dues"); };
-  return <div className="reminder-bell" ref={panelRef}>
-    <button className="reminder-trigger" onClick={() => setOpen((value) => !value)} aria-label={`${reminders.length} money reminders`} aria-expanded={open}>
+
+  const openDue = (id?: string, action?: "repay") => {
+    setOpen(false);
+    onOpenDue(id, action);
+  };
+
+  const runAction = async (item: DueItem, action: ReminderAction) => {
+    setPending({ id: item.id, action });
+    setError(null);
+    try {
+      if (action === "complete") await onComplete(item.id, true);
+      else await onSnooze(item.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not update this reminder.");
+    } finally {
+      setPending(null);
+    }
+  };
+
+  return <div className="reminder-bell" ref={rootRef}>
+    <button
+      ref={triggerRef}
+      id="money-reminders-trigger"
+      className="reminder-trigger"
+      onClick={() => setOpen((value) => !value)}
+      aria-label={`${urgentCount} urgent, ${reminders.length} total money reminders`}
+      aria-expanded={open}
+      aria-controls="money-reminders-panel"
+      aria-haspopup="dialog"
+    >
       <Bell size={20} weight={reminders.length ? "fill" : "regular"} />
-      {reminders.length > 0 && <span>{reminders.length > 9 ? "9+" : reminders.length}</span>}
+      {urgentCount > 0
+        ? <span>{urgentCount > 9 ? "9+" : urgentCount}</span>
+        : reminders.length > 0 && <i aria-hidden="true" />}
     </button>
-    {open && <section className="reminder-panel" aria-label="Money reminders">
-      <header><div><span className="section-label">Dues & reminders</span><h2>{reminders.length ? `${reminders.length} need attention` : "You’re all caught up"}</h2></div><button className="icon-button" onClick={() => setOpen(false)} aria-label="Close reminders"><X size={17} /></button></header>
-      <div className="reminder-list">
-        {reminders.slice(0, 5).map((item) => <button key={item.id} onClick={goToDues}>
-          <span className={`reminder-kind ${item.kind}`}><HandCoins size={18} weight="duotone" /></span>
-          <span><strong>{item.title}</strong><small><CalendarBlank size={12} />{dueDateLabel(item.dueOn)}</small></span>
-          <b>{formatMoney(dueRemaining(item), currency)}</b>
-        </button>)}
-        {!reminders.length && <p>No overdue or scheduled reminders right now.</p>}
+    <span className="sr-only" aria-live="polite">{urgentCount} urgent money reminders</span>
+
+    {open && <section
+      id="money-reminders-panel"
+      className="reminder-panel"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="money-reminders-title"
+    >
+      <header>
+        <div>
+          <span className="section-label">Money to handle</span>
+          <h2 id="money-reminders-title">{reminders.length ? `${reminders.length} ${reminders.length === 1 ? "item needs" : "items need"} attention` : "You’re all caught up"}</h2>
+          {reminders.length > 0 && <p>{urgentCount ? `${urgentCount} urgent right now` : "Nothing urgent right now"}</p>}
+        </div>
+        <button ref={closeRef} className="icon-button" onClick={() => closePanel(true)} aria-label="Close money reminders"><X size={18} /></button>
+      </header>
+
+      <div className="reminder-panel-body">
+        {(["overdue", "today", "later"] as DueUrgency[]).map((urgency) => groups[urgency].length > 0 && <section className={`reminder-group ${urgency}`} key={urgency} aria-labelledby={`reminder-group-${urgency}`}>
+          <h3 id={`reminder-group-${urgency}`}>{groupLabels[urgency]} <span>{groups[urgency].length}</span></h3>
+          <div className="reminder-list">
+            {groups[urgency].map((item) => {
+              const completing = pending?.id === item.id && pending.action === "complete";
+              const snoozing = pending?.id === item.id && pending.action === "snooze";
+              const disabled = pending?.id === item.id;
+              const debt = item.kind === "lent" || item.kind === "borrowed";
+              return <article className="reminder-item" key={item.id} aria-busy={disabled}>
+                <button className="reminder-item-main" onClick={() => openDue(item.id)}>
+                  <span className={`reminder-kind ${item.kind}`}>
+                    {debt ? <HandCoins size={18} weight="duotone" /> : <CalendarBlank size={18} weight="duotone" />}
+                  </span>
+                  <span className="reminder-copy">
+                    <strong>{item.title}</strong>
+                    <small>{dueDateLabel(item.dueOn)}{item.person ? ` · ${item.person}` : ""}</small>
+                  </span>
+                  <b className="reminder-item-amount">{formatMoney(dueRemaining(item), currency)}</b>
+                </button>
+                <div className="reminder-actions">
+                  {debt
+                    ? <button className="reminder-action primary" disabled={disabled} onClick={() => openDue(item.id, "repay")}><HandCoins size={14} />Record repayment</button>
+                    : <button className="reminder-action primary" disabled={disabled} onClick={() => void runAction(item, "complete")}>
+                      {completing ? <ButtonSpinner /> : <Check size={14} />}{completing ? "Updating…" : completionLabel(item)}
+                    </button>}
+                  <button className="reminder-action" disabled={disabled} onClick={() => void runAction(item, "snooze")}>
+                    {snoozing ? <ButtonSpinner /> : <ClockCountdown size={14} />}{snoozing ? "Snoozing…" : "Tomorrow"}
+                  </button>
+                </div>
+              </article>;
+            })}
+          </div>
+        </section>)}
+
+        {!reminders.length && <div className="reminder-empty">
+          <span><Check size={22} weight="bold" /></span>
+          <strong>No money tasks need attention</strong>
+          <p>New reminders will appear here when their reminder date arrives.</p>
+        </div>}
+        {error && <div className="reminder-error" role="alert">{error}</div>}
       </div>
-      <button className="reminder-view-all" onClick={goToDues}>View all dues</button>
+
+      <button className="reminder-view-all" onClick={() => openDue()}>View all dues</button>
     </section>}
   </div>;
 }

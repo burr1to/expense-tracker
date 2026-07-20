@@ -198,6 +198,7 @@ model DueItem {
   occurredOn  DateTime?          @db.Date
   dueOn       DateTime           @db.Date
   remindOn    DateTime?          @db.Date
+  snoozedUntil DateTime?         @db.Date
   note        String             @default("")
   status      String             @default("open")
   completedOn DateTime?          @db.Date
@@ -209,6 +210,7 @@ model DueItem {
 
   @@index([userId, dueOn])
   @@index([userId, remindOn])
+  @@index([userId, snoozedUntil])
 }
 
 model DuePayment {
