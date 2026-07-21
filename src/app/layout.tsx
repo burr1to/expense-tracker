@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import "@mantine/core/styles.css";
 import "@mantine/dates/styles.css";
+import "maplibre-gl/dist/maplibre-gl.css";
 import "@fontsource-variable/manrope";
 import { MantineProvider, createTheme } from "@mantine/core";
 import type { Metadata } from "next";

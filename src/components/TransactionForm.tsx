@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { NumberInput, SegmentedControl, Select, TextInput } from "@mantine/core";
-import { Check, ClockCounterClockwise, Eye, MagnifyingGlass, Paperclip, X } from "@phosphor-icons/react";
+import { Check, ClockCounterClockwise, Eye, MagnifyingGlass, MapPin, Paperclip, X } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Controller, useForm } from "react-hook-form";
@@ -11,12 +11,13 @@ import { toDateInput } from "../lib/dates";
 import { discardReceipt, uploadReceipt } from "../lib/receipts";
 import { paymentAccountLabel } from "../lib/payment-accounts";
 import { getTransactionSuggestions, type TransactionSuggestion } from "../lib/transaction-suggestions";
-import type { CurrencyCode, CustomCategory, LedgerTransaction, PaymentAccount, PaymentMode, ReceiptUpload, TransactionDraft, TransactionKind } from "../types";
+import type { CurrencyCode, CustomCategory, LedgerTransaction, PaymentAccount, PaymentMode, ReceiptUpload, TransactionDraft, TransactionKind, TransactionLocationDraft } from "../types";
 import { CategoryIcon } from "./CategoryIcon";
 import { ButtonSpinner } from "./ButtonSpinner";
 import { LedgerDatePickerInput as DatePickerInput } from "./LedgerDatePickerInput";
 import { SubcategoryIcon } from "./SubcategoryIcon";
 import { ReceiptPreview } from "./ReceiptPreview";
+import { LocationPicker } from "./LocationPicker";
 
 const schema = z.object({
   kind: z.enum(["income", "expense"]),
@@ -45,6 +46,18 @@ interface TransactionFormProps {
   onSave: (draft: TransactionDraft, id?: string) => Promise<void>;
 }
 
+function locationFromTransaction(transaction?: LedgerTransaction | null): TransactionLocationDraft | null {
+  return transaction?.locationLatitude != null && transaction.locationLongitude != null ? {
+    label: transaction.locationLabel ?? transaction.area ?? "Pinned location",
+    address: transaction.locationAddress ?? "Kathmandu, Nepal",
+    latitude: transaction.locationLatitude,
+    longitude: transaction.locationLongitude,
+    accuracy: transaction.locationAccuracy,
+    source: transaction.locationSource ?? "pin",
+    savedPlaceId: transaction.savedPlaceId,
+  } : null;
+}
+
 export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, transactions, customCategories, paymentAccounts, onClose, onSave }: TransactionFormProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ReceiptUpload | undefined>();
@@ -52,8 +65,22 @@ export function TransactionForm({ open, currency, transaction, template, initial
   const [receiptError, setReceiptError] = useState<string | null>(null);
   const [suggestionQuery, setSuggestionQuery] = useState("");
   const [appliedSuggestionId, setAppliedSuggestionId] = useState<string | null>(template?.id ?? null);
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const source = transaction ?? template;
+  const defaultLocation = useMemo(() => locationFromTransaction(source), [source]);
+  const recentLocations = useMemo(() => {
+    const seen = new Set<string>();
+    return transactions.flatMap((entry) => {
+      const previous = locationFromTransaction(entry);
+      if (!previous) return [];
+      const key = `${previous.latitude.toFixed(5)}-${previous.longitude.toFixed(5)}`;
+      if (seen.has(key)) return [];
+      seen.add(key);
+      return [previous];
+    }).slice(0, 12);
+  }, [transactions]);
+  const [location, setLocation] = useState<TransactionLocationDraft | null>(defaultLocation);
   const defaults = useMemo<TransactionDraft>(() => {
-    const source = transaction ?? template;
     return {
     kind: source?.kind ?? "expense",
     category: source?.category ?? "food",
@@ -74,7 +101,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
   const categoryColor = allCategoriesFor(kind, customCategories).find((item) => item.id === category)?.color ?? "#147a4b";
   const discardAndClose = () => { if (receipt) void discardReceipt(receipt); onClose(); };
 
-  useEffect(() => { reset(defaults); setSubmitError(null); setReceipt(undefined); setRemoveReceipt(false); setReceiptError(null); setSuggestionQuery(""); setAppliedSuggestionId(template?.id ?? null); }, [defaults, open, reset, template?.id]);
+  useEffect(() => { reset(defaults); setLocation(defaultLocation); setLocationPickerOpen(false); setSubmitError(null); setReceipt(undefined); setRemoveReceipt(false); setReceiptError(null); setSuggestionQuery(""); setAppliedSuggestionId(template?.id ?? null); }, [defaults, defaultLocation, open, reset, template?.id]);
 
   if (!open) return null;
 
@@ -85,6 +112,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
     setValue("subcategory", "");
     setValue("area", "");
     setAppliedSuggestionId(null);
+    setLocation(null);
   };
 
   const applySuggestion = ({ transaction: suggestion }: TransactionSuggestion) => {
@@ -100,13 +128,14 @@ export function TransactionForm({ open, currency, transaction, template, initial
       paymentMode: canUseAccount ? suggestion.paymentMode : "cash",
       paymentAccountId: canUseAccount ? suggestion.paymentAccountId ?? "" : "",
     });
+    setLocation(locationFromTransaction(suggestion));
     setAppliedSuggestionId(suggestion.id);
   };
 
   const submit = handleSubmit(async (draft) => {
     try {
       setSubmitError(null);
-      await onSave({ ...draft, receipt, removeReceipt }, transaction?.id);
+      await onSave({ ...draft, location, receipt, removeReceipt }, transaction?.id);
       onClose();
     } catch (error) {
       setSubmitError(error instanceof Error ? error.message : "Could not save this entry.");
@@ -158,7 +187,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
             <legend>Category</legend>
             <div className="category-grid">
               {allCategoriesFor(kind, customCategories).map((item) => (
-                <button key={item.id} type="button" className={category === item.id ? "category-choice selected" : "category-choice"} onClick={() => { setValue("category", item.id, { shouldValidate: true }); setValue("subcategory", ""); setValue("area", ""); }}>
+                <button key={item.id} type="button" className={category === item.id ? "category-choice selected" : "category-choice"} onClick={() => { setValue("category", item.id, { shouldValidate: true }); setValue("subcategory", ""); setValue("area", ""); setLocation(null); }}>
                   <span style={{ "--category-color": item.color } as CSSProperties}><CategoryIcon category={item.id} /></span>
                   {item.label}
                   {category === item.id && <Check size={15} weight="bold" />}
@@ -168,7 +197,11 @@ export function TransactionForm({ open, currency, transaction, template, initial
           </fieldset>
 
           {subcategory.options.length ? <fieldset className="subcategory-fieldset"><legend>{subcategory.label} <span>Optional</span></legend><Controller control={control} name="subcategory" render={({ field }) => <div className="subcategory-grid">{subcategory.options.map((value) => <button key={value} type="button" className={field.value === value ? "subcategory-choice selected" : "subcategory-choice"} aria-pressed={field.value === value} onClick={() => field.onChange(field.value === value ? "" : value)}><span style={{ "--category-color": categoryColor } as CSSProperties}><SubcategoryIcon subcategory={value} /></span>{value}{field.value === value && <Check size={14} weight="bold" />}</button>)}</div>} /></fieldset> : <TextInput label={subcategory.label} description="Optional" placeholder="Add more detail" {...register("subcategory")} />}
-          <TextInput label={subcategory.areaLabel ?? "Area / location"} description="Optional" placeholder={subcategory.areaPlaceholder ?? "Where did this happen?"} {...register("area")} />
+          <div className="transaction-location-field">
+            <Controller control={control} name="area" render={({ field }) => <TextInput label={subcategory.areaLabel ?? "Where did this happen?"} description="Optional · Kathmandu only for exact pins" placeholder={subcategory.areaPlaceholder ?? "Type an area or choose an exact location"} value={field.value} onChange={(event) => { field.onChange(event); if (location && event.currentTarget.value !== location.label) setLocation(null); }} />} />
+            <button type="button" className={location ? "location-select-button selected" : "location-select-button"} onClick={() => setLocationPickerOpen(true)}><MapPin size={18} weight={location ? "fill" : "regular"} /><span><strong>{location ? "Exact location selected" : "Choose on Kathmandu map"}</strong><small>{location ? `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}` : "Use current location, search, or drop a pin"}</small></span></button>
+            {location && <button type="button" className="text-button danger-text clear-location-button" onClick={() => { setLocation(null); setValue("area", ""); }}>Clear exact location</button>}
+          </div>
 
           <fieldset className="payment-fieldset">
             <legend>Mode of payment <span>Required</span></legend>
@@ -189,6 +222,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
           <button className="primary-button full-width" type="submit" disabled={isSubmitting}>{isSubmitting ? <><ButtonSpinner />Saving…</> : transaction ? "Save changes" : `Add ${kind}`}</button>
         </form>
       </section>
+      <LocationPicker open={locationPickerOpen} value={location} recentLocations={recentLocations} onClose={() => setLocationPickerOpen(false)} onSelect={(next) => { setLocation(next); setValue("area", next.label, { shouldValidate: true }); }} />
     </div>
   );
 }

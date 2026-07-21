@@ -7,13 +7,25 @@ import { getPrisma } from "../../../lib/prisma";
 import { hashPin, verifyPin } from "../../../lib/pin";
 import { NEPAL_MOBILE_BANKS } from "../../../lib/payment-accounts";
 import { removeStoredReceipts, verifyStoredReceipt } from "../../../lib/receipt-storage";
+import { KATHMANDU_BOUNDS } from "../../../lib/kathmandu-locations";
 
 export const dynamic = "force-dynamic";
 
+const locationSchema = z.object({
+  label: z.string().trim().min(1).max(120),
+  address: z.string().trim().max(240),
+  latitude: z.number().min(KATHMANDU_BOUNDS.south).max(KATHMANDU_BOUNDS.north),
+  longitude: z.number().min(KATHMANDU_BOUNDS.west).max(KATHMANDU_BOUNDS.east),
+  accuracy: z.number().int().positive().max(100_000).nullable(),
+  source: z.enum(["pin", "search", "current_location", "saved"]),
+  savedPlaceId: z.string().nullable(),
+  savePlaceName: z.string().trim().min(1).max(60).optional(),
+}).nullable();
 const transactionSchema = z.object({
   kind: z.enum(["income", "expense"]), category: z.string().min(1).max(80), amountMinor: z.number().int().positive(),
   occurredOn: z.string().date(), note: z.string().max(240), subcategory: z.string().trim().max(80).nullable(),
   area: z.string().trim().max(120).nullable(), paymentMode: z.enum(["cash", "cheque", "online"]), paymentAccountId: z.string().nullable(),
+  location: locationSchema.optional(),
 }).superRefine((value, context) => {
   if (value.paymentMode === "online" && !value.paymentAccountId) context.addIssue({ code: "custom", path: ["paymentAccountId"], message: "Choose an online payment account." });
   if (value.paymentMode !== "online" && value.paymentAccountId) context.addIssue({ code: "custom", path: ["paymentAccountId"], message: "Payment accounts can only be used with online payments." });
@@ -57,13 +69,14 @@ function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
     })),
     customCategories: data.categories.map((item) => ({ ...item, label: item.name, custom: true })),
     paymentAccounts: data.paymentAccounts.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })),
+    savedPlaces: data.savedPlaces.map((item) => ({ ...item, createdAt: item.createdAt.toISOString(), lastUsedAt: item.lastUsedAt.toISOString() })),
     dueItems: data.dueItems.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn), dueOn: dateOnly(item.dueOn), remindOn: dateOnly(item.remindOn), snoozedUntil: dateOnly(item.snoozedUntil), completedOn: dateOnly(item.completedOn), createdAt: item.createdAt.toISOString(), payments: item.payments.map((payment) => ({ ...payment, occurredOn: dateOnly(payment.occurredOn), createdAt: payment.createdAt.toISOString() })) })),
   };
 }
 
 async function loadLedger(id: string) {
   const db = getPrisma();
-  const [user, transactions, budgets, recurring, goals, categories, paymentAccounts, dueItems] = await Promise.all([
+  const [user, transactions, budgets, recurring, goals, categories, paymentAccounts, savedPlaces, dueItems] = await Promise.all([
     db.user.findUniqueOrThrow({ where: { id }, select: { id: true, name: true, currency: true, theme: true, hideAmounts: true, autoLockMinutes: true, pinHash: true } }),
     db.transaction.findMany({ where: { userId: id }, orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }], include: { receipt: { select: receiptSelect }, paymentAccount: true } }),
     db.budget.findMany({ where: { userId: id }, orderBy: { monthKey: "desc" } }),
@@ -71,9 +84,10 @@ async function loadLedger(id: string) {
     db.savingsGoal.findMany({ where: { userId: id }, orderBy: { createdAt: "asc" }, include: { contributions: { orderBy: { createdAt: "desc" } } } }),
     db.customCategory.findMany({ where: { userId: id }, orderBy: { name: "asc" } }),
     db.paymentAccount.findMany({ where: { userId: id }, orderBy: { createdAt: "asc" } }),
+    db.savedPlace.findMany({ where: { userId: id }, orderBy: { lastUsedAt: "desc" } }),
     db.dueItem.findMany({ where: { userId: id }, orderBy: [{ status: "asc" }, { dueOn: "asc" }], include: { payments: { orderBy: { occurredOn: "desc" } }, receipt: { select: receiptSelect } } }),
   ]);
-  return { user, transactions, budgets, recurring, goals, categories, paymentAccounts, dueItems };
+  return { user, transactions, budgets, recurring, goals, categories, paymentAccounts, savedPlaces, dueItems };
 }
 
 export async function GET() {
@@ -94,9 +108,34 @@ export async function POST(request: Request) {
     switch (input.action) {
       case "saveTransaction": {
         const value = savedTransactionSchema.parse(input.payload);
-        const { receipt, removeReceipt, ...entry } = value;
+        const { receipt, removeReceipt, location, ...entry } = value;
         if (entry.paymentAccountId) await db.paymentAccount.findFirstOrThrow({ where: { id: entry.paymentAccountId, userId: id } });
-        const data = { ...entry, occurredOn: asDate(entry.occurredOn) };
+        let savedPlaceId = location?.savedPlaceId ?? null;
+        if (savedPlaceId) {
+          const savedPlace = await db.savedPlace.findFirstOrThrow({ where: { id: savedPlaceId, userId: id } });
+          await db.savedPlace.update({ where: { id: savedPlace.id }, data: { lastUsedAt: new Date() } });
+        } else if (location?.savePlaceName) {
+          savedPlaceId = (await db.savedPlace.create({
+            data: {
+              userId: id,
+              name: location.savePlaceName,
+              address: location.address || "Kathmandu, Nepal",
+              latitude: location.latitude,
+              longitude: location.longitude,
+            },
+          })).id;
+        }
+        const data = {
+          ...entry,
+          occurredOn: asDate(entry.occurredOn),
+          locationLabel: location?.label ?? null,
+          locationAddress: location?.address ?? null,
+          locationLatitude: location?.latitude ?? null,
+          locationLongitude: location?.longitude ?? null,
+          locationAccuracy: location?.accuracy ?? null,
+          locationSource: location?.source ?? null,
+          savedPlaceId,
+        };
         let transactionId = recordId;
         if (recordId) {
           const existing = await db.transaction.findFirstOrThrow({ where: { id: recordId, userId: id } });
@@ -119,7 +158,18 @@ export async function POST(request: Request) {
           const ownedAccounts = await db.paymentAccount.count({ where: { userId: id, id: { in: accountIds } } });
           if (ownedAccounts !== accountIds.length) throw new Error("One or more online payment accounts are invalid.");
         }
-        await db.transaction.createMany({ data: values.map((value) => ({ ...value, occurredOn: asDate(value.occurredOn), userId: id })) });
+        await db.transaction.createMany({ data: values.map(({ location, ...value }) => ({
+          ...value,
+          occurredOn: asDate(value.occurredOn),
+          userId: id,
+          locationLabel: location?.label ?? null,
+          locationAddress: location?.address ?? null,
+          locationLatitude: location?.latitude ?? null,
+          locationLongitude: location?.longitude ?? null,
+          locationAccuracy: location?.accuracy ?? null,
+          locationSource: location?.source ?? null,
+          savedPlaceId: null,
+        })) });
         break;
       }
       case "deleteTransaction": {

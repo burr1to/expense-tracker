@@ -14,6 +14,13 @@ const transaction = (kind: "income" | "expense", amountMinor: number, occurredOn
   area: null,
   paymentMode: "cash",
   paymentAccountId: null,
+  locationLabel: null,
+  locationAddress: null,
+  locationLatitude: null,
+  locationLongitude: null,
+  locationAccuracy: null,
+  locationSource: null,
+  savedPlaceId: null,
   createdAt: `${occurredOn}T00:00:00.000Z`,
   receipt: null,
 });

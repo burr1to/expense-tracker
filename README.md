@@ -1,6 +1,15 @@
 # SaveYoRupee
 
-A mobile-first personal income and expense tracker with monthly reporting, planning, dues and repayment tracking, reminders, optional receipt attachments, a financial milestone timeline, CSV import/export, privacy controls, and database-backed email/password authentication.
+A mobile-first personal income and expense tracker with monthly reporting, planning, dues and repayment tracking, reminders, optional Kathmandu transaction locations, receipt attachments, a financial milestone timeline, CSV import/export, privacy controls, and database-backed email/password authentication.
+
+## Kathmandu transaction map
+
+- Add an optional exact location to an income or expense by searching a Kathmandu area, using device location, or dropping a pin.
+- Save named places such as Home, Office, or a favorite shop and reuse them on later transactions.
+- Review mapped entries at `/maps`, filter income and expenses, and inspect clustered markers.
+- Exact coordinates are accepted only inside the configured Kathmandu map bounds. Free-text `area` remains available when no exact location is wanted.
+- MapLibre renders keyless OpenFreeMap vector tiles derived from OpenStreetMap. The app applies its own low-clutter Kathmandu theme, hides buildings and secondary map labels, and adds a high-visibility neighborhood overlay. Override the source with `NEXT_PUBLIC_MAP_STYLE_URL` if needed.
+- Live place suggestions use the authenticated server-side `PHOTON_SEARCH_URL` endpoint with input debouncing, caching, request pacing, and Kathmandu bounds. Use a hosted provider or self-hosted Photon as usage grows.
 
 ## Dues and reminders
 
@@ -15,7 +24,7 @@ A mobile-first personal income and expense tracker with monthly reporting, plann
 - Next.js 16 App Router + React 19 + TypeScript
 - Prisma ORM 7 + Supabase-hosted PostgreSQL
 - Better Auth with persisted users, credential accounts, sessions, and reset tokens
-- React Hook Form + Zod, Recharts, Phosphor Icons
+- React Hook Form + Zod, Recharts, MapLibre GL JS, Phosphor Icons
 - Vitest + ESLint
 
 Supabase hosts PostgreSQL and the private receipt Storage bucket. The browser uploads receipt bytes directly to Storage only with a short-lived, server-issued upload token; all authorization and ownership checks still go through authenticated server routes and user-owned Prisma queries.
@@ -27,7 +36,8 @@ Supabase hosts PostgreSQL and the private receipt Storage bucket. The browser up
 3. Set `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and the comma-separated `BETA_ALLOWED_EMAILS` allowlist.
 4. Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and the server-only `SUPABASE_SECRET_KEY`. A legacy `SUPABASE_SERVICE_ROLE_KEY` is also accepted. `SUPABASE_RECEIPTS_BUCKET` defaults to `receipts`; the private bucket is created on the first upload with the app's 3 MB and MIME-type restrictions.
 5. For production password-reset mail, set `RESEND_API_KEY` and `AUTH_EMAIL_FROM`. In development, reset links are printed in the server terminal when Resend is not configured.
-6. Apply the checked-in schema and generate the client:
+6. Optionally set `NEXT_PUBLIC_MAP_STYLE_URL` and `PHOTON_SEARCH_URL` for alternative production map providers. Development defaults to OpenFreeMap Positron vector tiles and Photon search with visible attribution.
+7. Apply the checked-in schema and generate the client:
 
 ```bash
 npm install

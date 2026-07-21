@@ -14,6 +14,13 @@ const transaction = (overrides: Partial<LedgerTransaction>): LedgerTransaction =
   area: "Thamel",
   paymentMode: "cash",
   paymentAccountId: null,
+  locationLabel: null,
+  locationAddress: null,
+  locationLatitude: null,
+  locationLongitude: null,
+  locationAccuracy: null,
+  locationSource: null,
+  savedPlaceId: null,
   createdAt: "2026-07-10T08:00:00.000Z",
   ...overrides,
 });

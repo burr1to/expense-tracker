@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { financialMilestones } from "./milestones";
 import type { LedgerTransaction } from "../types";
 
-const transaction = (id: string, occurredOn: string, kind: "income" | "expense", amountMinor: number): LedgerTransaction => ({ id, userId: "u1", occurredOn, kind, amountMinor, category: "other", note: id, subcategory: null, area: null, paymentMode: "cash", paymentAccountId: null, createdAt: `${occurredOn}T00:00:00.000Z`, receipt: null });
+const transaction = (id: string, occurredOn: string, kind: "income" | "expense", amountMinor: number): LedgerTransaction => ({ id, userId: "u1", occurredOn, kind, amountMinor, category: "other", note: id, subcategory: null, area: null, paymentMode: "cash", paymentAccountId: null, locationLabel: null, locationAddress: null, locationLatitude: null, locationLongitude: null, locationAccuracy: null, locationSource: null, savedPlaceId: null, createdAt: `${occurredOn}T00:00:00.000Z`, receipt: null });
 
 describe("financial milestones", () => {
   it("identifies the first entry, largest movement, and best saving month", () => {

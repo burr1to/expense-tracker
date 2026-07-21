@@ -32,6 +32,7 @@ model User {
   dueItems          DueItem[]
   duePayments       DuePayment[]
   receipts          ReceiptAttachment[]
+  savedPlaces     SavedPlace[]
 }
 
 model Session {
@@ -79,25 +80,50 @@ model Verification {
 }
 
 model Transaction {
-  id               String             @id @default(cuid())
-  userId           String
-  kind             String
-  category         String
-  amountMinor      Int
-  occurredOn       DateTime           @db.Date
-  note             String             @default("")
-  subcategory      String?
-  area             String?
-  paymentMode      String             @default("cash")
-  paymentAccountId String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  paymentAccount   PaymentAccount?    @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
-  receipt          ReceiptAttachment?
+  id                String             @id @default(cuid())
+  userId            String
+  kind              String
+  category          String
+  amountMinor       Int
+  occurredOn        DateTime           @db.Date
+  note              String             @default("")
+  subcategory       String?
+  area              String?
+  paymentMode       String             @default("cash")
+  paymentAccountId  String?
+  locationLabel     String?
+  locationAddress   String?
+  locationLatitude  Float?
+  locationLongitude Float?
+  locationAccuracy  Int?
+  locationSource    String?
+  savedPlaceId      String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paymentAccount    PaymentAccount?    @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
+  savedPlace        SavedPlace?         @relation(fields: [savedPlaceId], references: [id], onDelete: SetNull)
+  receipt           ReceiptAttachment?
 
   @@index([userId, occurredOn])
   @@index([paymentAccountId])
+  @@index([savedPlaceId])
+}
+
+model SavedPlace {
+  id        String        @id @default(cuid())
+  userId    String
+  name      String
+  address   String        @default("Kathmandu, Nepal")
+  latitude  Float
+  longitude Float
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  lastUsedAt DateTime     @default(now())
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([userId, lastUsedAt])
 }
 
 model PaymentAccount {

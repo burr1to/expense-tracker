@@ -1,6 +1,6 @@
 export type CurrencyCode = "NPR" | "USD" | "AUD";
 export type TransactionKind = "income" | "expense";
-export type AppView = "home" | "plan" | "dues" | "reports" | "transactions" | "settings";
+export type AppView = "home" | "plan" | "dues" | "reports" | "transactions" | "maps" | "settings";
 export type TransactionCategory = string;
 export type ThemePreference = "light" | "dark" | "system";
 export type PaymentMode = "cash" | "cheque" | "online";
@@ -29,6 +29,13 @@ export interface LedgerTransaction {
   paymentMode: PaymentMode;
   paymentAccountId: string | null;
   paymentAccount?: PaymentAccount | null;
+  locationLabel: string | null;
+  locationAddress: string | null;
+  locationLatitude: number | null;
+  locationLongitude: number | null;
+  locationAccuracy: number | null;
+  locationSource: LocationSource | null;
+  savedPlaceId: string | null;
   createdAt: string;
   receipt?: ReceiptMeta | null;
 }
@@ -43,8 +50,33 @@ export interface TransactionDraft {
   area: string;
   paymentMode: PaymentMode;
   paymentAccountId: string;
+  location?: TransactionLocationDraft | null;
   receipt?: ReceiptUpload;
   removeReceipt?: boolean;
+}
+
+export type LocationSource = "pin" | "search" | "current_location" | "saved";
+
+export interface TransactionLocationDraft {
+  label: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  source: LocationSource;
+  savedPlaceId: string | null;
+  savePlaceName?: string;
+}
+
+export interface SavedPlace {
+  id: string;
+  userId: string;
+  name: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  createdAt: string;
+  lastUsedAt: string;
 }
 
 export interface CategoryDefinition {

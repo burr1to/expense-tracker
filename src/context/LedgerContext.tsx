@@ -4,7 +4,7 @@
 import { addDays, addMonths, format } from "date-fns";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { majorToMinor } from "../lib/currency";
-import type { Budget, CustomCategory, DueDraft, DueItem, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, RecurringEntry, SavingsGoal, TransactionDraft, TransactionKind } from "../types";
+import type { Budget, CustomCategory, DueDraft, DueItem, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, RecurringEntry, SavedPlace, SavingsGoal, TransactionDraft, TransactionKind } from "../types";
 import { useAuth } from "./AuthContext";
 
 interface BudgetDraft { category: string; amount: string; monthKey: string }
@@ -12,7 +12,7 @@ interface RecurringDraft { kind: TransactionKind; category: string; amount: stri
 interface GoalDraft { name: string; target: string; saved: string; targetDate: string }
 interface CategoryDraft { name: string; kind: TransactionKind | "both"; color: string }
 interface PaymentAccountDraft { type: PaymentAccountType; provider: string; label: string }
-interface LedgerData { profile: Profile; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; goals: SavingsGoal[]; customCategories: CustomCategory[]; paymentAccounts: PaymentAccount[]; dueItems: DueItem[] }
+interface LedgerData { profile: Profile; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; goals: SavingsGoal[]; customCategories: CustomCategory[]; paymentAccounts: PaymentAccount[]; savedPlaces: SavedPlace[]; dueItems: DueItem[] }
 interface LedgerContextValue extends LedgerData {
   loading: boolean; error: string | null;
   saveTransaction: (draft: TransactionDraft, id?: string) => Promise<void>; importTransactions: (drafts: TransactionDraft[]) => Promise<number>; deleteTransaction: (id: string) => Promise<void>;
@@ -30,7 +30,7 @@ interface LedgerContextValue extends LedgerData {
 }
 
 const emptyProfile: Profile = { id: "", displayName: "Personal ledger", currency: "NPR", theme: "system", hideAmounts: false, autoLockMinutes: 0, hasPin: false };
-const emptyData: LedgerData = { profile: emptyProfile, transactions: [], budgets: [], recurringEntries: [], goals: [], customCategories: [], paymentAccounts: [], dueItems: [] };
+const emptyData: LedgerData = { profile: emptyProfile, transactions: [], budgets: [], recurringEntries: [], goals: [], customCategories: [], paymentAccounts: [], savedPlaces: [], dueItems: [] };
 const LedgerContext = createContext<LedgerContextValue | null>(null);
 const splitTags = (value: string) => [...new Set(value.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean))].slice(0, 8);
 
@@ -61,7 +61,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     setData(body as LedgerData);
   }, []);
 
-  const transactionPayload = (draft: TransactionDraft) => ({ kind: draft.kind, category: draft.category, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn, note: draft.note.trim(), subcategory: draft.subcategory.trim() || null, area: draft.area.trim() || null, paymentMode: draft.paymentMode, paymentAccountId: draft.paymentMode === "online" ? draft.paymentAccountId || null : null, receipt: draft.receipt, removeReceipt: draft.removeReceipt });
+  const transactionPayload = (draft: TransactionDraft) => ({ kind: draft.kind, category: draft.category, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn, note: draft.note.trim(), subcategory: draft.subcategory.trim() || null, area: draft.area.trim() || null, paymentMode: draft.paymentMode, paymentAccountId: draft.paymentMode === "online" ? draft.paymentAccountId || null : null, location: draft.location ?? null, receipt: draft.receipt, removeReceipt: draft.removeReceipt });
   const saveTransaction = useCallback(async (draft: TransactionDraft, id?: string) => mutate("saveTransaction", transactionPayload(draft), id), [mutate]);
   const importTransactions = useCallback(async (drafts: TransactionDraft[]) => { await mutate("importTransactions", drafts.map(transactionPayload)); return drafts.length; }, [mutate]);
   const deleteTransaction = useCallback(async (id: string) => mutate("deleteTransaction", undefined, id), [mutate]);

@@ -15,7 +15,19 @@ const now = new Date();
 const year = now.getFullYear();
 const month = String(now.getMonth() + 1).padStart(2, "0");
 const date = (day: number) => `${year}-${month}-${String(day).padStart(2, "0")}`;
-const cashPayment = { subcategory: null, area: null, paymentMode: "cash", paymentAccountId: null } as const;
+const cashPayment = {
+  subcategory: null,
+  area: null,
+  paymentMode: "cash",
+  paymentAccountId: null,
+  locationLabel: null,
+  locationAddress: null,
+  locationLatitude: null,
+  locationLongitude: null,
+  locationAccuracy: null,
+  locationSource: null,
+  savedPlaceId: null,
+} as const;
 
 export const DEMO_TRANSACTIONS: LedgerTransaction[] = [
   { id: "d1", userId: "demo-user", kind: "income", category: "salary", amountMinor: 8540000, occurredOn: date(10), note: "Monthly salary", ...cashPayment, createdAt: new Date().toISOString() },
