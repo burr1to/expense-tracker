@@ -11,7 +11,7 @@ import { toDateInput } from "../lib/dates";
 import { discardReceipt, uploadReceipt } from "../lib/receipts";
 import { paymentAccountLabel } from "../lib/payment-accounts";
 import { getTransactionSuggestions, type TransactionSuggestion } from "../lib/transaction-suggestions";
-import type { CurrencyCode, CustomCategory, LedgerTransaction, PaymentAccount, PaymentMode, ReceiptUpload, TransactionDraft, TransactionKind, TransactionLocationDraft } from "../types";
+import type { CurrencyCode, CustomCategory, LedgerTransaction, PaymentAccount, PaymentMode, ReceiptUpload, SavedPlace, TransactionDraft, TransactionKind, TransactionLocationDraft } from "../types";
 import { CategoryIcon } from "./CategoryIcon";
 import { ButtonSpinner } from "./ButtonSpinner";
 import { LedgerDatePickerInput as DatePickerInput } from "./LedgerDatePickerInput";
@@ -42,6 +42,7 @@ interface TransactionFormProps {
   transactions: LedgerTransaction[];
   customCategories: CustomCategory[];
   paymentAccounts: PaymentAccount[];
+  savedPlaces: SavedPlace[];
   onClose: () => void;
   onSave: (draft: TransactionDraft, id?: string) => Promise<void>;
 }
@@ -58,7 +59,7 @@ function locationFromTransaction(transaction?: LedgerTransaction | null): Transa
   } : null;
 }
 
-export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, transactions, customCategories, paymentAccounts, onClose, onSave }: TransactionFormProps) {
+export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, transactions, customCategories, paymentAccounts, savedPlaces, onClose, onSave }: TransactionFormProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ReceiptUpload | undefined>();
   const [removeReceipt, setRemoveReceipt] = useState(false);
@@ -222,7 +223,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
           <button className="primary-button full-width" type="submit" disabled={isSubmitting}>{isSubmitting ? <><ButtonSpinner />Saving…</> : transaction ? "Save changes" : `Add ${kind}`}</button>
         </form>
       </section>
-      <LocationPicker open={locationPickerOpen} value={location} recentLocations={recentLocations} onClose={() => setLocationPickerOpen(false)} onSelect={(next) => { setLocation(next); setValue("area", next.label, { shouldValidate: true }); }} />
+      <LocationPicker open={locationPickerOpen} value={location} recentLocations={recentLocations} savedPlaces={savedPlaces} onClose={() => setLocationPickerOpen(false)} onSelect={(next) => { setLocation(next); setValue("area", next.label, { shouldValidate: true }); }} />
     </div>
   );
 }

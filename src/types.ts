@@ -93,6 +93,21 @@ export interface PaymentAccount {
   type: PaymentAccountType;
   provider: string;
   label: string;
+  balanceMinor: number;
+  balanceAsOf: string;
+  balanceRecordedAt: string;
+  currentBalanceMinor: number;
+  createdAt: string;
+}
+
+export interface AccountTransfer {
+  id: string;
+  userId: string;
+  fromAccountId: string;
+  toAccountId: string;
+  amountMinor: number;
+  occurredOn: string;
+  note: string;
   createdAt: string;
 }
 

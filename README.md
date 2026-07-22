@@ -19,6 +19,13 @@ A mobile-first personal income and expense tracker with monthly reporting, plann
 - Settling an item can optionally create the matching income or expense ledger entry.
 - JPG, PNG, WebP, and PDF receipts up to 3 MB can be kept privately with a transaction or due.
 
+## Account balances and transfers
+
+- Track a manually checked balance for each supported bank or digital wallet.
+- Account balances are snapshots: transactions and transfers recorded after the snapshot adjust the displayed current balance automatically.
+- Move money between tracked accounts with transfers; transfers do not count as income or expenses.
+- The dashboard and Reports page show the total tracked balance and how it is distributed across accounts.
+
 ## Stack
 
 - Next.js 16 App Router + React 19 + TypeScript

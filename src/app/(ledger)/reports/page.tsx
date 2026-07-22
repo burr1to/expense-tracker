@@ -11,6 +11,7 @@ export default function ReportsRoute() {
     currency={ledger.profile.currency}
     transactions={ledger.transactions}
     customCategories={ledger.customCategories}
+    paymentAccounts={ledger.paymentAccounts}
     dueItems={ledger.dueItems}
     onMonthChange={setMonth}
     onAdd={openAdd}

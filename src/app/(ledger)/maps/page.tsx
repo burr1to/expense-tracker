@@ -10,6 +10,10 @@ export default function MapsRoute() {
     currency={ledger.profile.currency}
     transactions={ledger.transactions}
     customCategories={ledger.customCategories}
+    paymentAccounts={ledger.paymentAccounts}
+    savedPlaces={ledger.savedPlaces}
+    onSaveSavedPlace={ledger.saveSavedPlace}
+    onDeleteSavedPlace={ledger.deleteSavedPlace}
     onAdd={openAdd}
     onEdit={openEdit}
   />;

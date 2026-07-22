@@ -1,6 +1,7 @@
-import { DownloadSimple, FunnelSimple, MagnifyingGlass, Plus, UploadSimple, X } from "@phosphor-icons/react";
-import { NumberInput, Select, TextInput } from "@mantine/core";
-import { format } from "date-fns";
+import { CaretDown, DownloadSimple, FunnelSimple, MagnifyingGlass, Plus, UploadSimple, X } from "@phosphor-icons/react";
+import { NumberInput, Popover, Select, TextInput } from "@mantine/core";
+import { DatePicker } from "@mantine/dates";
+import { format, isSameMonth, parseISO, startOfMonth } from "date-fns";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState } from "../components/EmptyState";
 import { ButtonSpinner } from "../components/ButtonSpinner";
@@ -16,7 +17,7 @@ interface TransactionsPageProps {
   month: Date;
   currency: CurrencyCode; transactions: LedgerTransaction[]; customCategories: CustomCategory[]; paymentAccounts: PaymentAccount[];
   onMonthChange: (date: Date) => void;
-  onAdd: () => void; onDuplicate: (transaction: LedgerTransaction) => void; onEdit: (transaction: LedgerTransaction) => void; onDelete: (transaction: LedgerTransaction) => Promise<void>;
+  onAdd: (occurredOn: string) => void; onDuplicate: (transaction: LedgerTransaction) => void; onEdit: (transaction: LedgerTransaction) => void; onDelete: (transaction: LedgerTransaction) => Promise<void>;
   onImport: (drafts: TransactionDraft[]) => Promise<number>;
 }
 
@@ -26,31 +27,43 @@ export function TransactionsPage({ month, currency, transactions, customCategori
   const [preview, setPreview] = useState<TransactionDraft[] | null>(null); const [importErrors, setImportErrors] = useState<string[]>([]); const [importing, setImporting] = useState(false); const fileRef = useRef<HTMLInputElement>(null);
   const templateHref = `data:text/csv;charset=utf-8,${encodeURIComponent(`\uFEFF${TRANSACTION_CSV_TEMPLATE}`)}`;
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedDay, setSelectedDay] = useState<Date>(() => isSameMonth(month, new Date()) ? new Date() : startOfMonth(month));
+  const selectedDayKey = format(selectedDay, "yyyy-MM-dd");
   const filterCategories = useMemo(() => kind === "all" ? [...CATEGORIES, ...customCategories] : [...allCategoriesFor(kind, customCategories)], [kind, customCategories]);
   useEffect(() => { if (category !== "all" && !filterCategories.some((item) => item.id === category)) setCategory("all"); }, [category, filterCategories]);
   const sorted = useMemo(() => [...transactions]
-    .filter((item) => isInMonth(item.occurredOn, month))
+    .filter((item) => isInMonth(item.occurredOn, month) && item.occurredOn === selectedDayKey)
     .filter((item) => kind === "all" || item.kind === kind)
     .filter((item) => category === "all" || item.category === category)
     .filter((item) => !from || item.occurredOn >= from).filter((item) => !to || item.occurredOn <= to)
     .filter((item) => !min || item.amountMinor >= Number(min) * 100).filter((item) => !max || item.amountMinor <= Number(max) * 100)
     .filter((item) => paymentMode === "all" || item.paymentMode === paymentMode)
     .filter((item) => `${item.note} ${getCategory(item.category, customCategories).label} ${item.subcategory ?? ""} ${item.area ?? ""} ${item.paymentAccount?.provider ?? ""}`.toLowerCase().includes(query.toLowerCase()))
-    .sort((a, b) => `${b.occurredOn}${b.createdAt}`.localeCompare(`${a.occurredOn}${a.createdAt}`)), [transactions, month, kind, category, from, to, min, max, paymentMode, query, customCategories]);
+    .sort((a, b) => `${b.occurredOn}${b.createdAt}`.localeCompare(`${a.occurredOn}${a.createdAt}`)), [transactions, month, selectedDayKey, kind, category, from, to, min, max, paymentMode, query, customCategories]);
 
   const readFile = async (file: File) => { const result = parseTransactionCsv(await file.text(), customCategories, paymentAccounts); setPreview(result.rows); setImportErrors(result.errors); };
   const importRows = async () => { if (!preview?.length) return; setImporting(true); try { await onImport(preview); setPreview(null); setImportErrors([]); } finally { setImporting(false); } };
   const remove = async (transaction: LedgerTransaction) => { if (deletingId) return; setDeletingId(transaction.id); try { await onDelete(transaction); } finally { setDeletingId(null); } };
   const clearFilters = () => { setCategory("all"); setFrom(""); setTo(""); setMin(""); setMax(""); setPaymentMode("all"); };
   const hasActiveFilters = category !== "all" || Boolean(from || to || min || max) || paymentMode !== "all";
+  const changeMonth = (nextMonth: Date) => {
+    onMonthChange(nextMonth);
+    if (!isSameMonth(selectedDay, nextMonth)) setSelectedDay(isSameMonth(nextMonth, new Date()) ? new Date() : startOfMonth(nextMonth));
+  };
+  const selectDay = (value: string | null) => {
+    if (!value) return;
+    const nextDay = parseISO(value);
+    setSelectedDay(nextDay);
+    if (!isSameMonth(month, nextDay)) onMonthChange(nextDay);
+  };
 
   return <div className="page list-page">
-    <header className="page-header"><div><span className="eyebrow">Your ledger</span><h1>Transactions</h1><p>Every income and expense entry, in one clear timeline.</p></div><div className="transaction-actions"><div className="header-actions"><input ref={fileRef} className="visually-hidden" type="file" accept=".csv,text/csv" onChange={(event) => event.target.files?.[0] && void readFile(event.target.files[0])} /><button className="secondary-button" onClick={() => fileRef.current?.click()}><UploadSimple size={18} />Import CSV</button><button className="primary-button" onClick={onAdd}><Plus size={18} />Add transaction</button></div><div className="csv-template-help"><span>New to CSV imports?</span><a href={templateHref} download="transaction-import-template.csv"><DownloadSimple size={14} />Download CSV template</a></div></div></header>
+    <header className="page-header"><div><span className="eyebrow">Your ledger</span><h1>Transactions</h1><p>Every income and expense entry, in one clear timeline.</p></div><div className="transaction-actions"><div className="header-actions"><input ref={fileRef} className="visually-hidden" type="file" accept=".csv,text/csv" onChange={(event) => event.target.files?.[0] && void readFile(event.target.files[0])} /><button className="secondary-button" onClick={() => fileRef.current?.click()}><UploadSimple size={18} />Import CSV</button><button className="primary-button" onClick={() => onAdd(selectedDayKey)}><Plus size={18} />Add transaction</button></div><div className="csv-template-help"><span>New to CSV imports?</span><a href={templateHref} download="transaction-import-template.csv"><DownloadSimple size={14} />Download CSV template</a></div></div></header>
     <section className="transaction-scope">
-      <div><span className="section-label">Viewing month</span><MonthPicker month={month} onChange={onMonthChange} /></div>
+      <div><span className="section-label">Viewing month</span><MonthPicker month={month} onChange={changeMonth} /><Popover position="bottom-start" shadow="md" withArrow><Popover.Target><button className="current-date" aria-label={`Choose day. Selected ${format(selectedDay, "EEEE, MMMM d, yyyy")}`}>{format(selectedDay, "EEEE, MMMM d")} <CaretDown size={13} weight="bold" /></button></Popover.Target><Popover.Dropdown className="day-picker-popover"><DatePicker value={selectedDayKey} onChange={selectDay} firstDayOfWeek={0} /></Popover.Dropdown></Popover></div>
       <nav className="filter-tabs" aria-label="Transaction type">{(["all", "expense", "income"] as const).map((value) => <button key={value} className={kind === value ? "active" : ""} aria-pressed={kind === value} onClick={() => setKind(value)}>{value[0].toUpperCase() + value.slice(1)}</button>)}</nav>
     </section>
-    <section className="toolbar"><TextInput className="search-field" aria-label="Search transactions in selected month" leftSection={<MagnifyingGlass size={19} />} rightSection={query ? <button onClick={() => setQuery("")} aria-label="Clear search"><X size={17} /></button> : null} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${format(month, "MMMM")} transactions`} /></section>
+    <section className="toolbar"><TextInput className="search-field" aria-label="Search transactions on selected day" leftSection={<MagnifyingGlass size={19} />} rightSection={query ? <button onClick={() => setQuery("")} aria-label="Clear search"><X size={17} /></button> : null} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${format(selectedDay, "MMMM d")} transactions`} /></section>
     <section className="advanced-filters" aria-label="Transaction filters">
       <div className="filter-panel-heading"><span><FunnelSimple size={18} /><strong>Filters</strong></span><button className="text-button clear-filter-button" disabled={!hasActiveFilters} onClick={clearFilters}>Clear filters</button></div>
       <Select label={kind === "all" ? "Category" : `${kind === "expense" ? "Expense" : "Income"} category`} value={category} onChange={(value) => value && setCategory(value)} data={[{ value: "all", label: "All categories" }, ...filterCategories.map((item) => ({ value: item.id, label: item.label }))]} searchable allowDeselect={false} />
@@ -60,7 +73,7 @@ export function TransactionsPage({ month, currency, transactions, customCategori
       <NumberInput label="Max amount" aria-label={`Maximum amount in ${currency}`} leftSection={<span className="currency-prefix">{currency}</span>} leftSectionWidth={52} value={max} onChange={(value) => setMax(String(value))} min={0} thousandSeparator="," decimalScale={2} />
       <Select label="Payment mode" value={paymentMode} onChange={(value) => value && setPaymentMode(value as PaymentMode | "all")} data={[{ value: "all", label: "All payment modes" }, { value: "cash", label: "Cash" }, { value: "cheque", label: "Cheque" }, { value: "online", label: "Online payment" }]} allowDeselect={false} />
     </section>
-    <section className="ledger-list"><div className="ledger-list-heading"><span>{sorted.length} {sorted.length === 1 ? "entry" : "entries"} in {format(month, "MMMM yyyy")}</span><span>Newest first</span></div>{sorted.map((transaction) => <TransactionRow key={transaction.id} transaction={transaction} currency={currency} customCategories={customCategories} onDuplicate={onDuplicate} onEdit={onEdit} onDelete={(item) => void remove(item)} deletePending={deletingId === transaction.id} />)}{!sorted.length && <EmptyState title={`No ${kind === "all" ? "" : `${kind} `}entries in ${format(month, "MMMM")}`} message="Try a different filter or month, or add a new transaction." action={<button className="primary-button small" onClick={onAdd}><Plus size={17} />Add transaction</button>} />}</section>
+    <section className="ledger-list"><div className="ledger-list-heading"><span>{sorted.length} {sorted.length === 1 ? "entry" : "entries"} on {format(selectedDay, "MMMM d, yyyy")}</span><span>Newest first</span></div>{sorted.map((transaction) => <TransactionRow key={transaction.id} transaction={transaction} currency={currency} customCategories={customCategories} onDuplicate={onDuplicate} onEdit={onEdit} onDelete={(item) => void remove(item)} deletePending={deletingId === transaction.id} />)}{!sorted.length && <EmptyState title={`No ${kind === "all" ? "" : `${kind} `}entries on ${format(selectedDay, "MMMM d")}`} message="Try another day or filter, or add a new transaction." action={<button className="primary-button small" onClick={() => onAdd(selectedDayKey)}><Plus size={17} />Add transaction</button>} />}</section>
     {preview && <div className="modal-backdrop"><section className="import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-title" aria-busy={importing}><header><div><span className="eyebrow">CSV import</span><h2 id="import-title">Review before importing</h2></div><button className="icon-button" disabled={importing} onClick={() => setPreview(null)} aria-label="Close"><X size={20} /></button></header>{importErrors.length > 0 && <div className="import-errors"><strong>{importErrors.length} rows need attention</strong>{importErrors.slice(0, 5).map((error) => <span key={error}>{error}</span>)}</div>}<div className="import-preview">{preview.slice(0, 8).map((row, index) => <div key={`${row.occurredOn}-${index}`}><span>{row.occurredOn}</span><strong>{row.note || getCategory(row.category, customCategories).label}</strong><span>{row.kind}</span><span>{row.amount} {currency}</span></div>)}</div><p>{preview.length} valid rows ready. Invalid rows will not be imported.</p><div className="dialog-actions"><button className="secondary-button" disabled={importing} onClick={() => setPreview(null)}>Cancel</button><button className="primary-button" disabled={!preview.length || importing} onClick={() => void importRows()}>{importing ? <><ButtonSpinner />Importing…</> : <><DownloadSimple size={17} />Import {preview.length} rows</>}</button></div></section></div>}
   </div>;
 }

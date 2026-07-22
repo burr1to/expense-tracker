@@ -24,6 +24,7 @@ export default function DashboardRoute() {
     dueItems={ledger.dueItems}
     goals={ledger.goals}
     customCategories={ledger.customCategories}
+    paymentAccounts={ledger.paymentAccounts}
     onMonthChange={setMonth}
     onAdd={openAddForDate}
     onSelectedDayChange={setHomeSelectedDate}

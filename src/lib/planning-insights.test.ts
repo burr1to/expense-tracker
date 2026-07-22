@@ -130,6 +130,7 @@ describe("monthly breathing room", () => {
         due({ id: "receivable", kind: "receivable", amountMinor: 500000 }),
       ],
       new Date(2026, 6, 1),
+      new Date(2026, 6, 20),
     );
 
     expect(result).toEqual({
@@ -141,5 +142,17 @@ describe("monthly breathing room", () => {
       projectedExpensesMinor: 5500000,
       projectedNetMinor: 4000000,
     });
+  });
+
+  it("includes a recurring payment due shortly after the current month", () => {
+    const result = calculateMonthlyBreathingRoom(
+      [],
+      [recurring({ id: "emi", amountMinor: 380000, nextDueOn: "2026-08-04" })],
+      [],
+      new Date(2026, 6, 1),
+      new Date(2026, 6, 20),
+    );
+
+    expect(result.upcomingExpensesMinor).toBe(380000);
   });
 });

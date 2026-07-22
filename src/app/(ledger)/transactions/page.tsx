@@ -8,7 +8,7 @@ export default function TransactionsRoute() {
     ledger,
     month,
     setMonth,
-    openAdd,
+    openAddForDate,
     openDuplicate,
     openEdit,
     removeTransaction,
@@ -21,7 +21,7 @@ export default function TransactionsRoute() {
     customCategories={ledger.customCategories}
     paymentAccounts={ledger.paymentAccounts}
     onMonthChange={setMonth}
-    onAdd={openAdd}
+    onAdd={openAddForDate}
     onDuplicate={openDuplicate}
     onEdit={openEdit}
     onDelete={removeTransaction}

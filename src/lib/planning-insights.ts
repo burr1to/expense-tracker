@@ -1,4 +1,4 @@
-import { compareAsc, getDate, getDaysInMonth, startOfMonth } from "date-fns";
+import { addDays, compareAsc, format, getDate, getDaysInMonth, isSameMonth, startOfMonth } from "date-fns";
 import { dueRemaining } from "./dues";
 import { isInMonth } from "./dates";
 import type { Budget, DueItem, LedgerTransaction, RecurringEntry } from "../types";
@@ -53,6 +53,15 @@ const upcomingRecurringForMonth = (entries: readonly RecurringEntry[], month: Da
 
 const upcomingDuesForMonth = (items: readonly DueItem[], month: Date) =>
   items.filter((item) => item.status === "open" && isInMonth(item.dueOn, month));
+
+const upcomingRecurringForBreathingRoom = (entries: readonly RecurringEntry[], month: Date, today: Date) => {
+  if (!isSameMonth(month, today)) return upcomingRecurringForMonth(entries, month);
+
+  // The dashboard is a near-term cash-flow view. Include overdue entries and
+  // the next 30 days so a payment due just after month-end is still visible.
+  const through = format(addDays(today, 30), "yyyy-MM-dd");
+  return entries.filter((entry) => entry.active && entry.nextDueOn <= through);
+};
 
 export function calculateBudgetPacing(
   budgets: readonly Budget[],
@@ -133,9 +142,10 @@ export function calculateMonthlyBreathingRoom(
   recurringEntries: readonly RecurringEntry[],
   dueItems: readonly DueItem[],
   month: Date,
+  today = new Date(),
 ): MonthlyBreathingRoom {
   const monthTransactions = transactions.filter((item) => isInMonth(item.occurredOn, month));
-  const recurring = upcomingRecurringForMonth(recurringEntries, month);
+  const recurring = upcomingRecurringForBreathingRoom(recurringEntries, month, today);
   const dues = upcomingDuesForMonth(dueItems, month);
   const loggedIncomeMinor = sum(monthTransactions.filter((item) => item.kind === "income").map((item) => item.amountMinor));
   const loggedExpensesMinor = sum(monthTransactions.filter((item) => item.kind === "expense").map((item) => item.amountMinor));

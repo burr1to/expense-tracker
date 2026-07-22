@@ -1,4 +1,4 @@
-import { ArrowRight, CalendarBlank, CaretDown, Check, Flag, Lightbulb, Plus, Repeat } from "@phosphor-icons/react";
+import { ArrowRight, Bank, CalendarBlank, CaretDown, Check, Flag, Lightbulb, Plus, Repeat } from "@phosphor-icons/react";
 import { Popover } from "@mantine/core";
 import { DatePicker } from "@mantine/dates";
 import { format, isSameMonth, parseISO, startOfMonth } from "date-fns";
@@ -14,7 +14,8 @@ import { isInMonth } from "../lib/dates";
 import { dailyExpenseSeries, summarizeLedger } from "../lib/ledger";
 import { generateInsights } from "../lib/insights";
 import { calculateBudgetPacing, calculateMonthlyBreathingRoom } from "../lib/planning-insights";
-import type { AppView, Budget, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, RecurringEntry, SavingsGoal } from "../types";
+import { totalCurrentBalance } from "../lib/account-balances";
+import type { AppView, Budget, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount, RecurringEntry, SavingsGoal } from "../types";
 
 interface DashboardPageProps {
   month: Date;
@@ -26,6 +27,7 @@ interface DashboardPageProps {
   dueItems: DueItem[];
   goals: SavingsGoal[];
   customCategories: CustomCategory[];
+  paymentAccounts: PaymentAccount[];
   onMonthChange: (date: Date) => void;
   onAdd: (occurredOn: string) => void;
   onSelectedDayChange: (occurredOn: string) => void;
@@ -33,7 +35,7 @@ interface DashboardPageProps {
   onConfirmRecurring: (id: string) => Promise<void>;
 }
 
-export function DashboardPage({ month, focus, currency, transactions, budgets, recurringEntries, dueItems, goals, customCategories, onMonthChange, onAdd, onSelectedDayChange, onNavigate, onConfirmRecurring }: DashboardPageProps) {
+export function DashboardPage({ month, focus, currency, transactions, budgets, recurringEntries, dueItems, goals, customCategories, paymentAccounts, onMonthChange, onAdd, onSelectedDayChange, onNavigate, onConfirmRecurring }: DashboardPageProps) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<Date>(() => isSameMonth(month, new Date()) ? new Date() : startOfMonth(month));
   useEffect(() => {
@@ -41,6 +43,7 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
   }, [focus]);
   const monthTransactions = transactions.filter((item) => isInMonth(item.occurredOn, month));
   const summary = summarizeLedger(monthTransactions, customCategories);
+  const trackedBalance = totalCurrentBalance(paymentAccounts);
   const chartData = dailyExpenseSeries(monthTransactions).slice(-7);
   const selectedDayKey = format(selectedDay, "yyyy-MM-dd");
   useEffect(() => { onSelectedDayChange(selectedDayKey); }, [onSelectedDayChange, selectedDayKey]);
@@ -103,6 +106,11 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
         <div><span>Income</span><strong className="income">{formatMoney(summary.income, currency)}</strong></div>
         <div><span>Expenses</span><strong className="expense">{formatMoney(summary.expenses, currency)}</strong></div>
         <div><span>Net saved</span><strong>{formatMoney(summary.saved, currency)}</strong></div>
+      </section>
+
+      <section className="account-balance-card" aria-label="Tracked account balances">
+        <div className="account-balance-heading"><div><span className="section-label">Your money right now</span><h2>{formatMoney(trackedBalance, currency)}</h2><p>Across {paymentAccounts.length} manually tracked {paymentAccounts.length === 1 ? "account" : "accounts"}</p></div><Bank size={27} weight="duotone" /></div>
+        {paymentAccounts.length ? <div className="account-balance-list">{paymentAccounts.map((account) => <div key={account.id}><span><strong>{account.label || account.provider}</strong><small>Checked {account.balanceAsOf}</small></span><strong>{formatMoney(account.currentBalanceMinor, currency)}</strong></div>)}</div> : <p className="account-balance-empty">Add a bank or wallet in Profile to see your live tracked balance here.</p>}
       </section>
 
       <section className="savings-hero">

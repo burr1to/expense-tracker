@@ -166,6 +166,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         transactions={ledger.transactions}
         customCategories={ledger.customCategories}
         paymentAccounts={ledger.paymentAccounts}
+        savedPlaces={ledger.savedPlaces}
         onClose={() => setFormOpen(false)}
         onSave={saveTransaction}
       />

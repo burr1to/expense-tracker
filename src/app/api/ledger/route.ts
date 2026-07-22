@@ -8,6 +8,8 @@ import { hashPin, verifyPin } from "../../../lib/pin";
 import { NEPAL_MOBILE_BANKS } from "../../../lib/payment-accounts";
 import { removeStoredReceipts, verifyStoredReceipt } from "../../../lib/receipt-storage";
 import { KATHMANDU_BOUNDS } from "../../../lib/kathmandu-locations";
+import { withCurrentAccountBalance } from "../../../lib/account-balances";
+import type { AccountTransfer, LedgerTransaction, PaymentAccount } from "../../../types";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +23,12 @@ const locationSchema = z.object({
   savedPlaceId: z.string().nullable(),
   savePlaceName: z.string().trim().min(1).max(60).optional(),
 }).nullable();
+const savedPlaceSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  address: z.string().trim().max(240),
+  latitude: z.number().min(KATHMANDU_BOUNDS.south).max(KATHMANDU_BOUNDS.north),
+  longitude: z.number().min(KATHMANDU_BOUNDS.west).max(KATHMANDU_BOUNDS.east),
+});
 const transactionSchema = z.object({
   kind: z.enum(["income", "expense"]), category: z.string().min(1).max(80), amountMinor: z.number().int().positive(),
   occurredOn: z.string().date(), note: z.string().max(240), subcategory: z.string().trim().max(80).nullable(),
@@ -36,7 +44,11 @@ const budgetSchema = z.object({ monthKey: z.string().regex(/^\d{4}-\d{2}$/), cat
 const recurringSchema = z.object({ kind: z.enum(["income", "expense"]), category: z.string().min(1).max(80), amountMinor: z.number().int().positive(), note: z.string().max(240), tags: z.array(z.string().max(40)).max(8), dayOfMonth: z.number().int().min(1).max(28), nextDueOn: z.string().date() });
 const goalSchema = z.object({ name: z.string().trim().min(1).max(80), targetMinor: z.number().int().positive(), savedMinor: z.number().int().min(0), targetDate: z.string().date().nullable() });
 const categorySchema = z.object({ name: z.string().trim().min(1).max(30), kind: z.enum(["income", "expense", "both"]), color: z.string().regex(/^#[0-9a-fA-F]{6}$/) });
-const paymentAccountSchema = z.object({ type: z.enum(["mobile_banking", "esewa", "khalti", "connect_ips"]), provider: z.string().trim().min(1).max(100), label: z.string().trim().max(60) });
+const paymentAccountSchema = z.object({ type: z.enum(["mobile_banking", "esewa", "khalti", "connect_ips"]), provider: z.string().trim().min(1).max(100), label: z.string().trim().max(60), balanceMinor: z.number().int(), balanceAsOf: z.string().date() });
+const accountBalanceSchema = z.object({ balanceMinor: z.number().int(), balanceAsOf: z.string().date() });
+const transferSchema = z.object({ fromAccountId: z.string().min(1), toAccountId: z.string().min(1), amountMinor: z.number().int().positive(), occurredOn: z.string().date(), note: z.string().trim().max(240) }).superRefine((value, context) => {
+  if (value.fromAccountId === value.toAccountId) context.addIssue({ code: "custom", path: ["toAccountId"], message: "Choose two different accounts." });
+});
 const profileSchema = z.object({ displayName: z.string().trim().min(1).max(50), currency: z.enum(["NPR", "USD", "AUD"]), theme: z.enum(["light", "dark", "system"]), hideAmounts: z.boolean(), autoLockMinutes: z.number().int().min(0).max(120) });
 const dueSchema = z.object({ kind: z.enum(["payment", "receivable", "lent", "borrowed"]), title: z.string().trim().min(1).max(100), person: z.string().trim().max(80), amountMinor: z.number().int().positive(), category: z.string().min(1).max(80), occurredOn: z.string().date().nullable(), dueOn: z.string().date(), remindOn: z.string().date().nullable(), note: z.string().trim().max(300), receipt: receiptSchema.optional() });
 const duePaymentSchema = z.object({ amountMinor: z.number().int().positive(), occurredOn: z.string().date(), note: z.string().trim().max(240), addToLedger: z.boolean() });
@@ -57,9 +69,14 @@ async function userId() {
 }
 
 function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
+  const transactions: LedgerTransaction[] = data.transactions.map((item) => ({ ...item, kind: item.kind as LedgerTransaction["kind"], paymentMode: item.paymentMode as LedgerTransaction["paymentMode"], locationSource: item.locationSource as LedgerTransaction["locationSource"], occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString(), paymentAccount: null }));
+  const transfers: AccountTransfer[] = data.transfers.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString() }));
+  const paymentAccounts: PaymentAccount[] = data.paymentAccounts.map((item) => serializeAccount(item, transactions, transfers));
+  const accountById = new Map(paymentAccounts.map((item) => [item.id, item]));
+  for (const transaction of transactions) if (transaction.paymentAccountId) transaction.paymentAccount = accountById.get(transaction.paymentAccountId) ?? null;
   return {
     profile: { id: data.user.id, displayName: data.user.name, currency: data.user.currency, theme: data.user.theme, hideAmounts: data.user.hideAmounts, autoLockMinutes: data.user.autoLockMinutes, hasPin: Boolean(data.user.pinHash) },
-    transactions: data.transactions.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn), createdAt: item.createdAt.toISOString(), paymentAccount: item.paymentAccount ? { ...item.paymentAccount, createdAt: item.paymentAccount.createdAt.toISOString() } : null })),
+    transactions,
     budgets: data.budgets,
     recurringEntries: data.recurring.map((item) => ({ ...item, nextDueOn: dateOnly(item.nextDueOn) })),
     goals: data.goals.map((item) => ({
@@ -68,15 +85,21 @@ function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
       contributions: item.contributions.map((contribution) => ({ ...contribution, createdAt: contribution.createdAt.toISOString() })),
     })),
     customCategories: data.categories.map((item) => ({ ...item, label: item.name, custom: true })),
-    paymentAccounts: data.paymentAccounts.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })),
+    paymentAccounts,
     savedPlaces: data.savedPlaces.map((item) => ({ ...item, createdAt: item.createdAt.toISOString(), lastUsedAt: item.lastUsedAt.toISOString() })),
+    transfers,
     dueItems: data.dueItems.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn), dueOn: dateOnly(item.dueOn), remindOn: dateOnly(item.remindOn), snoozedUntil: dateOnly(item.snoozedUntil), completedOn: dateOnly(item.completedOn), createdAt: item.createdAt.toISOString(), payments: item.payments.map((payment) => ({ ...payment, occurredOn: dateOnly(payment.occurredOn), createdAt: payment.createdAt.toISOString() })) })),
   };
 }
 
+function serializeAccount(item: Awaited<ReturnType<typeof loadLedger>>["paymentAccounts"][number], transactions: readonly LedgerTransaction[], transfers: readonly AccountTransfer[]): PaymentAccount {
+  const account: PaymentAccount = { id: item.id, userId: item.userId, type: item.type as PaymentAccount["type"], provider: item.provider, label: item.label, balanceMinor: item.balanceMinor, balanceAsOf: dateOnly(item.balanceAsOf)!, balanceRecordedAt: item.balanceRecordedAt.toISOString(), currentBalanceMinor: 0, createdAt: item.createdAt.toISOString() };
+  return withCurrentAccountBalance(account, transactions, transfers);
+}
+
 async function loadLedger(id: string) {
   const db = getPrisma();
-  const [user, transactions, budgets, recurring, goals, categories, paymentAccounts, savedPlaces, dueItems] = await Promise.all([
+  const [user, transactions, budgets, recurring, goals, categories, paymentAccounts, savedPlaces, transfers, dueItems] = await Promise.all([
     db.user.findUniqueOrThrow({ where: { id }, select: { id: true, name: true, currency: true, theme: true, hideAmounts: true, autoLockMinutes: true, pinHash: true } }),
     db.transaction.findMany({ where: { userId: id }, orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }], include: { receipt: { select: receiptSelect }, paymentAccount: true } }),
     db.budget.findMany({ where: { userId: id }, orderBy: { monthKey: "desc" } }),
@@ -85,9 +108,10 @@ async function loadLedger(id: string) {
     db.customCategory.findMany({ where: { userId: id }, orderBy: { name: "asc" } }),
     db.paymentAccount.findMany({ where: { userId: id }, orderBy: { createdAt: "asc" } }),
     db.savedPlace.findMany({ where: { userId: id }, orderBy: { lastUsedAt: "desc" } }),
+    db.accountTransfer.findMany({ where: { userId: id }, orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }] }),
     db.dueItem.findMany({ where: { userId: id }, orderBy: [{ status: "asc" }, { dueOn: "asc" }], include: { payments: { orderBy: { occurredOn: "desc" } }, receipt: { select: receiptSelect } } }),
   ]);
-  return { user, transactions, budgets, recurring, goals, categories, paymentAccounts, savedPlaces, dueItems };
+  return { user, transactions, budgets, recurring, goals, categories, paymentAccounts, savedPlaces, transfers, dueItems };
 }
 
 export async function GET() {
@@ -179,6 +203,17 @@ export async function POST(request: Request) {
         await removeStoredReceipts([receipt?.storagePath]);
         break;
       }
+      case "saveSavedPlace": {
+        const value = savedPlaceSchema.parse(input.payload);
+        if (recordId) await db.savedPlace.updateMany({ where: { id: recordId, userId: id }, data: value });
+        else await db.savedPlace.create({ data: { ...value, userId: id } });
+        break;
+      }
+      case "deleteSavedPlace": {
+        if (!recordId) throw new Error("Missing saved place id.");
+        await db.savedPlace.deleteMany({ where: { id: recordId, userId: id } });
+        break;
+      }
       case "saveBudget": {
         const value = budgetSchema.parse(input.payload);
         if (recordId) await db.budget.updateMany({ where: { id: recordId, userId: id }, data: value });
@@ -250,10 +285,28 @@ export async function POST(request: Request) {
         const value = paymentAccountSchema.parse(input.payload);
         if (value.type !== "mobile_banking" && value.provider !== value.type) throw new Error("The payment provider does not match the account type.");
         if (value.type === "mobile_banking" && !NEPAL_MOBILE_BANKS.includes(value.provider as typeof NEPAL_MOBILE_BANKS[number])) throw new Error("Choose a bank from the supported Nepal bank list.");
-        await db.paymentAccount.create({ data: { ...value, userId: id } });
+        await db.paymentAccount.create({ data: { ...value, balanceAsOf: asDate(value.balanceAsOf), balanceRecordedAt: new Date(), userId: id } });
+        break;
+      }
+      case "updatePaymentAccountBalance": {
+        if (!recordId) throw new Error("Missing payment account id.");
+        const value = accountBalanceSchema.parse(input.payload);
+        await db.paymentAccount.updateMany({ where: { id: recordId, userId: id }, data: { balanceMinor: value.balanceMinor, balanceAsOf: asDate(value.balanceAsOf), balanceRecordedAt: new Date() } });
         break;
       }
       case "deletePaymentAccount": await db.paymentAccount.deleteMany({ where: { id: recordId, userId: id } }); break;
+      case "saveTransfer": {
+        const value = transferSchema.parse(input.payload);
+        const owned = await db.paymentAccount.findMany({ where: { userId: id, id: { in: [value.fromAccountId, value.toAccountId] } }, select: { id: true } });
+        if (owned.length !== 2) throw new Error("Both transfer accounts must belong to you.");
+        await db.accountTransfer.create({ data: { ...value, occurredOn: asDate(value.occurredOn), userId: id } });
+        break;
+      }
+      case "deleteTransfer": {
+        if (!recordId) throw new Error("Missing transfer id.");
+        await db.accountTransfer.deleteMany({ where: { id: recordId, userId: id } });
+        break;
+      }
       case "saveDueItem": {
         const value = dueSchema.parse(input.payload);
         if (value.remindOn && value.remindOn > value.dueOn) return NextResponse.json({ error: "The reminder must be on or before the due date." }, { status: 400 });
