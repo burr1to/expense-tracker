@@ -25,10 +25,12 @@ export default function DashboardRoute() {
     goals={ledger.goals}
     customCategories={ledger.customCategories}
     paymentAccounts={ledger.paymentAccounts}
+    hasPin={ledger.profile.hasPin}
     onMonthChange={setMonth}
     onAdd={openAddForDate}
     onSelectedDayChange={setHomeSelectedDate}
     onNavigate={navigate}
     onConfirmRecurring={ledger.confirmRecurring}
+    onVerifyPin={ledger.verifyPin}
   />;
 }

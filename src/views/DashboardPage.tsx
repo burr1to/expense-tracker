@@ -1,5 +1,5 @@
-import { ArrowRight, Bank, CalendarBlank, CaretDown, Check, Flag, Lightbulb, Plus, Repeat } from "@phosphor-icons/react";
-import { Popover } from "@mantine/core";
+import { ArrowRight, Bank, CalendarBlank, CaretDown, Check, Flag, Lightbulb, LockKey, Plus, Repeat } from "@phosphor-icons/react";
+import { Modal, PasswordInput, Popover } from "@mantine/core";
 import { DatePicker } from "@mantine/dates";
 import { format, isSameMonth, parseISO, startOfMonth } from "date-fns";
 import { useEffect, useState } from "react";
@@ -28,16 +28,23 @@ interface DashboardPageProps {
   goals: SavingsGoal[];
   customCategories: CustomCategory[];
   paymentAccounts: PaymentAccount[];
+  hasPin: boolean;
   onMonthChange: (date: Date) => void;
   onAdd: (occurredOn: string) => void;
   onSelectedDayChange: (occurredOn: string) => void;
   onNavigate: (view: AppView) => void;
   onConfirmRecurring: (id: string) => Promise<void>;
+  onVerifyPin: (pin: string) => Promise<void>;
 }
 
-export function DashboardPage({ month, focus, currency, transactions, budgets, recurringEntries, dueItems, goals, customCategories, paymentAccounts, onMonthChange, onAdd, onSelectedDayChange, onNavigate, onConfirmRecurring }: DashboardPageProps) {
+export function DashboardPage({ month, focus, currency, transactions, budgets, recurringEntries, dueItems, goals, customCategories, paymentAccounts, hasPin, onMonthChange, onAdd, onSelectedDayChange, onNavigate, onConfirmRecurring, onVerifyPin }: DashboardPageProps) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<Date>(() => isSameMonth(month, new Date()) ? new Date() : startOfMonth(month));
+  const [balancesUnlocked, setBalancesUnlocked] = useState(false);
+  const [balanceUnlockOpen, setBalanceUnlockOpen] = useState(false);
+  const [balancePin, setBalancePin] = useState("");
+  const [balanceUnlockError, setBalanceUnlockError] = useState<string | null>(null);
+  const [balanceUnlocking, setBalanceUnlocking] = useState(false);
   useEffect(() => {
     if (focus) setSelectedDay(parseISO(focus.date));
   }, [focus]);
@@ -80,6 +87,29 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
     setSelectedDay(nextDay);
     if (!isSameMonth(month, nextDay)) onMonthChange(nextDay);
   };
+  const closeBalanceUnlock = () => {
+    if (balanceUnlocking) return;
+    setBalanceUnlockOpen(false);
+    setBalancePin("");
+    setBalanceUnlockError(null);
+  };
+  const unlockBalances = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (balanceUnlocking || balancePin.length < 4) return;
+    setBalanceUnlocking(true);
+    try {
+      setBalanceUnlockError(null);
+      await onVerifyPin(balancePin);
+      setBalancesUnlocked(true);
+      setBalanceUnlockOpen(false);
+      setBalancePin("");
+    } catch (caught) {
+      setBalanceUnlockError(caught instanceof Error ? caught.message : "Could not unlock account balances.");
+      setBalancePin("");
+    } finally {
+      setBalanceUnlocking(false);
+    }
+  };
 
   return (
     <div className="page dashboard-page">
@@ -106,11 +136,6 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
         <div><span>Income</span><strong className="income">{formatMoney(summary.income, currency)}</strong></div>
         <div><span>Expenses</span><strong className="expense">{formatMoney(summary.expenses, currency)}</strong></div>
         <div><span>Net saved</span><strong>{formatMoney(summary.saved, currency)}</strong></div>
-      </section>
-
-      <section className="account-balance-card" aria-label="Tracked account balances">
-        <div className="account-balance-heading"><div><span className="section-label">Your money right now</span><h2>{formatMoney(trackedBalance, currency)}</h2><p>Across {paymentAccounts.length} manually tracked {paymentAccounts.length === 1 ? "account" : "accounts"}</p></div><Bank size={27} weight="duotone" /></div>
-        {paymentAccounts.length ? <div className="account-balance-list">{paymentAccounts.map((account) => <div key={account.id}><span><strong>{account.label || account.provider}</strong><small>Checked {account.balanceAsOf}</small></span><strong>{formatMoney(account.currentBalanceMinor, currency)}</strong></div>)}</div> : <p className="account-balance-empty">Add a bank or wallet in Profile to see your live tracked balance here.</p>}
       </section>
 
       <section className="savings-hero">
@@ -192,6 +217,17 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
         </div>
       </section>
 
+      <section className={`account-balance-card${balancesUnlocked ? " unlocked" : " locked"}`} aria-label="Tracked account balances">
+        {hasPin && balancesUnlocked ? <>
+          <div className="account-balance-heading"><div><span className="section-label">Your money right now</span><h2>{formatMoney(trackedBalance, currency)}</h2><p>Across {paymentAccounts.length} manually tracked {paymentAccounts.length === 1 ? "account" : "accounts"}</p></div><Bank size={27} weight="duotone" /></div>
+          {paymentAccounts.length ? <div className="account-balance-list">{paymentAccounts.map((account) => <div key={account.id}><span><strong>{account.label || account.provider}</strong><small>Checked {account.balanceAsOf}</small></span><strong>{formatMoney(account.currentBalanceMinor, currency)}</strong></div>)}</div> : <p className="account-balance-empty">Add a bank or wallet on the Accounts page to track its current balance here.</p>}
+        </> : <div className="account-balance-locked">
+          <span className="account-balance-lock-icon"><LockKey size={24} weight="duotone" /></span>
+          <div><span className="section-label">Your money right now</span><h2>Account balances are locked</h2><p>{hasPin ? "Enter your ledger PIN to reveal the total and each account balance." : "Set up a ledger PIN before adding an account or viewing account balances."}</p></div>
+          <button className="secondary-button" onClick={() => hasPin ? setBalanceUnlockOpen(true) : onNavigate("settings")}><LockKey size={17} />{hasPin ? "Unlock balances" : "Set up PIN"}</button>
+        </div>}
+      </section>
+
       <section className="dashboard-planning">
         <article className="plan-snapshot">
           <div className="section-heading"><div><span className="section-label">Your plans</span><h2>{hasPlans ? "What you’re working toward" : "Make a plan for your money"}</h2></div><button className="text-button" onClick={() => onNavigate("plan")}>{hasPlans ? "View all" : "Get started"} <ArrowRight size={16} /></button></div>
@@ -203,6 +239,13 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
         </article>
         <article className="insight-snapshot"><div className="section-heading"><div><span className="section-label">Smart insights</span><h2>Your month, explained</h2></div><Lightbulb size={22} weight="duotone" /></div><div>{insights.slice(0, 3).map((insight) => <div key={insight.id} className={insight.tone}><strong>{insight.title}</strong><span>{insight.detail}</span></div>)}</div></article>
       </section>
+      <Modal opened={balanceUnlockOpen} onClose={closeBalanceUnlock} centered title="Unlock account balances" closeOnClickOutside={!balanceUnlocking} closeOnEscape={!balanceUnlocking} withCloseButton={!balanceUnlocking}>
+        <form className="balance-unlock-form" onSubmit={unlockBalances} aria-busy={balanceUnlocking}>
+          <p>Enter your ledger PIN to reveal the balances on this dashboard.</p>
+          <PasswordInput label="Ledger PIN" value={balancePin} onChange={(event) => setBalancePin(event.currentTarget.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="current-password" autoFocus minLength={4} maxLength={6} required disabled={balanceUnlocking} error={balanceUnlockError ?? undefined} />
+          <button className="primary-button full-width" disabled={balanceUnlocking || balancePin.length < 4}>{balanceUnlocking ? <><ButtonSpinner />Checking…</> : "Unlock balances"}</button>
+        </form>
+      </Modal>
     </div>
   );
 }

@@ -17,19 +17,19 @@ const theme = createTheme({
     ledgerGreen: ["#edf8f1", "#d9f0e2", "#b8dfc7", "#8dccaa", "#5eb887", "#35a268", "#147a4b", "#106a41", "#0b5836", "#07472b"],
   },
   components: {
-    Input: { defaultProps: { size: "md", radius: "md" } },
-    InputWrapper: { defaultProps: { size: "md" } },
+    Input: { defaultProps: { size: "sm", radius: "md" } },
+    InputWrapper: { defaultProps: { size: "sm" } },
     Select: {
       defaultProps: {
-        size: "md",
+        size: "sm",
         radius: "md",
         inputMode: "none",
         comboboxProps: { shadow: "md", withinPortal: true, floatingStrategy: "fixed" },
       },
     },
     Popover: { defaultProps: { floatingStrategy: "fixed" } },
-    NumberInput: { defaultProps: { size: "md", radius: "md", hideControls: true } },
-    PasswordInput: { defaultProps: { size: "md", radius: "md" } },
+    NumberInput: { defaultProps: { size: "sm", radius: "md", hideControls: true } },
+    PasswordInput: { defaultProps: { size: "sm", radius: "md" } },
   },
 });
 

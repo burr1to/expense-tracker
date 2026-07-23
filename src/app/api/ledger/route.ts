@@ -282,6 +282,8 @@ export async function POST(request: Request) {
         break;
       }
       case "savePaymentAccount": {
+        const user = await db.user.findUniqueOrThrow({ where: { id }, select: { pinHash: true } });
+        if (!user.pinHash) return NextResponse.json({ error: "Set up a ledger PIN in Security before adding an account." }, { status: 409 });
         const value = paymentAccountSchema.parse(input.payload);
         if (value.type !== "mobile_banking" && value.provider !== value.type) throw new Error("The payment provider does not match the account type.");
         if (value.type === "mobile_banking" && !NEPAL_MOBILE_BANKS.includes(value.provider as typeof NEPAL_MOBILE_BANKS[number])) throw new Error("Choose a bank from the supported Nepal bank list.");

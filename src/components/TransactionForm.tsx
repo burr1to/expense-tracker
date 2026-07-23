@@ -207,8 +207,8 @@ export function TransactionForm({ open, currency, transaction, template, initial
           <fieldset className="payment-fieldset">
             <legend>Mode of payment <span>Required</span></legend>
             <Controller control={control} name="paymentMode" render={({ field }) => <SegmentedControl fullWidth value={field.value} data={[{ value: "cash", label: "Cash" }, { value: "cheque", label: "Cheque" }, { value: "online", label: "Online payment" }]} onChange={(value) => { field.onChange(value as PaymentMode); if (value !== "online") setValue("paymentAccountId", "", { shouldValidate: true }); }} />} />
-            {paymentMode === "online" && <Controller control={control} name="paymentAccountId" render={({ field }) => <Select label="Account" placeholder={paymentAccounts.length ? "Choose an account" : "Add an account in Profile settings first"} data={paymentAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))} value={field.value || null} onChange={(value) => field.onChange(value ?? "")} allowDeselect={false} rightSection={null} required error={errors.paymentAccountId?.message} disabled={!paymentAccounts.length} />} />}
-            {paymentMode === "online" && !paymentAccounts.length && <p className="field-hint">Online accounts are managed in Profile & settings.</p>}
+            {paymentMode === "online" && <Controller control={control} name="paymentAccountId" render={({ field }) => <Select label="Account" placeholder={paymentAccounts.length ? "Choose an account" : "Add an account on the Accounts page first"} data={paymentAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))} value={field.value || null} onChange={(value) => field.onChange(value ?? "")} allowDeselect={false} rightSection={null} required error={errors.paymentAccountId?.message} disabled={!paymentAccounts.length} />} />}
+            {paymentMode === "online" && !paymentAccounts.length && <p className="field-hint">Online accounts are managed on the Accounts page.</p>}
           </fieldset>
 
           <div className="field-row">

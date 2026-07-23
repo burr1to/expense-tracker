@@ -1,5 +1,6 @@
 import { Drawer } from "@mantine/core";
 import {
+  Bank,
   ChartPieSlice,
   DotsThreeCircle,
   Flag,
@@ -25,6 +26,7 @@ const navItems: { id: AppView; label: string; icon: typeof House }[] = [
   { id: "dues", label: "Dues", icon: HandCoins },
   { id: "reports", label: "Reports", icon: ChartPieSlice },
   { id: "transactions", label: "Transactions", icon: ListBullets },
+  { id: "accounts", label: "Accounts", icon: Bank },
   { id: "maps", label: "Map", icon: MapTrifold },
   { id: "settings", label: "Profile", icon: UserCircle },
 ];
@@ -39,7 +41,7 @@ interface AppShellProps {
 
 export function AppShell({ view, onAdd, onSignOut, signingOut, children }: AppShellProps) {
   const [moreOpen, setMoreOpen] = useState(false);
-  const moreItems = navItems.filter((item) => item.id === "dues" || item.id === "reports" || item.id === "maps" || item.id === "settings");
+  const moreItems = navItems.filter((item) => item.id === "dues" || item.id === "reports" || item.id === "accounts" || item.id === "maps" || item.id === "settings");
   const moreActive = moreItems.some((item) => item.id === view);
   return (
     <div className="app-frame">
@@ -84,7 +86,7 @@ export function AppShell({ view, onAdd, onSignOut, signingOut, children }: AppSh
           {moreItems.map(({ id, label, icon: Icon }) => (
             <Link key={id} href={appRoutes[id]} className={view === id ? "mobile-more-link active" : "mobile-more-link"} onClick={() => setMoreOpen(false)} aria-current={view === id ? "page" : undefined}>
               <span><Icon size={22} weight={view === id ? "fill" : "duotone"} /></span>
-              <span><strong>{label}</strong><small>{id === "dues" ? "Payments, reminders, and money between people" : id === "reports" ? "Spending patterns and monthly comparisons" : id === "maps" ? "Kathmandu income and expense locations" : "Preferences, categories, accounts, and security"}</small></span>
+              <span><strong>{label}</strong><small>{id === "dues" ? "Payments, reminders, and money between people" : id === "reports" ? "Spending patterns and monthly comparisons" : id === "accounts" ? "Balances, transfers, and account-wise transactions" : id === "maps" ? "Kathmandu income and expense locations" : "Preferences, categories, and security"}</small></span>
             </Link>
           ))}
         </nav>

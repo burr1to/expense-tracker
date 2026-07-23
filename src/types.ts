@@ -1,6 +1,6 @@
 export type CurrencyCode = "NPR" | "USD" | "AUD";
 export type TransactionKind = "income" | "expense";
-export type AppView = "home" | "plan" | "dues" | "reports" | "transactions" | "maps" | "settings";
+export type AppView = "home" | "plan" | "dues" | "reports" | "transactions" | "accounts" | "maps" | "settings";
 export type TransactionCategory = string;
 export type ThemePreference = "light" | "dark" | "system";
 export type PaymentMode = "cash" | "cheque" | "online";
