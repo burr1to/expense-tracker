@@ -5,7 +5,6 @@ export const DEMO_PROFILE: Profile = {
   id: "demo-user",
   displayName: "Suman",
   currency: "NPR",
-  theme: "light",
   hideAmounts: false,
   autoLockMinutes: 0,
   hasPin: false,

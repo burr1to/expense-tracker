@@ -29,10 +29,10 @@ interface LedgerContextValue extends LedgerData {
   recordDuePayment: (id: string, amount: string, occurredOn: string, note: string, addToLedger: boolean) => Promise<void>;
   completeDueItem: (id: string, addToLedger: boolean) => Promise<void>;
   savePin: (pin: string, currentPin?: string) => Promise<void>; removePin: (currentPin: string) => Promise<void>; verifyPin: (pin: string) => Promise<void>;
-  updateProfile: (changes: Partial<Pick<Profile, "displayName" | "currency" | "theme" | "hideAmounts" | "autoLockMinutes">>) => Promise<void>; resetDemo: () => void;
+  updateProfile: (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes">>) => Promise<void>; resetDemo: () => void;
 }
 
-const emptyProfile: Profile = { id: "", displayName: "Personal ledger", currency: "NPR", theme: "system", hideAmounts: false, autoLockMinutes: 0, hasPin: false };
+const emptyProfile: Profile = { id: "", displayName: "Personal ledger", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, hasPin: false };
 const emptyData: LedgerData = { profile: emptyProfile, transactions: [], budgets: [], recurringEntries: [], goals: [], customCategories: [], paymentAccounts: [], savedPlaces: [], transfers: [], dueItems: [] };
 const LedgerContext = createContext<LedgerContextValue | null>(null);
 const splitTags = (value: string) => [...new Set(value.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean))].slice(0, 8);
@@ -97,7 +97,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     const body = await response.json();
     if (!response.ok) throw new Error(body.error ?? "That PIN did not match.");
   }, []);
-  const updateProfile = useCallback(async (changes: Partial<Pick<Profile, "displayName" | "currency" | "theme" | "hideAmounts" | "autoLockMinutes">>) => mutate("updateProfile", { ...data.profile, ...changes }), [data.profile, mutate]);
+  const updateProfile = useCallback(async (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes">>) => mutate("updateProfile", { ...data.profile, ...changes }), [data.profile, mutate]);
   const resetDemo = useCallback(() => undefined, []);
 
   const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, saveTransaction, importTransactions, deleteTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, deleteCustomCategory, savePaymentAccount, updatePaymentAccountBalance, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, updateProfile, resetDemo }), [data, loading, error, saveTransaction, importTransactions, deleteTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, deleteCustomCategory, savePaymentAccount, updatePaymentAccountBalance, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, updateProfile, resetDemo]);

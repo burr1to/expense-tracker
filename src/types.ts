@@ -2,7 +2,6 @@ export type CurrencyCode = "NPR" | "USD" | "AUD";
 export type TransactionKind = "income" | "expense";
 export type AppView = "home" | "plan" | "dues" | "reports" | "transactions" | "accounts" | "maps" | "settings";
 export type TransactionCategory = string;
-export type ThemePreference = "light" | "dark" | "system";
 export type PaymentMode = "cash" | "cheque" | "online";
 export type PaymentAccountType = "mobile_banking" | "esewa" | "khalti" | "connect_ips";
 
@@ -10,7 +9,6 @@ export interface Profile {
   id: string;
   displayName: string;
   currency: CurrencyCode;
-  theme: ThemePreference;
   hideAmounts: boolean;
   autoLockMinutes: number;
   hasPin: boolean;

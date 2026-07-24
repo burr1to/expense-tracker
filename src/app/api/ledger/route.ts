@@ -49,7 +49,7 @@ const accountBalanceSchema = z.object({ balanceMinor: z.number().int(), balanceA
 const transferSchema = z.object({ fromAccountId: z.string().min(1), toAccountId: z.string().min(1), amountMinor: z.number().int().positive(), occurredOn: z.string().date(), note: z.string().trim().max(240) }).superRefine((value, context) => {
   if (value.fromAccountId === value.toAccountId) context.addIssue({ code: "custom", path: ["toAccountId"], message: "Choose two different accounts." });
 });
-const profileSchema = z.object({ displayName: z.string().trim().min(1).max(50), currency: z.enum(["NPR", "USD", "AUD"]), theme: z.enum(["light", "dark", "system"]), hideAmounts: z.boolean(), autoLockMinutes: z.number().int().min(0).max(120) });
+const profileSchema = z.object({ displayName: z.string().trim().min(1).max(50), currency: z.enum(["NPR", "USD", "AUD"]), hideAmounts: z.boolean(), autoLockMinutes: z.number().int().min(0).max(120) });
 const dueSchema = z.object({ kind: z.enum(["payment", "receivable", "lent", "borrowed"]), title: z.string().trim().min(1).max(100), person: z.string().trim().max(80), amountMinor: z.number().int().positive(), category: z.string().min(1).max(80), occurredOn: z.string().date().nullable(), dueOn: z.string().date(), remindOn: z.string().date().nullable(), note: z.string().trim().max(300), receipt: receiptSchema.optional() });
 const duePaymentSchema = z.object({ amountMinor: z.number().int().positive(), occurredOn: z.string().date(), note: z.string().trim().max(240), addToLedger: z.boolean() });
 const pinSchema = z.string().regex(/^\d{4,6}$/, "PIN must contain 4 to 6 digits.");
@@ -75,7 +75,7 @@ function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
   const accountById = new Map(paymentAccounts.map((item) => [item.id, item]));
   for (const transaction of transactions) if (transaction.paymentAccountId) transaction.paymentAccount = accountById.get(transaction.paymentAccountId) ?? null;
   return {
-    profile: { id: data.user.id, displayName: data.user.name, currency: data.user.currency, theme: data.user.theme, hideAmounts: data.user.hideAmounts, autoLockMinutes: data.user.autoLockMinutes, hasPin: Boolean(data.user.pinHash) },
+    profile: { id: data.user.id, displayName: data.user.name, currency: data.user.currency, hideAmounts: data.user.hideAmounts, autoLockMinutes: data.user.autoLockMinutes, hasPin: Boolean(data.user.pinHash) },
     transactions,
     budgets: data.budgets,
     recurringEntries: data.recurring.map((item) => ({ ...item, nextDueOn: dateOnly(item.nextDueOn) })),
@@ -100,7 +100,7 @@ function serializeAccount(item: Awaited<ReturnType<typeof loadLedger>>["paymentA
 async function loadLedger(id: string) {
   const db = getPrisma();
   const [user, transactions, budgets, recurring, goals, categories, paymentAccounts, savedPlaces, transfers, dueItems] = await Promise.all([
-    db.user.findUniqueOrThrow({ where: { id }, select: { id: true, name: true, currency: true, theme: true, hideAmounts: true, autoLockMinutes: true, pinHash: true } }),
+    db.user.findUniqueOrThrow({ where: { id }, select: { id: true, name: true, currency: true, hideAmounts: true, autoLockMinutes: true, pinHash: true } }),
     db.transaction.findMany({ where: { userId: id }, orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }], include: { receipt: { select: receiptSelect }, paymentAccount: true } }),
     db.budget.findMany({ where: { userId: id }, orderBy: { monthKey: "desc" } }),
     db.recurringEntry.findMany({ where: { userId: id }, orderBy: { nextDueOn: "asc" } }),
@@ -378,7 +378,7 @@ export async function POST(request: Request) {
       case "updateProfile": {
         const value = profileSchema.parse(input.payload);
         const pin = await db.user.findUniqueOrThrow({ where: { id }, select: { pinHash: true } });
-        await db.user.update({ where: { id }, data: { name: value.displayName, currency: value.currency, theme: value.theme, hideAmounts: value.hideAmounts, autoLockMinutes: pin.pinHash ? value.autoLockMinutes : 0 } });
+        await db.user.update({ where: { id }, data: { name: value.displayName, currency: value.currency, hideAmounts: value.hideAmounts, autoLockMinutes: pin.pinHash ? value.autoLockMinutes : 0 } });
         break;
       }
       case "savePin": {

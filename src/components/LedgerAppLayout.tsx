@@ -38,18 +38,6 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => { setAmountsHidden(ledger.profile.hideAmounts); }, [ledger.profile.hideAmounts]);
   useEffect(() => { window.scrollTo({ top: 0, behavior: "auto" }); }, [pathname]);
-  useEffect(() => {
-    const root = document.documentElement;
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => {
-      root.dataset.theme = ledger.profile.theme === "system"
-        ? media.matches ? "dark" : "light"
-        : ledger.profile.theme;
-    };
-    apply();
-    media.addEventListener("change", apply);
-    return () => media.removeEventListener("change", apply);
-  }, [ledger.profile.theme]);
   useEffect(() => { document.body.dataset.hideAmounts = String(amountsHidden); }, [amountsHidden]);
   useEffect(() => {
     if (!ledger.profile.hasPin || !ledger.profile.autoLockMinutes || locked || (!user && !isDemo)) return;
