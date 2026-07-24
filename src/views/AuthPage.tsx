@@ -70,10 +70,11 @@ export function AuthPage() {
           <p>{mode === "signin" ? "Pick up where you left off." : mode === "signup" ? "A clean money habit starts here." : mode === "new-password" ? "Use at least eight characters." : "We’ll email you a secure reset link."}</p>
 
           <form onSubmit={submit} className="auth-form">
-            {mode === "signup" && <TextInput label="Your name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required placeholder="Suman" />}
-            {mode !== "new-password" && <TextInput label="Email address" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required placeholder="you@example.com" />}
+            {mode === "signup" && <TextInput size="sm" label="Your name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" required placeholder="Suman" />}
+            {mode !== "new-password" && <TextInput size="sm" label="Email address" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required placeholder="you@example.com" />}
             {(mode !== "reset") && (
               <PasswordInput
+                size="sm"
                 label="Password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}

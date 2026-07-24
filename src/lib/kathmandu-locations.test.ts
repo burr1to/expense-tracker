@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { KATHMANDU_BOUNDS, isInsideKathmandu, kathmanduMapStyle, nearestKathmanduPlace, pinnedKathmanduLocation } from "./kathmandu-locations";
+import { KATHMANDU_BOUNDS, KATHMANDU_PLACES, isInsideKathmandu, kathmanduMapStyle, nearestKathmanduPlace, pinnedKathmanduLocation } from "./kathmandu-locations";
 
 describe("Kathmandu transaction locations", () => {
   it("accepts coordinates inside the configured Kathmandu area", () => {
@@ -14,6 +14,11 @@ describe("Kathmandu transaction locations", () => {
 
   it("uses the keyless OpenFreeMap vector style by default", () => {
     expect(kathmanduMapStyle()).toBe("https://tiles.openfreemap.org/styles/positron");
+  });
+
+  it("provides small locality labels across the wider Kathmandu map at its default zoom", () => {
+    expect(KATHMANDU_PLACES.filter((place) => (place.minZoom ?? 11) <= 12.3).length).toBeGreaterThanOrEqual(20);
+    expect(KATHMANDU_PLACES.every((place) => isInsideKathmandu(place.latitude, place.longitude))).toBe(true);
   });
 
   it("creates a precise pin snapshot with a nearby Kathmandu label", () => {
