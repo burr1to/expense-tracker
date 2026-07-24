@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@better-auth/prisma-adapter": "1.6.23",
-    "@fontsource-variable/manrope": "5.2.8",
+    "@fontsource-variable/ibm-plex-sans": "^5.2.8",
     "@hookform/resolvers": "5.1.1",
     "@mantine/core": "^9.4.1",
     "@mantine/dates": "^9.4.1",

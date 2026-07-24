@@ -1,19 +1,19 @@
 import type { CategoryDefinition, CustomCategory, TransactionCategory } from "../types";
 
 export const CATEGORIES: readonly CategoryDefinition[] = [
-  { id: "salary", label: "Salary", kind: "income", color: "#2b8a50" },
-  { id: "freelance", label: "Freelance", kind: "income", color: "#427d62" },
-  { id: "gift", label: "Gift", kind: "income", color: "#6a8f78" },
-  { id: "housing", label: "Housing", kind: "expense", color: "#5f5ce6" },
-  { id: "food", label: "Food & Dining", kind: "expense", color: "#e8675a" },
-  { id: "transport", label: "Transport", kind: "expense", color: "#2878c8" },
-  { id: "utilities", label: "Utilities", kind: "expense", color: "#8867c7" },
-  { id: "shopping", label: "Shopping", kind: "expense", color: "#d69531" },
-  { id: "health", label: "Health", kind: "expense", color: "#dc5877" },
-  { id: "entertainment", label: "Entertainment", kind: "expense", color: "#705ea8" },
-  { id: "education", label: "Education", kind: "expense", color: "#3a8e91" },
-  { id: "travel", label: "Travel", kind: "expense", color: "#3b70a2" },
-  { id: "other", label: "Other", kind: "both", color: "#8a857e" },
+  { id: "salary", label: "Salary", kind: "income", color: "#3f6653" },
+  { id: "freelance", label: "Freelance", kind: "income", color: "#557f69" },
+  { id: "gift", label: "Gift", kind: "income", color: "#789685" },
+  { id: "housing", label: "Housing", kind: "expense", color: "#745d56" },
+  { id: "food", label: "Food & Dining", kind: "expense", color: "#8f4c49" },
+  { id: "transport", label: "Transport", kind: "expense", color: "#9b625a" },
+  { id: "utilities", label: "Utilities", kind: "expense", color: "#80635b" },
+  { id: "shopping", label: "Shopping", kind: "expense", color: "#a77662" },
+  { id: "health", label: "Health", kind: "expense", color: "#995b59" },
+  { id: "entertainment", label: "Entertainment", kind: "expense", color: "#826a5d" },
+  { id: "education", label: "Education", kind: "expense", color: "#916b61" },
+  { id: "travel", label: "Travel", kind: "expense", color: "#a48470" },
+  { id: "other", label: "Other", kind: "both", color: "#6c7069" },
 ] as const;
 
 export function getCategory(category: TransactionCategory, custom: readonly CustomCategory[] = []): CategoryDefinition {

@@ -99,7 +99,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
   const paymentMode = watch("paymentMode");
   const suggestions = useMemo(() => getTransactionSuggestions(transactions, kind, suggestionQuery), [kind, suggestionQuery, transactions]);
   const subcategory = subcategoriesFor(category);
-  const categoryColor = allCategoriesFor(kind, customCategories).find((item) => item.id === category)?.color ?? "#147a4b";
+  const categoryColor = allCategoriesFor(kind, customCategories).find((item) => item.id === category)?.color ?? "#557f69";
   const discardAndClose = () => { if (receipt) void discardReceipt(receipt); onClose(); };
 
   useEffect(() => { reset(defaults); setLocation(defaultLocation); setLocationPickerOpen(false); setSubmitError(null); setReceipt(undefined); setRemoveReceipt(false); setReceiptError(null); setSuggestionQuery(""); setAppliedSuggestionId(template?.id ?? null); }, [defaults, defaultLocation, open, reset, template?.id]);

@@ -2,7 +2,7 @@
 import "@mantine/core/styles.css";
 import "@mantine/dates/styles.css";
 import "maplibre-gl/dist/maplibre-gl.css";
-import "@fontsource-variable/manrope";
+import "@fontsource-variable/ibm-plex-sans";
 import { MantineProvider, createTheme } from "@mantine/core";
 import type { Metadata } from "next";
 import { AppProviders } from "../components/AppProviders";
@@ -10,26 +10,26 @@ import "../styles.css";
 
 const theme = createTheme({
   primaryColor: "ledgerGreen",
-  fontFamily: "Manrope Variable, sans-serif",
-  headings: { fontFamily: "Manrope Variable, sans-serif", fontWeight: "750" },
-  defaultRadius: "md",
+  fontFamily: "IBM Plex Sans Variable, ui-sans-serif, system-ui, sans-serif",
+  headings: { fontFamily: "IBM Plex Sans Variable, ui-sans-serif, system-ui, sans-serif", fontWeight: "650" },
+  defaultRadius: "xs",
   colors: {
-    ledgerGreen: ["#edf8f1", "#d9f0e2", "#b8dfc7", "#8dccaa", "#5eb887", "#35a268", "#147a4b", "#106a41", "#0b5836", "#07472b"],
+    ledgerGreen: ["#f3f6f3", "#e5ece6", "#cddbcf", "#aec4b3", "#8eac98", "#718f7b", "#557f69", "#486e5a", "#3f5f4f", "#344e42"],
   },
   components: {
-    Input: { defaultProps: { size: "sm", radius: "md" } },
-    InputWrapper: { defaultProps: { size: "sm" } },
+    Input: { defaultProps: { size: "xs", radius: "xs" } },
+    InputWrapper: { defaultProps: { size: "xs" } },
     Select: {
       defaultProps: {
-        size: "sm",
-        radius: "md",
+        size: "xs",
+        radius: "xs",
         inputMode: "none",
         comboboxProps: { shadow: "md", withinPortal: true, floatingStrategy: "fixed" },
       },
     },
     Popover: { defaultProps: { floatingStrategy: "fixed" } },
-    NumberInput: { defaultProps: { size: "sm", radius: "md", hideControls: true } },
-    PasswordInput: { defaultProps: { size: "sm", radius: "md" } },
+    NumberInput: { defaultProps: { size: "xs", radius: "xs", hideControls: true } },
+    PasswordInput: { defaultProps: { size: "xs", radius: "xs" } },
   },
 });
 

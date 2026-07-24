@@ -166,11 +166,11 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
             <div className="chart-wrap" aria-label="Daily expense chart">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={chartData} margin={{ top: 12, right: 4, left: -18, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#dedbd4" />
-                  <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#77736c", fontSize: 11 }} />
-                  <YAxis tickFormatter={(value) => formatMoney(Number(value), currency, true)} axisLine={false} tickLine={false} tick={{ fill: "#77736c", fontSize: 10 }} />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#cbd3c9" />
+                  <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#5c6e63", fontSize: 11 }} />
+                  <YAxis tickFormatter={(value) => formatMoney(Number(value), currency, true)} axisLine={false} tickLine={false} tick={{ fill: "#5c6e63", fontSize: 10 }} />
                   <Tooltip
-                    cursor={{ stroke: "rgba(20, 122, 75, .18)", strokeWidth: 1 }}
+                    cursor={{ stroke: "rgba(85, 127, 105, .24)", strokeWidth: 1 }}
                     isAnimationActive={false}
                     content={({ active, payload }) => {
                       const point = payload?.[0]?.payload as { date?: string; label?: string; amount?: number } | undefined;
@@ -184,8 +184,8 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
                       );
                     }}
                   />
-                  <Bar dataKey="amount" fill="#ebe8e1" radius={[7, 7, 0, 0]} barSize={28} isAnimationActive={false} />
-                  <Line type="monotone" dataKey="amount" stroke="#147a4b" strokeWidth={2.6} dot={{ r: 3.5, fill: "#147a4b", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#147a4b", stroke: "#147a4b", strokeWidth: 0 }} isAnimationActive={false} />
+                  <Bar dataKey="amount" fill="#dfe8df" radius={[2, 2, 0, 0]} barSize={28} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="amount" stroke="#557f69" strokeWidth={2.6} dot={{ r: 3.5, fill: "#557f69", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#557f69", stroke: "#557f69", strokeWidth: 0 }} isAnimationActive={false} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -239,7 +239,22 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
         </article>
         <article className="insight-snapshot"><div className="section-heading"><div><span className="section-label">Smart insights</span><h2>Your month, explained</h2></div><Lightbulb size={22} weight="duotone" /></div><div>{insights.slice(0, 3).map((insight) => <div key={insight.id} className={insight.tone}><strong>{insight.title}</strong><span>{insight.detail}</span></div>)}</div></article>
       </section>
-      <Modal opened={balanceUnlockOpen} onClose={closeBalanceUnlock} centered title="Unlock account balances" closeOnClickOutside={!balanceUnlocking} closeOnEscape={!balanceUnlocking} withCloseButton={!balanceUnlocking}>
+      <Modal
+        opened={balanceUnlockOpen}
+        onClose={closeBalanceUnlock}
+        centered
+        size="sm"
+        title="Unlock account balances"
+        closeOnClickOutside={!balanceUnlocking}
+        closeOnEscape={!balanceUnlocking}
+        withCloseButton={!balanceUnlocking}
+        classNames={{
+          content: "balance-unlock-dialog",
+          header: "balance-unlock-dialog-header",
+          title: "balance-unlock-dialog-title",
+          body: "balance-unlock-dialog-body",
+        }}
+      >
         <form className="balance-unlock-form" onSubmit={unlockBalances} aria-busy={balanceUnlocking}>
           <p>Enter your ledger PIN to reveal the balances on this dashboard.</p>
           <PasswordInput label="Ledger PIN" value={balancePin} onChange={(event) => setBalancePin(event.currentTarget.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="current-password" autoFocus minLength={4} maxLength={6} required disabled={balanceUnlocking} error={balanceUnlockError ?? undefined} />

@@ -12,7 +12,7 @@ import type { CurrencyCode, ThemePreference, TransactionKind } from "../types";
 const currencies: { code: CurrencyCode; label: string }[] = [
   { code: "NPR", label: "Nepalese rupee" }, { code: "USD", label: "US dollar" }, { code: "AUD", label: "Australian dollar" },
 ];
-const categoryColors = ["#147a4b", "#2b8a50", "#e8675a", "#8867c7", "#d69531", "#3a8e91"];
+const categoryColors = ["#557f69", "#3f6653", "#789685", "#8f4c49", "#a76d62", "#745d56"];
 
 export function SettingsPage({ onLock }: { onLock: () => void }) {
   const { isDemo, user, changePassword, deleteAccount } = useAuth();
