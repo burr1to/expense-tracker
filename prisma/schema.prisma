@@ -115,6 +115,7 @@ model SavedPlace {
   id        String        @id @default(cuid())
   userId    String
   name      String
+  icon      String        @default("pin")
   address   String        @default("Kathmandu, Nepal")
   latitude  Float
   longitude Float

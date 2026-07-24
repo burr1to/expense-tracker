@@ -4,7 +4,9 @@ import { Loader, TextInput } from "@mantine/core";
 import { ClockCounterClockwise, Crosshair, MagnifyingGlass, MapPin, NavigationArrow, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { KATHMANDU_BOUNDS, KATHMANDU_CENTER, KATHMANDU_MAP_MAX_ZOOM, addKathmanduLabelMarkers, applyKathmanduMapTheme, isInsideKathmandu, kathmanduMapStyle, nearestKathmanduPlace, pinnedKathmanduLocation } from "../lib/kathmandu-locations";
-import type { SavedPlace, TransactionLocationDraft } from "../types";
+import { savedPlaceIconOptions } from "../lib/saved-places";
+import type { SavedPlace, SavedPlaceDraft, SavedPlaceIconName, TransactionLocationDraft } from "../types";
+import { SavedPlaceIcon } from "./SavedPlaceIcon";
 
 interface LocationPickerProps {
   open: boolean;
@@ -12,7 +14,9 @@ interface LocationPickerProps {
   recentLocations: TransactionLocationDraft[];
   savedPlaces: SavedPlace[];
   onClose: () => void;
-  onSelect: (location: TransactionLocationDraft) => void;
+  onSelect?: (location: TransactionLocationDraft) => void;
+  mode?: "transaction" | "saved-place";
+  onSavePlace?: (place: SavedPlaceDraft) => Promise<void>;
 }
 
 interface LocationSearchResult {
@@ -22,7 +26,7 @@ interface LocationSearchResult {
   longitude: number;
 }
 
-export function LocationPicker({ open, value, recentLocations, savedPlaces, onClose, onSelect }: LocationPickerProps) {
+export function LocationPicker({ open, value, recentLocations, savedPlaces, onClose, onSelect, mode = "transaction", onSavePlace }: LocationPickerProps) {
   const mapNode = useRef<HTMLDivElement>(null);
   const map = useRef<import("maplibre-gl").Map | null>(null);
   const marker = useRef<import("maplibre-gl").Marker | null>(null);
@@ -34,13 +38,16 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
   const [locating, setLocating] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<LocationSearchResult[]>([]);
-  const [saveForReuse, setSaveForReuse] = useState(false);
   const [savedPlaceName, setSavedPlaceName] = useState("");
+  const [savedPlaceIcon, setSavedPlaceIcon] = useState<SavedPlaceIconName>("pin");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const savedLocationDrafts = useMemo(() => savedPlaces.map((place): TransactionLocationDraft => ({ label: place.name, address: place.address, latitude: place.latitude, longitude: place.longitude, accuracy: null, source: "saved", savedPlaceId: place.id })), [savedPlaces]);
   const visibleLocations = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    if (!normalized) return [...savedLocationDrafts, ...recentLocations].slice(0, 8);
-    const previousMatches = [...savedLocationDrafts, ...recentLocations].filter((place) => `${place.label} ${place.address}`.toLowerCase().includes(normalized));
+    const previousLocations = mode === "transaction" ? [...savedLocationDrafts, ...recentLocations] : recentLocations;
+    if (!normalized) return previousLocations.slice(0, 8);
+    const previousMatches = previousLocations.filter((place) => `${place.label} ${place.address}`.toLowerCase().includes(normalized));
     const seen = new Set(previousMatches.map((place) => `${place.latitude.toFixed(5)}-${place.longitude.toFixed(5)}`));
     return [...previousMatches, ...searchResults.filter((place) => {
       const key = `${place.latitude.toFixed(5)}-${place.longitude.toFixed(5)}`;
@@ -48,7 +55,7 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
       seen.add(key);
       return true;
     })].slice(0, 8);
-  }, [query, recentLocations, savedLocationDrafts, searchResults]);
+  }, [mode, query, recentLocations, savedLocationDrafts, searchResults]);
 
   const moveMarker = (next: TransactionLocationDraft, zoom = 16) => {
     setCandidate(next);
@@ -73,8 +80,10 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
     setMapError(null);
     setSearching(false);
     setSearchResults([]);
-    setSaveForReuse(false);
     setSavedPlaceName("");
+    setSavedPlaceIcon("pin");
+    setSaving(false);
+    setSaveError(null);
     let active = true;
     let removeLabels = () => {};
     void import("maplibre-gl").then((module) => {
@@ -187,16 +196,36 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
       setLocationError("We could not access your location. You can still drop a pin.");
     }, { enableHighAccuracy: true, timeout: 12_000, maximumAge: 60_000 });
   };
-  const confirm = () => {
+  const confirm = async () => {
     if (!candidate) return;
-    onSelect({ ...candidate, label: candidate.label.trim() || "Pinned location", savePlaceName: saveForReuse && !candidate.savedPlaceId ? savedPlaceName.trim() || undefined : undefined });
+    if (mode === "saved-place") {
+      if (!savedPlaceName.trim() || !onSavePlace) return;
+      setSaving(true);
+      setSaveError(null);
+      try {
+        await onSavePlace({
+          name: savedPlaceName.trim(),
+          icon: savedPlaceIcon,
+          address: candidate.address || "Kathmandu, Nepal",
+          latitude: candidate.latitude,
+          longitude: candidate.longitude,
+        });
+        onClose();
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : "Could not save this place.");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    onSelect?.({ ...candidate, label: candidate.label.trim() || "Pinned location" });
     onClose();
   };
 
   return <div className="modal-backdrop location-picker-backdrop" role="presentation">
     <section className="location-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="location-picker-title">
       <header>
-        <div><span className="eyebrow">Kathmandu only</span><h2 id="location-picker-title">Choose transaction location</h2><p>Search an area, use your device, or click the exact spot on the map.</p></div>
+        <div><span className="eyebrow">Kathmandu only</span><h2 id="location-picker-title">{mode === "saved-place" ? "Save a place" : "Choose transaction location"}</h2><p>{mode === "saved-place" ? "Choose the exact spot, then give it a name and icon." : "Search an area, use your device, or click the exact spot on the map."}</p></div>
         <button className="icon-button" onClick={onClose} aria-label="Close location picker"><X size={21} /></button>
       </header>
       <div className="location-picker-body">
@@ -204,12 +233,13 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
           <button type="button" className="secondary-button full-width" disabled={locating} onClick={useCurrentLocation}><Crosshair size={18} />{locating ? "Finding your location…" : "Use current location"}</button>
           {locationError && <div className="form-error" role="alert">{locationError}</div>}
           <TextInput value={query} onChange={(event) => setQuery(event.target.value)} leftSection={<MagnifyingGlass size={17} />} rightSection={searching ? <Loader size={15} /> : undefined} label="Search Kathmandu" placeholder="Place, landmark, or address…" />
-          {!query.trim() && visibleLocations.length > 0 && <span className="field-label"><ClockCounterClockwise size={15} />Saved and previously selected</span>}
+          {!query.trim() && visibleLocations.length > 0 && <span className="field-label"><ClockCounterClockwise size={15} />{mode === "saved-place" ? "Previously selected" : "Saved and previously selected"}</span>}
           <div className="location-results">
             {visibleLocations.map((place) => {
               const label = place.label;
               const active = candidate?.latitude === place.latitude && candidate.longitude === place.longitude;
-              return <button type="button" className={active ? "active" : undefined} key={`${label}-${place.latitude}-${place.longitude}`} onClick={() => choosePlace(place)}><MapPin size={17} weight={active ? "fill" : "regular"} /><span><strong>{label}</strong><small>{place.address}</small></span></button>;
+              const savedPlace = "savedPlaceId" in place && place.savedPlaceId ? savedPlaces.find((item) => item.id === place.savedPlaceId) : undefined;
+              return <button type="button" className={active ? "active" : undefined} key={`${label}-${place.latitude}-${place.longitude}`} onClick={() => choosePlace(place)}>{savedPlace ? <SavedPlaceIcon icon={savedPlace.icon ?? "pin"} size={17} weight={active ? "fill" : "regular"} /> : <MapPin size={17} weight={active ? "fill" : "regular"} />}<span><strong>{label}</strong><small>{place.address}</small></span></button>;
             })}
             {query.trim().length >= 2 && !searching && !visibleLocations.length && !locationError && <p>No Kathmandu places matched that search.</p>}
           </div>
@@ -220,12 +250,12 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
           {mapError && <span className="map-load-warning" role="status">{mapError}</span>}
         </div>
       </div>
-      <footer className="location-picker-footer">
+      <footer className={mode === "saved-place" ? "location-picker-footer save-place-mode" : "location-picker-footer"}>
         <div className="selected-location">
           {candidate ? <><MapPin size={20} weight="fill" /><div><TextInput aria-label="Location label" value={candidate.label} onChange={(event) => setCandidate({ ...candidate, label: event.target.value })} /><small>{candidate.address}</small></div></> : <><MapPin size={20} /><div><strong>No location selected</strong><small>Click anywhere inside the Kathmandu map.</small></div></>}
         </div>
-        <div className="location-picker-actions">{candidate && !candidate.savedPlaceId && <label className="save-place-option"><input type="checkbox" checked={saveForReuse} onChange={(event) => setSaveForReuse(event.currentTarget.checked)} /><span><strong>Save this place</strong><small>Reuse it for future transactions</small></span></label>}{saveForReuse && !candidate?.savedPlaceId && <TextInput aria-label="Saved place name" value={savedPlaceName} onChange={(event) => setSavedPlaceName(event.currentTarget.value)} placeholder="Place name, e.g. Office" />}</div>
-        <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={!candidate || !candidate.label.trim() || (saveForReuse && !savedPlaceName.trim())} onClick={confirm}><MapPin size={17} />Use this location</button></div>
+        {mode === "saved-place" && <div className="location-picker-actions"><TextInput label="Place name" aria-label="Saved place name" value={savedPlaceName} onChange={(event) => setSavedPlaceName(event.currentTarget.value)} placeholder="e.g. Home or Office" /><fieldset className="saved-place-icon-picker"><legend>Icon</legend>{savedPlaceIconOptions.map((option) => <button type="button" className={savedPlaceIcon === option.value ? "active" : undefined} aria-label={option.label} aria-pressed={savedPlaceIcon === option.value} title={option.label} key={option.value} onClick={() => setSavedPlaceIcon(option.value)}><SavedPlaceIcon icon={option.value} size={18} /></button>)}</fieldset>{saveError && <div className="form-error" role="alert">{saveError}</div>}</div>}
+        <div className="dialog-actions"><button type="button" className="secondary-button" disabled={saving} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={saving || !candidate || !candidate.label.trim() || (mode === "saved-place" && !savedPlaceName.trim())} onClick={() => void confirm()}><MapPin size={17} />{saving ? "Saving…" : mode === "saved-place" ? "Save place" : "Use this location"}</button></div>
       </footer>
     </section>
   </div>;

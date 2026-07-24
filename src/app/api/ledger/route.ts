@@ -21,10 +21,10 @@ const locationSchema = z.object({
   accuracy: z.number().int().positive().max(100_000).nullable(),
   source: z.enum(["pin", "search", "current_location", "saved"]),
   savedPlaceId: z.string().nullable(),
-  savePlaceName: z.string().trim().min(1).max(60).optional(),
 }).nullable();
 const savedPlaceSchema = z.object({
   name: z.string().trim().min(1).max(60),
+  icon: z.enum(["pin", "home", "work", "food", "shopping", "health", "favorite"]),
   address: z.string().trim().max(240),
   latitude: z.number().min(KATHMANDU_BOUNDS.south).max(KATHMANDU_BOUNDS.north),
   longitude: z.number().min(KATHMANDU_BOUNDS.west).max(KATHMANDU_BOUNDS.east),
@@ -134,20 +134,10 @@ export async function POST(request: Request) {
         const value = savedTransactionSchema.parse(input.payload);
         const { receipt, removeReceipt, location, ...entry } = value;
         if (entry.paymentAccountId) await db.paymentAccount.findFirstOrThrow({ where: { id: entry.paymentAccountId, userId: id } });
-        let savedPlaceId = location?.savedPlaceId ?? null;
+        const savedPlaceId = location?.savedPlaceId ?? null;
         if (savedPlaceId) {
           const savedPlace = await db.savedPlace.findFirstOrThrow({ where: { id: savedPlaceId, userId: id } });
           await db.savedPlace.update({ where: { id: savedPlace.id }, data: { lastUsedAt: new Date() } });
-        } else if (location?.savePlaceName) {
-          savedPlaceId = (await db.savedPlace.create({
-            data: {
-              userId: id,
-              name: location.savePlaceName,
-              address: location.address || "Kathmandu, Nepal",
-              latitude: location.latitude,
-              longitude: location.longitude,
-            },
-          })).id;
         }
         const data = {
           ...entry,

@@ -65,19 +65,23 @@ export interface TransactionLocationDraft {
   accuracy: number | null;
   source: LocationSource;
   savedPlaceId: string | null;
-  savePlaceName?: string;
 }
+
+export type SavedPlaceIconName = "pin" | "home" | "work" | "food" | "shopping" | "health" | "favorite";
 
 export interface SavedPlace {
   id: string;
   userId: string;
   name: string;
+  icon: SavedPlaceIconName;
   address: string;
   latitude: number;
   longitude: number;
   createdAt: string;
   lastUsedAt: string;
 }
+
+export type SavedPlaceDraft = Pick<SavedPlace, "name" | "icon" | "address" | "latitude" | "longitude">;
 
 export interface CategoryDefinition {
   id: TransactionCategory;

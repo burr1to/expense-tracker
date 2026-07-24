@@ -4,7 +4,7 @@ import { useLedgerWorkspace } from "../../../context/LedgerWorkspaceContext";
 import { MapsPage } from "../../../views/MapsPage";
 
 export default function MapsRoute() {
-  const { ledger, openAdd, openEdit } = useLedgerWorkspace();
+  const { ledger, openAdd, openAddAtPlace, openEdit } = useLedgerWorkspace();
 
   return <MapsPage
     currency={ledger.profile.currency}
@@ -15,6 +15,7 @@ export default function MapsRoute() {
     onSaveSavedPlace={ledger.saveSavedPlace}
     onDeleteSavedPlace={ledger.deleteSavedPlace}
     onAdd={openAdd}
+    onAddAtPlace={openAddAtPlace}
     onEdit={openEdit}
   />;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, type Dispatch, type SetStateAction } from "react";
-import type { LedgerTransaction } from "../types";
+import type { LedgerTransaction, SavedPlace } from "../types";
 import { useLedger } from "./LedgerContext";
 
 export interface DashboardFocus {
@@ -16,6 +16,7 @@ interface LedgerWorkspaceContextValue {
   homeFocus: DashboardFocus | null;
   setHomeSelectedDate: Dispatch<SetStateAction<string>>;
   openAdd: () => void;
+  openAddAtPlace: (place: SavedPlace) => void;
   openAddForDate: (occurredOn: string) => void;
   openDuplicate: (transaction: LedgerTransaction) => void;
   openEdit: (transaction: LedgerTransaction) => void;

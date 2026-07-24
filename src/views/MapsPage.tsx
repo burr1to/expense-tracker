@@ -1,13 +1,16 @@
 "use client";
 
 import { Select, SegmentedControl, TextInput } from "@mantine/core";
-import { ArrowRight, ClockCounterClockwise, MapPin, PencilSimple, Trash, X } from "@phosphor-icons/react";
+import { ArrowRight, ClockCounterClockwise, FunnelSimple, MapPin, PencilSimple, Plus, Trash, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { LocationPicker } from "../components/LocationPicker";
+import { SavedPlaceIcon } from "../components/SavedPlaceIcon";
 import { TransactionRow } from "../components/TransactionRow";
 import { allCategoriesFor, getCategory } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
 import { KATHMANDU_BOUNDS, KATHMANDU_CENTER, KATHMANDU_MAP_MAX_ZOOM, addKathmanduLabelMarkers, applyKathmanduMapTheme, kathmanduMapStyle } from "../lib/kathmandu-locations";
-import type { CurrencyCode, CustomCategory, LedgerTransaction, PaymentAccount, SavedPlace, TransactionKind } from "../types";
+import { savedPlaceIconOptions } from "../lib/saved-places";
+import type { CurrencyCode, CustomCategory, LedgerTransaction, PaymentAccount, SavedPlace, SavedPlaceDraft, SavedPlaceIconName, TransactionKind, TransactionLocationDraft } from "../types";
 
 interface MapsPageProps {
   currency: CurrencyCode;
@@ -15,10 +18,11 @@ interface MapsPageProps {
   customCategories: CustomCategory[];
   paymentAccounts: PaymentAccount[];
   savedPlaces: SavedPlace[];
-  onSaveSavedPlace: (draft: Pick<SavedPlace, "name" | "address" | "latitude" | "longitude">, id?: string) => Promise<void>;
+  onSaveSavedPlace: (draft: SavedPlaceDraft, id?: string) => Promise<void>;
   onDeleteSavedPlace: (id: string) => Promise<void>;
   onEdit: (transaction: LedgerTransaction) => void;
   onAdd: () => void;
+  onAddAtPlace: (place: SavedPlace) => void;
 }
 
 type MapMode = "pins" | "heatmap";
@@ -41,6 +45,7 @@ interface PlaceSummary {
   address: string;
   latitude: number;
   longitude: number;
+  icon: SavedPlaceIconName;
   transactions: LedgerTransaction[];
   totalExpenseMinor: number;
   totalIncomeMinor: number;
@@ -76,6 +81,7 @@ function buildSummaries(transactions: LedgerTransaction[], savedPlaces: SavedPla
       address: saved?.address ?? transaction.locationAddress ?? "Kathmandu, Nepal",
       latitude: transaction.locationLatitude,
       longitude: transaction.locationLongitude,
+      icon: saved?.icon ?? "pin",
       transactions: [],
       totalExpenseMinor: 0,
       totalIncomeMinor: 0,
@@ -89,6 +95,23 @@ function buildSummaries(transactions: LedgerTransaction[], savedPlaces: SavedPla
     current.netMinor = current.totalIncomeMinor - current.totalExpenseMinor;
     groups.set(key, current);
   });
+  savedPlaces.forEach((place) => {
+    if (groups.has(place.id)) return;
+    groups.set(place.id, {
+      key: place.id,
+      label: place.name,
+      address: place.address,
+      latitude: place.latitude,
+      longitude: place.longitude,
+      icon: place.icon ?? "pin",
+      transactions: [],
+      totalExpenseMinor: 0,
+      totalIncomeMinor: 0,
+      netMinor: 0,
+      topCategory: "other",
+      monthlyTotals: [],
+    });
+  });
   return [...groups.values()].map((summary) => {
     const categoryTotals = new Map<string, number>();
     const monthlyTotals = new Map<string, number>();
@@ -100,13 +123,16 @@ function buildSummaries(transactions: LedgerTransaction[], savedPlaces: SavedPla
   }).sort((a, b) => b.totalExpenseMinor - a.totalExpenseMinor || b.transactions.length - a.transactions.length);
 }
 
-export function MapsPage({ currency, transactions, customCategories, paymentAccounts, savedPlaces, onSaveSavedPlace, onDeleteSavedPlace, onEdit, onAdd }: MapsPageProps) {
+export function MapsPage({ currency, transactions, customCategories, paymentAccounts, savedPlaces, onSaveSavedPlace, onDeleteSavedPlace, onEdit, onAdd, onAddAtPlace }: MapsPageProps) {
   const [filters, setFilters] = useState<MapFilters>(initialFilters);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [mapMode, setMapMode] = useState<MapMode>("pins");
   const [selectedPlaceKey, setSelectedPlaceKey] = useState<string | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [placePickerOpen, setPlacePickerOpen] = useState(false);
   const [editingSavedPlaceId, setEditingSavedPlaceId] = useState<string | null>(null);
   const [editingSavedPlaceName, setEditingSavedPlaceName] = useState("");
+  const [editingSavedPlaceIcon, setEditingSavedPlaceIcon] = useState<SavedPlaceIconName>("pin");
   const mapNode = useRef<HTMLDivElement>(null);
   const map = useRef<import("maplibre-gl").Map | null>(null);
   const located = useMemo(() => {
@@ -127,11 +153,40 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
   }, [filters, transactions]);
   const summaries = useMemo(() => buildSummaries(located, savedPlaces), [located, savedPlaces]);
   const selectedSummary = summaries.find((summary) => summary.key === selectedPlaceKey) ?? null;
+  const selectedSavedPlace = savedPlaces.find((place) => place.id === selectedPlaceKey) ?? null;
   const categories = useMemo(() => {
     const unique = new Map<string, { value: string; label: string }>();
     [...allCategoriesFor("expense", customCategories), ...allCategoriesFor("income", customCategories)].forEach((category) => unique.set(category.id, { value: category.id, label: category.label }));
     return [...unique.values()].sort((a, b) => a.label.localeCompare(b.label));
   }, [customCategories]);
+  const recentLocations = useMemo(() => {
+    const seen = new Set<string>();
+    return transactions.flatMap((transaction): TransactionLocationDraft[] => {
+      if (transaction.locationLatitude == null || transaction.locationLongitude == null) return [];
+      const key = `${transaction.locationLatitude.toFixed(5)}-${transaction.locationLongitude.toFixed(5)}`;
+      if (seen.has(key)) return [];
+      seen.add(key);
+      return [{
+        label: transaction.locationLabel ?? transaction.area ?? "Pinned location",
+        address: transaction.locationAddress ?? "Kathmandu, Nepal",
+        latitude: transaction.locationLatitude,
+        longitude: transaction.locationLongitude,
+        accuracy: transaction.locationAccuracy,
+        source: transaction.locationSource ?? "pin",
+        savedPlaceId: transaction.savedPlaceId,
+      }];
+    }).slice(0, 8);
+  }, [transactions]);
+  const activeFilterCount = [
+    filters.kind !== "all",
+    filters.category !== "all",
+    filters.paymentAccountId !== "all",
+    filters.dateFilter !== "all",
+    filters.dateFilter === "custom" && Boolean(filters.fromDate),
+    filters.dateFilter === "custom" && Boolean(filters.toDate),
+    Boolean(filters.minAmount),
+    Boolean(filters.maxAmount),
+  ].filter(Boolean).length;
   const updateFilter = <K extends keyof MapFilters>(key: K, value: MapFilters[K]) => setFilters((current) => ({ ...current, [key]: value }));
 
   useEffect(() => {
@@ -149,6 +204,11 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
         type: "Feature" as const,
         geometry: { type: "Point" as const, coordinates: [transaction.locationLongitude!, transaction.locationLatitude!] },
         properties: { id: transaction.id, kind: transaction.kind, amount: transaction.amountMinor, placeKey: placeKeyFor(transaction) },
+      }));
+      const savedPlaceFeatures = savedPlaces.map((place) => ({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: [place.longitude, place.latitude] },
+        properties: { placeKey: place.id },
       }));
       const instance = new module.Map({
         container: mapNode.current,
@@ -171,6 +231,7 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
       instance.on("idle", () => setMapError(null));
       instance.on("load", () => {
         instance.addSource("transactions", { type: "geojson", data: { type: "FeatureCollection", features }, cluster: mapMode === "pins", clusterRadius: 46, clusterMaxZoom: 15 });
+        instance.addSource("saved-places", { type: "geojson", data: { type: "FeatureCollection", features: savedPlaceFeatures } });
         if (mapMode === "heatmap") {
           instance.addLayer({ id: "transaction-heatmap", type: "heatmap", source: "transactions", maxzoom: 17, paint: {
             "heatmap-weight": ["interpolate", ["linear"], ["get", "amount"], 0, 0, 1000, 0.15, 10000, 0.5, 100000, 1],
@@ -186,36 +247,40 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
           instance.addLayer({ id: "transaction-expenses", type: "circle", source: "transactions", filter: ["all", ["!", ["has", "point_count"]], ["==", ["get", "kind"], "expense"]], paint: { "circle-color": "#e06a5f", "circle-radius": 9, "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 } });
           instance.addLayer({ id: "transaction-income", type: "circle", source: "transactions", filter: ["all", ["!", ["has", "point_count"]], ["==", ["get", "kind"], "income"]], paint: { "circle-color": "#2a936f", "circle-radius": 9, "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 } });
         }
+        instance.addLayer({ id: "saved-place-points", type: "circle", source: "saved-places", paint: { "circle-color": "#f7f4e8", "circle-radius": 8, "circle-stroke-color": "#557f69", "circle-stroke-width": 3 } });
         const pointLayers = mapMode === "heatmap" ? ["transaction-heatmap-points"] : ["transaction-expenses", "transaction-income"];
         const selectPoint = (event: import("maplibre-gl").MapMouseEvent & { features?: import("maplibre-gl").MapGeoJSONFeature[] }) => {
           const properties = event.features?.[0]?.properties;
           if (properties?.placeKey) setSelectedPlaceKey(String(properties.placeKey));
         };
-        pointLayers.forEach((layer) => instance.on("click", layer, selectPoint));
+        [...pointLayers, "saved-place-points"].forEach((layer) => instance.on("click", layer, selectPoint));
+        instance.on("mouseenter", "saved-place-points", () => { instance.getCanvas().style.cursor = "pointer"; });
+        instance.on("mouseleave", "saved-place-points", () => { instance.getCanvas().style.cursor = ""; });
         if (mapMode === "pins") {
           instance.on("click", "transaction-clusters", (event) => instance.easeTo({ center: event.lngLat, zoom: Math.min(instance.getZoom() + 2, 16) }));
           ["transaction-expenses", "transaction-income", "transaction-clusters"].forEach((layer) => { instance.on("mouseenter", layer, () => { instance.getCanvas().style.cursor = "pointer"; }); instance.on("mouseleave", layer, () => { instance.getCanvas().style.cursor = ""; }); });
         }
-        if (features.length > 1) { const bounds = new module.LngLatBounds(); features.forEach((feature) => bounds.extend(feature.geometry.coordinates as [number, number])); instance.fitBounds(bounds, { padding: 65, maxZoom: 15 }); }
-        else if (features[0]) instance.flyTo({ center: features[0].geometry.coordinates as [number, number], zoom: 15 });
+        const allFeatures = [...features, ...savedPlaceFeatures];
+        if (allFeatures.length > 1) { const bounds = new module.LngLatBounds(); allFeatures.forEach((feature) => bounds.extend(feature.geometry.coordinates as [number, number])); instance.fitBounds(bounds, { padding: 65, maxZoom: 15 }); }
+        else if (allFeatures[0]) instance.flyTo({ center: allFeatures[0].geometry.coordinates as [number, number], zoom: 15 });
       });
     });
     return () => { active = false; removeLabels(); map.current?.remove(); map.current = null; };
-  }, [located, mapMode]);
+  }, [located, mapMode, savedPlaces]);
 
   const focusSummary = (summary: PlaceSummary) => { setSelectedPlaceKey(summary.key); map.current?.flyTo({ center: [summary.longitude, summary.latitude], zoom: 16 }); };
   const savePlaceRename = async (place: SavedPlace) => {
     const name = editingSavedPlaceName.trim();
     if (!name) return;
-    await onSaveSavedPlace({ name, address: place.address, latitude: place.latitude, longitude: place.longitude }, place.id);
+    await onSaveSavedPlace({ name, icon: editingSavedPlaceIcon, address: place.address, latitude: place.latitude, longitude: place.longitude }, place.id);
     setEditingSavedPlaceId(null);
   };
 
   return <div className="page maps-page">
-    <header className="page-header maps-header"><div><span className="eyebrow">Kathmandu location history</span><h1>Transaction map</h1><p>See where your mapped income and expenses happened, what each place costs, and how your patterns change.</p></div><button className="primary-button" onClick={onAdd}><MapPin size={18} />Add mapped transaction</button></header>
+    <header className="page-header maps-header"><div><span className="eyebrow">Kathmandu location history</span><h1>Transaction map</h1><p>Save the places that matter, then connect transactions to them to understand your location patterns.</p></div><div className="maps-header-actions"><button className="secondary-button" onClick={onAdd}><MapPin size={18} />Add transaction</button><button className="primary-button" onClick={() => setPlacePickerOpen(true)}><Plus size={18} />Save a place</button></div></header>
     <section className="map-filter-panel">
-      <div className="map-filter-heading"><div><span className="section-label">Explore your places</span><strong>{located.length} mapped {located.length === 1 ? "entry" : "entries"}</strong></div><button type="button" className="text-button" onClick={() => setFilters(initialFilters)}><X size={14} />Clear filters</button></div>
-      <div className="map-filter-grid">
+      <div className="map-filter-heading"><div><span className="section-label">Explore your places</span><strong>{located.length} mapped {located.length === 1 ? "entry" : "entries"}</strong></div><div className="map-filter-actions">{activeFilterCount > 0 && <button type="button" className="text-button" onClick={() => setFilters(initialFilters)}><X size={14} />Clear</button>}<button type="button" className={activeFilterCount ? "secondary-button small map-filter-toggle active" : "secondary-button small map-filter-toggle"} aria-expanded={filtersOpen} aria-controls="map-filters" onClick={() => setFiltersOpen((open) => !open)}><FunnelSimple size={16} weight={activeFilterCount ? "fill" : "regular"} />Filter{activeFilterCount > 0 && <span>{activeFilterCount}</span>}</button></div></div>
+      {filtersOpen && <div className="map-filter-grid" id="map-filters">
         <Select label="Date" value={filters.dateFilter} data={[{ value: "all", label: "All time" }, { value: "this_month", label: "This month" }, { value: "last_3_months", label: "Last 3 months" }, { value: "this_year", label: "This year" }, { value: "custom", label: "Custom range" }]} onChange={(value) => updateFilter("dateFilter", (value ?? "all") as DateFilter)} />
         <Select label="Category" value={filters.category} data={[{ value: "all", label: "All categories" }, ...categories]} onChange={(value) => updateFilter("category", value ?? "all")} />
         <Select label="Payment account" value={filters.paymentAccountId} data={[{ value: "all", label: "All payment sources" }, ...paymentAccounts.map((account) => ({ value: account.id, label: account.label || account.provider }))]} onChange={(value) => updateFilter("paymentAccountId", value ?? "all")} />
@@ -223,7 +288,8 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
         {filters.dateFilter === "custom" && <><TextInput type="date" label="From" value={filters.fromDate} onChange={(event) => updateFilter("fromDate", event.currentTarget.value)} /><TextInput type="date" label="To" value={filters.toDate} onChange={(event) => updateFilter("toDate", event.currentTarget.value)} /></>}
         <TextInput label="Minimum amount" placeholder="0" value={filters.minAmount} onChange={(event) => updateFilter("minAmount", event.currentTarget.value)} />
         <TextInput label="Maximum amount" placeholder="No limit" value={filters.maxAmount} onChange={(event) => updateFilter("maxAmount", event.currentTarget.value)} />
-      </div>
+        <button type="button" className="text-button map-filter-clear" onClick={() => setFilters(initialFilters)}><X size={14} />Clear filters</button>
+      </div>}
     </section>
     <section className="map-summary-strip"><div><strong>{summaries.length}</strong><span>{summaries.length === 1 ? "place" : "places"}</span></div><div><span className="map-legend expense" />Expense</div><div><span className="map-legend income" />Income</div><SegmentedControl aria-label="Map display" value={mapMode} data={[{ value: "pins", label: "Pins" }, { value: "heatmap", label: "Heatmap" }]} onChange={(value) => setMapMode(value as MapMode)} /></section>
     <div className="maps-layout">
@@ -231,14 +297,19 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
         <div ref={mapNode} className="transactions-map" />
         {mapMode === "heatmap" && <div className="heatmap-legend"><span>Lower spend</span><i /><span>Higher spend</span></div>}
         {mapError && <span className="map-load-warning" role="status">{mapError}</span>}
-        {!located.length && <div className="map-empty-state"><MapPin size={32} weight="duotone" /><strong>No mapped transactions match</strong><p>Adjust the filters or add a transaction with an exact Kathmandu location.</p><button className="primary-button small" onClick={onAdd}>Add a location</button></div>}
-        {selectedSummary && <article className="map-selected-card"><button className="icon-button" aria-label="Close selected place" onClick={() => setSelectedPlaceKey(null)}>×</button><div className="place-summary-card"><span className="eyebrow">Selected place</span><h2>{selectedSummary.label}</h2><p>{selectedSummary.address}</p><div className="place-summary-stats"><div><strong className="map-amount">{formatMoney(selectedSummary.totalExpenseMinor, currency)}</strong><small>Spent</small></div><div><strong className="map-amount">{formatMoney(selectedSummary.totalIncomeMinor, currency)}</strong><small>Received</small></div><div><strong className="map-amount">{formatMoney(selectedSummary.netMinor, currency)}</strong><small>Net</small></div><div><strong>{selectedSummary.transactions.length}</strong><small>Entries</small></div></div><small className="place-summary-category">Top category: {getCategory(selectedSummary.topCategory, customCategories).label}</small>{selectedSummary.monthlyTotals.length > 0 && <div className="place-trend"><span className="section-label">Monthly spending</span>{selectedSummary.monthlyTotals.map((item) => { const max = Math.max(...selectedSummary.monthlyTotals.map((entry) => entry.amountMinor)); return <div className="place-trend-row" key={item.month}><span>{item.month}</span><i><b style={{ width: `${max ? Math.max(6, item.amountMinor / max * 100) : 0}%` }} /></i><strong className="map-amount">{formatMoney(item.amountMinor, currency)}</strong></div>; })}</div>}</div><div className="place-history"><div className="section-heading"><div><span className="section-label">History</span><h3>Transactions at this place</h3></div></div>{selectedSummary.transactions.map((transaction) => <div className="place-history-row" key={transaction.id}><TransactionRow compact transaction={transaction} currency={currency} customCategories={customCategories} /><button type="button" className="text-button" onClick={() => onEdit(transaction)}><PencilSimple size={14} />Edit</button></div>)}</div></article>}
+        {!located.length && !savedPlaces.length && <div className="map-empty-state"><MapPin size={32} weight="duotone" /><strong>Your map is ready</strong><p>Save a place first, or add a transaction with an exact Kathmandu location.</p><button className="primary-button small" onClick={() => setPlacePickerOpen(true)}>Save your first place</button></div>}
+        {selectedSummary && <article className="map-selected-card"><button className="icon-button" aria-label="Close selected place" onClick={() => setSelectedPlaceKey(null)}>×</button><div className="place-summary-card"><span className="eyebrow">Selected place</span><h2><SavedPlaceIcon icon={selectedSummary.icon} size={20} />{selectedSummary.label}</h2><p>{selectedSummary.address}</p><div className="place-summary-stats"><div><strong className="map-amount">{formatMoney(selectedSummary.totalExpenseMinor, currency)}</strong><small>Spent</small></div><div><strong className="map-amount">{formatMoney(selectedSummary.totalIncomeMinor, currency)}</strong><small>Received</small></div><div><strong className="map-amount">{formatMoney(selectedSummary.netMinor, currency)}</strong><small>Net</small></div><div><strong>{selectedSummary.transactions.length}</strong><small>Entries</small></div></div>{selectedSummary.transactions.length > 0 && <small className="place-summary-category">Top category: {getCategory(selectedSummary.topCategory, customCategories).label}</small>}{selectedSavedPlace && <button type="button" className="secondary-button small add-at-place-button" onClick={() => onAddAtPlace(selectedSavedPlace)}><Plus size={15} />Add transaction here</button>}{selectedSummary.monthlyTotals.length > 0 && <div className="place-trend"><span className="section-label">Monthly spending</span>{selectedSummary.monthlyTotals.map((item) => { const max = Math.max(...selectedSummary.monthlyTotals.map((entry) => entry.amountMinor)); return <div className="place-trend-row" key={item.month}><span>{item.month}</span><i><b style={{ width: `${max ? Math.max(6, item.amountMinor / max * 100) : 0}%` }} /></i><strong className="map-amount">{formatMoney(item.amountMinor, currency)}</strong></div>; })}</div>}</div><div className="place-history"><div className="section-heading"><div><span className="section-label">History</span><h3>Transactions at this place</h3></div></div>{selectedSummary.transactions.map((transaction) => <div className="place-history-row" key={transaction.id}><TransactionRow compact transaction={transaction} currency={currency} customCategories={customCategories} /><button type="button" className="text-button" onClick={() => onEdit(transaction)}><PencilSimple size={14} />Edit</button></div>)}{!selectedSummary.transactions.length && <p className="mapped-list-empty">Add a transaction here, or edit an existing transaction and choose this saved place.</p>}</div></article>}
       </section>
       <aside className="mapped-transaction-list">
         <div className="section-heading"><div><span className="section-label">Location summaries</span><h2>Places in Kathmandu</h2></div></div>
-        <div className="mapped-place-list">{summaries.map((summary) => <button type="button" className={selectedPlaceKey === summary.key ? "mapped-entry active" : "mapped-entry"} key={summary.key} onClick={() => focusSummary(summary)}><MapPin size={18} weight="fill" /><span><strong>{summary.label}</strong><small>{summary.transactions.length} {summary.transactions.length === 1 ? "entry" : "entries"} · <span className="map-amount">{formatMoney(summary.totalExpenseMinor, currency)}</span> spent</small></span><ArrowRight size={15} /></button>)}{!summaries.length && <p className="mapped-list-empty">Mapped places will appear here for quick review.</p>}</div>
-        <div className="saved-places-panel"><div className="section-heading"><div><span className="section-label"><ClockCounterClockwise size={14} />Saved places</span><h3>Quick reuse</h3></div></div>{savedPlaces.map((place) => <div className="saved-place-row" key={place.id}>{editingSavedPlaceId === place.id ? <><TextInput aria-label="Saved place name" size="xs" value={editingSavedPlaceName} onChange={(event) => setEditingSavedPlaceName(event.currentTarget.value)} /><button type="button" className="icon-button" onClick={() => void savePlaceRename(place)} aria-label="Save place name">✓</button></> : <><button type="button" className="saved-place-focus" onClick={() => focusSummary(summaries.find((summary) => summary.key === place.id) ?? { key: place.id, label: place.name, address: place.address, latitude: place.latitude, longitude: place.longitude, transactions: [], totalExpenseMinor: 0, totalIncomeMinor: 0, netMinor: 0, topCategory: "other", monthlyTotals: [] })}><MapPin size={16} /><span><strong>{place.name}</strong><small>{place.address}</small></span></button><button type="button" className="icon-button" onClick={() => { setEditingSavedPlaceId(place.id); setEditingSavedPlaceName(place.name); }} aria-label={`Rename ${place.name}`}><PencilSimple size={14} /></button><button type="button" className="icon-button danger-text" onClick={() => { if (window.confirm(`Delete saved place ${place.name}?`)) void onDeleteSavedPlace(place.id); }} aria-label={`Delete ${place.name}`}><Trash size={14} /></button></>}</div>)}{!savedPlaces.length && <p className="mapped-list-empty">Save a place while adding a transaction to reuse it here.</p>}</div>
+        <div className="mapped-place-list">{summaries.map((summary) => <button type="button" className={selectedPlaceKey === summary.key ? "mapped-entry active" : "mapped-entry"} key={summary.key} onClick={() => focusSummary(summary)}><SavedPlaceIcon icon={summary.icon} size={18} weight="fill" /><span><strong>{summary.label}</strong><small>{summary.transactions.length} {summary.transactions.length === 1 ? "entry" : "entries"} · <span className="map-amount">{formatMoney(summary.totalExpenseMinor, currency)}</span> spent</small></span><ArrowRight size={15} /></button>)}{!summaries.length && <p className="mapped-list-empty">Saved and mapped places will appear here.</p>}</div>
+        <div className="saved-places-panel">
+          <div className="section-heading"><div><span className="section-label"><ClockCounterClockwise size={14} />Saved places</span><h3>Reusable locations</h3></div><button type="button" className="icon-button" onClick={() => setPlacePickerOpen(true)} aria-label="Save a new place"><Plus size={15} /></button></div>
+          {savedPlaces.map((place) => <div className={editingSavedPlaceId === place.id ? "saved-place-row editing" : "saved-place-row"} key={place.id}>{editingSavedPlaceId === place.id ? <div className="saved-place-editor"><TextInput aria-label="Saved place name" size="xs" value={editingSavedPlaceName} onChange={(event) => setEditingSavedPlaceName(event.currentTarget.value)} /><fieldset className="saved-place-icon-picker compact"><legend>Icon</legend>{savedPlaceIconOptions.map((option) => <button type="button" className={editingSavedPlaceIcon === option.value ? "active" : undefined} aria-label={option.label} aria-pressed={editingSavedPlaceIcon === option.value} key={option.value} onClick={() => setEditingSavedPlaceIcon(option.value)}><SavedPlaceIcon icon={option.value} size={15} /></button>)}</fieldset><div className="saved-place-editor-actions"><button type="button" className="text-button" onClick={() => setEditingSavedPlaceId(null)}>Cancel</button><button type="button" className="primary-button small" disabled={!editingSavedPlaceName.trim()} onClick={() => void savePlaceRename(place)}>Save</button></div></div> : <><button type="button" className="saved-place-focus" onClick={() => { const summary = summaries.find((item) => item.key === place.id); if (summary) focusSummary(summary); }}><SavedPlaceIcon icon={place.icon ?? "pin"} size={17} /><span><strong>{place.name}</strong><small>{place.address}</small></span></button><button type="button" className="icon-button" onClick={() => { setEditingSavedPlaceId(place.id); setEditingSavedPlaceName(place.name); setEditingSavedPlaceIcon(place.icon ?? "pin"); }} aria-label={`Edit ${place.name}`}><PencilSimple size={14} /></button><button type="button" className="icon-button danger-text" onClick={() => { if (window.confirm(`Delete saved place ${place.name}?`)) void onDeleteSavedPlace(place.id); }} aria-label={`Delete ${place.name}`}><Trash size={14} /></button></>}</div>)}
+          {!savedPlaces.length && <div className="saved-place-empty"><p>Name places like Home, Office, or your favorite shop.</p><button type="button" className="secondary-button small" onClick={() => setPlacePickerOpen(true)}><Plus size={15} />Save a place</button></div>}
+        </div>
       </aside>
     </div>
+    <LocationPicker open={placePickerOpen} mode="saved-place" value={null} recentLocations={recentLocations} savedPlaces={savedPlaces} onClose={() => setPlacePickerOpen(false)} onSavePlace={onSaveSavedPlace} />
   </div>;
 }

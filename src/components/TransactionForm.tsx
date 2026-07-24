@@ -39,6 +39,7 @@ interface TransactionFormProps {
   transaction?: LedgerTransaction | null;
   template?: LedgerTransaction | null;
   initialOccurredOn?: string;
+  initialLocation?: TransactionLocationDraft | null;
   transactions: LedgerTransaction[];
   customCategories: CustomCategory[];
   paymentAccounts: PaymentAccount[];
@@ -59,7 +60,7 @@ function locationFromTransaction(transaction?: LedgerTransaction | null): Transa
   } : null;
 }
 
-export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, transactions, customCategories, paymentAccounts, savedPlaces, onClose, onSave }: TransactionFormProps) {
+export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, initialLocation, transactions, customCategories, paymentAccounts, savedPlaces, onClose, onSave }: TransactionFormProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ReceiptUpload | undefined>();
   const [removeReceipt, setRemoveReceipt] = useState(false);
@@ -68,7 +69,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
   const [appliedSuggestionId, setAppliedSuggestionId] = useState<string | null>(template?.id ?? null);
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const source = transaction ?? template;
-  const defaultLocation = useMemo(() => locationFromTransaction(source), [source]);
+  const defaultLocation = useMemo(() => locationFromTransaction(source) ?? initialLocation ?? null, [initialLocation, source]);
   const recentLocations = useMemo(() => {
     const seen = new Set<string>();
     return transactions.flatMap((entry) => {

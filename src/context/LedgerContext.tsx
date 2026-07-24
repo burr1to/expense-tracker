@@ -4,7 +4,7 @@
 import { addDays, addMonths, format } from "date-fns";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { majorToMinor } from "../lib/currency";
-import type { AccountTransfer, Budget, CustomCategory, DueDraft, DueItem, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, RecurringEntry, SavedPlace, SavingsGoal, TransactionDraft, TransactionKind } from "../types";
+import type { AccountTransfer, Budget, CustomCategory, DueDraft, DueItem, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, RecurringEntry, SavedPlace, SavedPlaceDraft, SavingsGoal, TransactionDraft, TransactionKind } from "../types";
 import { useAuth } from "./AuthContext";
 
 interface BudgetDraft { category: string; amount: string; monthKey: string }
@@ -17,7 +17,7 @@ interface LedgerData { profile: Profile; transactions: LedgerTransaction[]; budg
 interface LedgerContextValue extends LedgerData {
   loading: boolean; error: string | null;
   saveTransaction: (draft: TransactionDraft, id?: string) => Promise<void>; importTransactions: (drafts: TransactionDraft[]) => Promise<number>; deleteTransaction: (id: string) => Promise<void>;
-  saveSavedPlace: (draft: Pick<SavedPlace, "name" | "address" | "latitude" | "longitude">, id?: string) => Promise<void>; deleteSavedPlace: (id: string) => Promise<void>;
+  saveSavedPlace: (draft: SavedPlaceDraft, id?: string) => Promise<void>; deleteSavedPlace: (id: string) => Promise<void>;
   saveBudget: (draft: BudgetDraft, id?: string) => Promise<void>; deleteBudget: (id: string) => Promise<void>;
   saveRecurring: (draft: RecurringDraft, id?: string) => Promise<void>; deleteRecurring: (id: string) => Promise<void>; confirmRecurring: (id: string) => Promise<void>;
   saveGoal: (draft: GoalDraft, id?: string) => Promise<void>; contributeToGoal: (id: string, amount: string) => Promise<void>; deleteGoal: (id: string) => Promise<void>;
@@ -68,7 +68,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const saveTransaction = useCallback(async (draft: TransactionDraft, id?: string) => mutate("saveTransaction", transactionPayload(draft), id), [mutate]);
   const importTransactions = useCallback(async (drafts: TransactionDraft[]) => { await mutate("importTransactions", drafts.map(transactionPayload)); return drafts.length; }, [mutate]);
   const deleteTransaction = useCallback(async (id: string) => mutate("deleteTransaction", undefined, id), [mutate]);
-  const saveSavedPlace = useCallback(async (draft: Pick<SavedPlace, "name" | "address" | "latitude" | "longitude">, id?: string) => mutate("saveSavedPlace", draft, id), [mutate]);
+  const saveSavedPlace = useCallback(async (draft: SavedPlaceDraft, id?: string) => mutate("saveSavedPlace", draft, id), [mutate]);
   const deleteSavedPlace = useCallback(async (id: string) => mutate("deleteSavedPlace", undefined, id), [mutate]);
   const saveBudget = useCallback(async (draft: BudgetDraft, id?: string) => mutate("saveBudget", { monthKey: draft.monthKey, category: draft.category, amountMinor: majorToMinor(draft.amount) }, id), [mutate]);
   const deleteBudget = useCallback(async (id: string) => mutate("deleteBudget", undefined, id), [mutate]);

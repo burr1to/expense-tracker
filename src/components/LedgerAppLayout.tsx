@@ -10,7 +10,7 @@ import { useLedger } from "../context/LedgerContext";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { toDateInput } from "../lib/dates";
 import { appRoutes, viewFromPathname } from "../lib/routes";
-import type { AppView, LedgerTransaction, TransactionDraft } from "../types";
+import type { AppView, LedgerTransaction, SavedPlace, TransactionDraft, TransactionLocationDraft } from "../types";
 import { AuthPage } from "../views/AuthPage";
 import { AppShell } from "./AppShell";
 import { BrandIcon } from "./BrandIcon";
@@ -29,6 +29,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const [editing, setEditing] = useState<LedgerTransaction | null>(null);
   const [reusing, setReusing] = useState<LedgerTransaction | null>(null);
   const [newTransactionDate, setNewTransactionDate] = useState<string | undefined>();
+  const [newTransactionLocation, setNewTransactionLocation] = useState<TransactionLocationDraft | null>(null);
   const [homeSelectedDate, setHomeSelectedDate] = useState(toDateInput);
   const [homeFocus, setHomeFocus] = useState<{ date: string; revision: number } | null>(null);
   const [locked, setLocked] = useState(false);
@@ -77,24 +78,35 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     setEditing(null);
     setReusing(null);
     setNewTransactionDate(view === "home" ? homeSelectedDate : undefined);
+    setNewTransactionLocation(null);
+    setFormOpen(true);
+  };
+  const openAddAtPlace = (place: SavedPlace) => {
+    setEditing(null);
+    setReusing(null);
+    setNewTransactionDate(undefined);
+    setNewTransactionLocation({ label: place.name, address: place.address, latitude: place.latitude, longitude: place.longitude, accuracy: null, source: "saved", savedPlaceId: place.id });
     setFormOpen(true);
   };
   const openAddForDate = (occurredOn: string) => {
     setEditing(null);
     setReusing(null);
     setNewTransactionDate(occurredOn);
+    setNewTransactionLocation(null);
     setFormOpen(true);
   };
   const openDuplicate = (transaction: LedgerTransaction) => {
     setEditing(null);
     setReusing(transaction);
     setNewTransactionDate(toDateInput());
+    setNewTransactionLocation(null);
     setFormOpen(true);
   };
   const openEdit = (transaction: LedgerTransaction) => {
     setEditing(transaction);
     setReusing(null);
     setNewTransactionDate(undefined);
+    setNewTransactionLocation(null);
     setFormOpen(true);
   };
   const saveTransaction = async (draft: TransactionDraft, id?: string) => {
@@ -127,6 +139,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     homeFocus,
     setHomeSelectedDate,
     openAdd,
+    openAddAtPlace,
     openAddForDate,
     openDuplicate,
     openEdit,
@@ -163,6 +176,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         transaction={editing}
         template={reusing}
         initialOccurredOn={newTransactionDate}
+        initialLocation={newTransactionLocation}
         transactions={ledger.transactions}
         customCategories={ledger.customCategories}
         paymentAccounts={ledger.paymentAccounts}
