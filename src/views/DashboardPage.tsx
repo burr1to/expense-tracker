@@ -1,8 +1,8 @@
-import { ArrowRight, Bank, CalendarBlank, CaretDown, Check, Flag, Lightbulb, LockKey, Plus, Repeat } from "@phosphor-icons/react";
+import { ArrowRight, Bank, CalendarBlank, CaretDown, Check, DownloadSimple, FilePdf, Flag, Lightbulb, LockKey, MapPinLine, Minus, Plus, Repeat, TrendDown, TrendUp } from "@phosphor-icons/react";
 import { Modal, PasswordInput, Popover } from "@mantine/core";
 import { DatePicker } from "@mantine/dates";
 import { format, isSameMonth, parseISO, startOfMonth } from "date-fns";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { EmptyState } from "../components/EmptyState";
 import { ButtonSpinner } from "../components/ButtonSpinner";
@@ -13,9 +13,11 @@ import { formatMoney } from "../lib/currency";
 import { isInMonth } from "../lib/dates";
 import { dailyExpenseSeries, summarizeLedger } from "../lib/ledger";
 import { generateInsights } from "../lib/insights";
+import { calculatePlaceSpendingTrends, placeTrendPeriodOptions, type PlaceSpendingTrend, type PlaceTrendPeriodMonths } from "../lib/place-spending-trends";
 import { calculateBudgetPacing, calculateMonthlyBreathingRoom } from "../lib/planning-insights";
+import { spendingPeriodOptions, spendingPeriodRange, type SpendingPeriod } from "../lib/spending-period";
 import { totalCurrentBalance } from "../lib/account-balances";
-import type { AppView, Budget, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount, RecurringEntry, SavingsGoal } from "../types";
+import type { AppView, Budget, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount, RecurringEntry, SavedPlace, SavingsGoal } from "../types";
 
 interface DashboardPageProps {
   month: Date;
@@ -28,18 +30,34 @@ interface DashboardPageProps {
   goals: SavingsGoal[];
   customCategories: CustomCategory[];
   paymentAccounts: PaymentAccount[];
+  savedPlaces: SavedPlace[];
   hasPin: boolean;
+  monthlyReport?: { monthKey: string; monthLabel: string; href: string } | null;
   onMonthChange: (date: Date) => void;
   onAdd: (occurredOn: string) => void;
   onSelectedDayChange: (occurredOn: string) => void;
   onNavigate: (view: AppView) => void;
+  onOpenPlace: (placeKey: string) => void;
   onConfirmRecurring: (id: string) => Promise<void>;
   onVerifyPin: (pin: string) => Promise<void>;
 }
 
-export function DashboardPage({ month, focus, currency, transactions, budgets, recurringEntries, dueItems, goals, customCategories, paymentAccounts, hasPin, onMonthChange, onAdd, onSelectedDayChange, onNavigate, onConfirmRecurring, onVerifyPin }: DashboardPageProps) {
+function placeTrendExplanation(trend: PlaceSpendingTrend) {
+  const spendingDirection = trend.currentTotalMinor >= trend.previousTotalMinor ? "increase" : "decrease";
+  if (trend.driver === "steady") return "Spending stayed close to the previous period.";
+  if (trend.driver === "frequency") {
+    const purchases = Math.abs(trend.purchaseChange);
+    return `${purchases} ${purchases === 1 ? "purchase" : "purchases"} ${trend.purchaseChange > 0 ? "more" : "fewer"} drove most of the ${spendingDirection}.`;
+  }
+  if (trend.driver === "average") return `Average purchase ${trend.averageChangePercent >= 0 ? "rose" : "fell"} ${Math.abs(trend.averageChangePercent)}%.`;
+  return `Both purchase frequency and average spend contributed to the ${spendingDirection}.`;
+}
+
+export function DashboardPage({ month, focus, currency, transactions, budgets, recurringEntries, dueItems, goals, customCategories, paymentAccounts, savedPlaces, hasPin, monthlyReport, onMonthChange, onAdd, onSelectedDayChange, onNavigate, onOpenPlace, onConfirmRecurring, onVerifyPin }: DashboardPageProps) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<Date>(() => isSameMonth(month, new Date()) ? new Date() : startOfMonth(month));
+  const [spendingPeriod, setSpendingPeriod] = useState<SpendingPeriod>("weekly");
+  const [placeTrendPeriod, setPlaceTrendPeriod] = useState<PlaceTrendPeriodMonths>(1);
   const [balancesUnlocked, setBalancesUnlocked] = useState(false);
   const [balanceUnlockOpen, setBalanceUnlockOpen] = useState(false);
   const [balancePin, setBalancePin] = useState("");
@@ -51,7 +69,22 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
   const monthTransactions = transactions.filter((item) => isInMonth(item.occurredOn, month));
   const summary = summarizeLedger(monthTransactions, customCategories);
   const trackedBalance = totalCurrentBalance(paymentAccounts);
-  const chartData = dailyExpenseSeries(monthTransactions).slice(-7);
+  const spendingRange = spendingPeriodRange(spendingPeriod, selectedDay);
+  const spendingTransactions = transactions.filter((item) => item.occurredOn >= spendingRange.startKey && item.occurredOn <= spendingRange.endKey);
+  const spendingSummary = summarizeLedger(spendingTransactions, customCategories);
+  const chartData = dailyExpenseSeries(spendingTransactions);
+  const spendingRangeLabel = `${format(spendingRange.start, spendingRange.start.getFullYear() === spendingRange.end.getFullYear() ? "MMM d" : "MMM d, yyyy")} – ${format(spendingRange.end, "MMM d, yyyy")}`;
+  const placeTrendSets = useMemo(() => placeTrendPeriodOptions.map((option) => ({
+    ...option,
+    trends: calculatePlaceSpendingTrends(transactions, savedPlaces, option.value, selectedDay),
+  })), [savedPlaces, selectedDay, transactions]);
+  const hasPlaceTrends = placeTrendSets.some((set) => set.trends.length > 0);
+  const activePlaceTrendSet = placeTrendSets.find((set) => set.value === placeTrendPeriod) ?? placeTrendSets[0];
+  useEffect(() => {
+    if (!hasPlaceTrends || activePlaceTrendSet.trends.length) return;
+    const firstAvailable = placeTrendSets.find((set) => set.trends.length > 0);
+    if (firstAvailable) setPlaceTrendPeriod(firstAvailable.value);
+  }, [activePlaceTrendSet.trends.length, hasPlaceTrends, placeTrendSets]);
   const selectedDayKey = format(selectedDay, "yyyy-MM-dd");
   useEffect(() => { onSelectedDayChange(selectedDayKey); }, [onSelectedDayChange, selectedDayKey]);
   const dayTransactions = transactions
@@ -130,6 +163,11 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
         <button className="desktop-quick-add primary-button" onClick={() => onAdd(selectedDayKey)}><Plus size={18} />Add transaction</button>
       </header>
 
+      {monthlyReport && <section className="monthly-report-strip" role="status">
+        <div><FilePdf size={24} weight="duotone" /><div><strong>{monthlyReport.monthLabel} report is ready</strong><span>Your full income and expense report can now be saved as a PDF.</span></div></div>
+        <a href={monthlyReport.href} download={`SaveYoRupee-${monthlyReport.monthKey}-monthly-report.pdf`}><DownloadSimple size={16} />Download report</a>
+      </section>}
+
       {dueEntries.length > 0 && <section className="due-strip"><div><CalendarBlank size={23} weight="duotone" /><div><strong>{dueEntries.length} recurring {dueEntries.length === 1 ? "entry is" : "entries are"} ready</strong><span>Confirm before adding anything to your ledger.</span></div></div><div>{dueEntries.slice(0, 2).map((entry) => { const confirming = confirmingId === entry.id; return <button key={entry.id} disabled={Boolean(confirmingId)} onClick={() => void confirmRecurring(entry.id)}>{confirming ? <ButtonSpinner /> : <Check size={15} />}{confirming ? "Confirming…" : entry.note || getCategory(entry.category, customCategories).label}</button>; })}</div></section>}
 
       <section className="summary-strip" aria-label="Monthly summary">
@@ -159,9 +197,22 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
         </div>
       </section>
 
-      <section className="dashboard-grid">
+      <div className="spending-period-bar">
+        <div>
+          <span className="section-label">Spending period</span>
+          <strong>{spendingRangeLabel}</strong>
+        </div>
+        <label className="spending-period-control">
+          <span>Period</span>
+          <select value={spendingPeriod} onChange={(event) => setSpendingPeriod(event.currentTarget.value as SpendingPeriod)}>
+            {spendingPeriodOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </label>
+      </div>
+
+      <section className="dashboard-grid" aria-live="polite">
         <div className="chart-section">
-          <div className="section-heading"><div><span className="section-label">Spending overview</span><h2>Daily rhythm</h2></div><span>{chartData.length ? `${chartData[0].label} – ${chartData[chartData.length - 1].label}` : format(month, "MMMM yyyy")}</span></div>
+          <div className="section-heading"><div><span className="section-label">Spending overview</span><h2>Daily rhythm</h2></div><span>{spendingPeriodOptions.find((option) => option.value === spendingPeriod)?.label}</span></div>
           {chartData.length ? (
             <div className="chart-wrap" aria-label="Daily expense chart">
               <ResponsiveContainer width="100%" height="100%">
@@ -195,17 +246,45 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
         <div className="category-section">
           <div className="section-heading"><div><span className="section-label">Where it went</span><h2>Top categories</h2></div><button className="text-button" onClick={() => onNavigate("reports")}>Full report <ArrowRight size={16} /></button></div>
           <div className="category-bars">
-            {summary.categories.slice(0, 5).map((item) => (
+            {spendingSummary.categories.slice(0, 5).map((item) => (
               <div className="category-bar" key={item.category}>
                 <div><span>{item.label}</span><strong>{formatMoney(item.value, currency)}</strong></div>
                 <div className="bar-track"><span style={{ width: `${item.percentage}%`, backgroundColor: item.color }} /></div>
                 <small>{item.percentage}%</small>
               </div>
             ))}
-            {!summary.categories.length && <EmptyState />}
+            {!spendingSummary.categories.length && <EmptyState />}
           </div>
         </div>
       </section>
+
+      {hasPlaceTrends && <section className="place-spending-section" aria-labelledby="place-spending-title">
+        <div className="place-spending-heading">
+          <div><span className="section-label">Places over time</span><h2 id="place-spending-title">Where spending changed</h2><p>Compared with the previous {activePlaceTrendSet.label}. Changes separate purchase frequency from average spend.</p></div>
+          <div className="place-period-control" aria-label="Place spending comparison period">
+            {placeTrendSets.map((set) => <button type="button" key={set.value} className={placeTrendPeriod === set.value ? "active" : ""} disabled={!set.trends.length} onClick={() => setPlaceTrendPeriod(set.value)} aria-pressed={placeTrendPeriod === set.value}>{set.shortLabel}</button>)}
+          </div>
+        </div>
+        <div className="place-spending-list">
+          {activePlaceTrendSet.trends.slice(0, 3).map((trend) => {
+            const increased = trend.totalChangePercent > 0;
+            const steady = trend.driver === "steady";
+            const TrendIcon = steady ? Minus : increased ? TrendUp : TrendDown;
+            return <button type="button" className="place-spending-row" key={trend.key} onClick={() => onOpenPlace(trend.key)}>
+              <span className={`place-trend-icon ${increased ? "up" : "down"}`}><MapPinLine size={18} weight="duotone" /></span>
+              <span className="place-trend-copy"><strong>{trend.label}</strong><small>{placeTrendExplanation(trend)}</small></span>
+              <span className="place-trend-change"><strong className={steady ? undefined : increased ? "expense" : "income"}><TrendIcon size={14} />{steady ? "Stable" : `${increased ? "+" : ""}${trend.totalChangePercent}%`}</strong><small>vs previous</small></span>
+              <span className="place-trend-stats">
+                <span><small>Spent</small><strong className="map-amount">{formatMoney(trend.currentTotalMinor, currency)}</strong></span>
+                <span><small>Purchases</small><strong>{trend.currentPurchases}</strong></span>
+                <span><small>Average</small><strong className="map-amount">{formatMoney(trend.currentAverageMinor, currency)}</strong></span>
+              </span>
+              <ArrowRight size={16} className="place-trend-arrow" />
+            </button>;
+          })}
+        </div>
+        <p className="place-spending-note">This reflects your spending pattern, not item-level price inflation.</p>
+      </section>}
 
       <section className="breathing-room-card" aria-label="Monthly breathing room">
         <span className="section-label">Monthly breathing room</span>

@@ -1,4 +1,4 @@
-import { Bell, CalendarBlank, Check, ClockCountdown, HandCoins, X } from "@phosphor-icons/react";
+import { Bell, CalendarBlank, Check, ClockCountdown, DownloadSimple, FilePdf, HandCoins, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { dueDateLabel, dueRemaining, groupActionableDues, urgentDueCount, type DueUrgency } from "../lib/dues";
 import { formatMoney } from "../lib/currency";
@@ -10,6 +10,7 @@ type ReminderAction = "complete" | "snooze";
 interface ReminderBellProps {
   items: DueItem[];
   currency: CurrencyCode;
+  monthlyReport?: { monthKey: string; monthLabel: string; href: string } | null;
   onOpenDue: (id?: string, action?: "repay") => void;
   onComplete: (id: string, addToLedger: boolean) => Promise<void>;
   onSnooze: (id: string) => Promise<void>;
@@ -25,7 +26,7 @@ function completionLabel(item: DueItem) {
   return item.kind === "payment" ? "Paid" : "Received";
 }
 
-export function ReminderBell({ items, currency, onOpenDue, onComplete, onSnooze }: ReminderBellProps) {
+export function ReminderBell({ items, currency, monthlyReport, onOpenDue, onComplete, onSnooze }: ReminderBellProps) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<{ id: string; action: ReminderAction } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +36,7 @@ export function ReminderBell({ items, currency, onOpenDue, onComplete, onSnooze 
   const groups = useMemo(() => groupActionableDues(items), [items]);
   const reminders = useMemo(() => [...groups.overdue, ...groups.today, ...groups.later], [groups]);
   const urgentCount = useMemo(() => urgentDueCount(items), [items]);
+  const notificationCount = reminders.length + (monthlyReport ? 1 : 0);
 
   const closePanel = (restoreFocus = false) => {
     setOpen(false);
@@ -86,15 +88,15 @@ export function ReminderBell({ items, currency, onOpenDue, onComplete, onSnooze 
       id="money-reminders-trigger"
       className="reminder-trigger"
       onClick={() => setOpen((value) => !value)}
-      aria-label={`${urgentCount} urgent, ${reminders.length} total money reminders`}
+      aria-label={`${urgentCount} urgent, ${notificationCount} total notifications`}
       aria-expanded={open}
       aria-controls="money-reminders-panel"
       aria-haspopup="dialog"
     >
-      <Bell size={20} weight={reminders.length ? "fill" : "regular"} />
+      <Bell size={20} weight={notificationCount ? "fill" : "regular"} />
       {urgentCount > 0
         ? <span>{urgentCount > 9 ? "9+" : urgentCount}</span>
-        : reminders.length > 0 && <i aria-hidden="true" />}
+        : notificationCount > 0 && <i aria-hidden="true" />}
     </button>
     <span className="sr-only" aria-live="polite">{urgentCount} urgent money reminders</span>
 
@@ -108,13 +110,24 @@ export function ReminderBell({ items, currency, onOpenDue, onComplete, onSnooze 
       <header>
         <div>
           <span className="section-label">Money to handle</span>
-          <h2 id="money-reminders-title">{reminders.length ? `${reminders.length} ${reminders.length === 1 ? "item needs" : "items need"} attention` : "You’re all caught up"}</h2>
-          {reminders.length > 0 && <p>{urgentCount ? `${urgentCount} urgent right now` : "Nothing urgent right now"}</p>}
+          <h2 id="money-reminders-title">{notificationCount ? `${notificationCount} ${notificationCount === 1 ? "item is" : "items are"} ready` : "You’re all caught up"}</h2>
+          {notificationCount > 0 && <p>{urgentCount ? `${urgentCount} urgent right now` : "Nothing urgent right now"}</p>}
         </div>
         <button ref={closeRef} className="icon-button" onClick={() => closePanel(true)} aria-label="Close money reminders"><X size={18} /></button>
       </header>
 
       <div className="reminder-panel-body">
+        {monthlyReport && <section className="monthly-report-notification" aria-labelledby="monthly-report-notification-title">
+          <span className="reminder-kind report"><FilePdf size={18} weight="duotone" /></span>
+          <span>
+            <strong id="monthly-report-notification-title">{monthlyReport.monthLabel} report is ready</strong>
+            <small>Your completed income and expense report is available as a PDF.</small>
+          </span>
+          <a href={monthlyReport.href} download={`SaveYoRupee-${monthlyReport.monthKey}-monthly-report.pdf`} className="reminder-action primary">
+            <DownloadSimple size={14} />Download
+          </a>
+        </section>}
+
         {(["overdue", "today", "later"] as DueUrgency[]).map((urgency) => groups[urgency].length > 0 && <section className={`reminder-group ${urgency}`} key={urgency} aria-labelledby={`reminder-group-${urgency}`}>
           <h3 id={`reminder-group-${urgency}`}>{groupLabels[urgency]} <span>{groups[urgency].length}</span></h3>
           <div className="reminder-list">
@@ -149,7 +162,7 @@ export function ReminderBell({ items, currency, onOpenDue, onComplete, onSnooze 
           </div>
         </section>)}
 
-        {!reminders.length && <div className="reminder-empty">
+        {!notificationCount && <div className="reminder-empty">
           <span><Check size={22} weight="bold" /></span>
           <strong>No money tasks need attention</strong>
           <p>New reminders will appear here when their reminder date arrives.</p>

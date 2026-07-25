@@ -157,7 +157,7 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
     </section>
 
     <div className="accounts-management-grid">
-      <section className="settings-panel"><div className="settings-title"><span className="settings-icon"><Bank size={23} /></span><div><h2>Add and manage accounts</h2><p>Enter the real balance currently shown by your bank or wallet.</p></div></div>
+      <section className="settings-panel" id="add-account"><div className="settings-title"><span className="settings-icon"><Bank size={23} /></span><div><h2>Add and manage accounts</h2><p>Enter the real balance currently shown by your bank or wallet.</p></div></div>
         {profile.hasPin ? <form className="settings-form" onSubmit={addPaymentAccount} aria-busy={accountAction === "add"}>
           <Select label="Account type" value={accountType} onChange={(value) => { if (!value) return; setAccountType(value as PaymentAccountType); setAccountProvider(""); }} data={[...PAYMENT_ACCOUNT_TYPES]} allowDeselect={false} disabled={Boolean(accountAction)} />
           {accountType === "mobile_banking" && <Select label="Bank" placeholder="Search Nepal banks" value={accountProvider || null} onChange={(value) => setAccountProvider(value ?? "")} data={NEPAL_MOBILE_BANKS.map((bank) => ({ value: bank, label: bank }))} searchable required disabled={Boolean(accountAction)} />}

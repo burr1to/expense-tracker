@@ -3,12 +3,14 @@
 import { Select, SegmentedControl, TextInput } from "@mantine/core";
 import { ArrowRight, ClockCounterClockwise, FunnelSimple, MapPin, PencilSimple, Plus, Trash, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { LocationPicker } from "../components/LocationPicker";
 import { SavedPlaceIcon } from "../components/SavedPlaceIcon";
 import { TransactionRow } from "../components/TransactionRow";
 import { allCategoriesFor, getCategory } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
 import { KATHMANDU_BOUNDS, KATHMANDU_CENTER, KATHMANDU_MAP_MAX_ZOOM, addKathmanduLabelMarkers, applyKathmanduMapTheme, kathmanduMapStyle } from "../lib/kathmandu-locations";
+import { transactionPlaceKey } from "../lib/place-spending-trends";
 import { savedPlaceIconOptions } from "../lib/saved-places";
 import type { CurrencyCode, CustomCategory, LedgerTransaction, PaymentAccount, SavedPlace, SavedPlaceDraft, SavedPlaceIconName, TransactionKind, TransactionLocationDraft } from "../types";
 
@@ -55,7 +57,6 @@ interface PlaceSummary {
 }
 
 const initialFilters: MapFilters = { kind: "all", category: "all", paymentAccountId: "all", dateFilter: "all", fromDate: "", toDate: "", minAmount: "", maxAmount: "" };
-const placeKeyFor = (transaction: LedgerTransaction) => transaction.savedPlaceId ?? `${transaction.locationLatitude!.toFixed(5)}-${transaction.locationLongitude!.toFixed(5)}`;
 const startOfThisMonth = () => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`; };
 const startOfLast3Months = () => { const date = new Date(); date.setMonth(date.getMonth() - 2, 1); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`; };
 const startOfThisYear = () => `${new Date().getFullYear()}-01-01`;
@@ -73,7 +74,8 @@ function buildSummaries(transactions: LedgerTransaction[], savedPlaces: SavedPla
   const groups = new Map<string, PlaceSummary>();
   transactions.forEach((transaction) => {
     if (transaction.locationLatitude == null || transaction.locationLongitude == null) return;
-    const key = placeKeyFor(transaction);
+    const key = transactionPlaceKey(transaction);
+    if (!key) return;
     const saved = transaction.savedPlaceId ? savedById.get(transaction.savedPlaceId) : undefined;
     const current = groups.get(key) ?? {
       key,
@@ -128,6 +130,7 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [mapMode, setMapMode] = useState<MapMode>("pins");
   const [selectedPlaceKey, setSelectedPlaceKey] = useState<string | null>(null);
+  const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [placePickerOpen, setPlacePickerOpen] = useState(false);
   const [editingSavedPlaceId, setEditingSavedPlaceId] = useState<string | null>(null);
@@ -190,25 +193,32 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
   const updateFilter = <K extends keyof MapFilters>(key: K, value: MapFilters[K]) => setFilters((current) => ({ ...current, [key]: value }));
 
   useEffect(() => {
+    const placeKey = new URLSearchParams(window.location.search).get("place");
+    if (placeKey) setSelectedPlaceKey(placeKey);
+  }, []);
+
+  useEffect(() => {
     if (selectedPlaceKey && !selectedSummary) setSelectedPlaceKey(null);
   }, [selectedPlaceKey, selectedSummary]);
+
+  useEffect(() => {
+    if (!mapReady || !selectedSummary) return;
+    map.current?.flyTo({ center: [selectedSummary.longitude, selectedSummary.latitude], zoom: 16 });
+  }, [mapReady, selectedSummary]);
 
   useEffect(() => {
     if (!mapNode.current) return;
     let active = true;
     let removeLabels = () => {};
+    const savedPlaceMarkers: { marker: import("maplibre-gl").Marker; root: Root }[] = [];
+    setMapReady(false);
     setMapError(null);
     void import("maplibre-gl").then((module) => {
       if (!active || !mapNode.current) return;
       const features = located.map((transaction) => ({
         type: "Feature" as const,
         geometry: { type: "Point" as const, coordinates: [transaction.locationLongitude!, transaction.locationLatitude!] },
-        properties: { id: transaction.id, kind: transaction.kind, amount: transaction.amountMinor, placeKey: placeKeyFor(transaction) },
-      }));
-      const savedPlaceFeatures = savedPlaces.map((place) => ({
-        type: "Feature" as const,
-        geometry: { type: "Point" as const, coordinates: [place.longitude, place.latitude] },
-        properties: { placeKey: place.id },
+        properties: { id: transaction.id, kind: transaction.kind, amount: transaction.amountMinor, placeKey: transactionPlaceKey(transaction) },
       }));
       const instance = new module.Map({
         container: mapNode.current,
@@ -231,7 +241,6 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
       instance.on("idle", () => setMapError(null));
       instance.on("load", () => {
         instance.addSource("transactions", { type: "geojson", data: { type: "FeatureCollection", features }, cluster: mapMode === "pins", clusterRadius: 46, clusterMaxZoom: 15 });
-        instance.addSource("saved-places", { type: "geojson", data: { type: "FeatureCollection", features: savedPlaceFeatures } });
         if (mapMode === "heatmap") {
           instance.addLayer({ id: "transaction-heatmap", type: "heatmap", source: "transactions", maxzoom: 17, paint: {
             "heatmap-weight": ["interpolate", ["linear"], ["get", "amount"], 0, 0, 1000, 0.15, 10000, 0.5, 100000, 1],
@@ -247,25 +256,53 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
           instance.addLayer({ id: "transaction-expenses", type: "circle", source: "transactions", filter: ["all", ["!", ["has", "point_count"]], ["==", ["get", "kind"], "expense"]], paint: { "circle-color": "#e06a5f", "circle-radius": 9, "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 } });
           instance.addLayer({ id: "transaction-income", type: "circle", source: "transactions", filter: ["all", ["!", ["has", "point_count"]], ["==", ["get", "kind"], "income"]], paint: { "circle-color": "#2a936f", "circle-radius": 9, "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 } });
         }
-        instance.addLayer({ id: "saved-place-points", type: "circle", source: "saved-places", paint: { "circle-color": "#f7f4e8", "circle-radius": 8, "circle-stroke-color": "#557f69", "circle-stroke-width": 3 } });
         const pointLayers = mapMode === "heatmap" ? ["transaction-heatmap-points"] : ["transaction-expenses", "transaction-income"];
         const selectPoint = (event: import("maplibre-gl").MapMouseEvent & { features?: import("maplibre-gl").MapGeoJSONFeature[] }) => {
           const properties = event.features?.[0]?.properties;
           if (properties?.placeKey) setSelectedPlaceKey(String(properties.placeKey));
         };
-        [...pointLayers, "saved-place-points"].forEach((layer) => instance.on("click", layer, selectPoint));
-        instance.on("mouseenter", "saved-place-points", () => { instance.getCanvas().style.cursor = "pointer"; });
-        instance.on("mouseleave", "saved-place-points", () => { instance.getCanvas().style.cursor = ""; });
+        pointLayers.forEach((layer) => instance.on("click", layer, selectPoint));
+        savedPlaces.forEach((place) => {
+          const element = document.createElement("button");
+          element.type = "button";
+          element.className = "saved-place-map-marker";
+          element.setAttribute("aria-label", place.name);
+          element.title = place.name;
+          element.addEventListener("click", (event) => {
+            event.stopPropagation();
+            setSelectedPlaceKey(place.id);
+          });
+          const root = createRoot(element);
+          root.render(<SavedPlaceIcon icon={place.icon ?? "pin"} size={18} weight="fill" />);
+          const marker = new module.Marker({ element, anchor: "center" })
+            .setLngLat([place.longitude, place.latitude])
+            .addTo(instance);
+          savedPlaceMarkers.push({ marker, root });
+        });
         if (mapMode === "pins") {
           instance.on("click", "transaction-clusters", (event) => instance.easeTo({ center: event.lngLat, zoom: Math.min(instance.getZoom() + 2, 16) }));
           ["transaction-expenses", "transaction-income", "transaction-clusters"].forEach((layer) => { instance.on("mouseenter", layer, () => { instance.getCanvas().style.cursor = "pointer"; }); instance.on("mouseleave", layer, () => { instance.getCanvas().style.cursor = ""; }); });
         }
+        const savedPlaceFeatures = savedPlaces.map((place) => ({
+          type: "Feature" as const,
+          geometry: { type: "Point" as const, coordinates: [place.longitude, place.latitude] },
+        }));
         const allFeatures = [...features, ...savedPlaceFeatures];
         if (allFeatures.length > 1) { const bounds = new module.LngLatBounds(); allFeatures.forEach((feature) => bounds.extend(feature.geometry.coordinates as [number, number])); instance.fitBounds(bounds, { padding: 65, maxZoom: 15 }); }
         else if (allFeatures[0]) instance.flyTo({ center: allFeatures[0].geometry.coordinates as [number, number], zoom: 15 });
+        setMapReady(true);
       });
     });
-    return () => { active = false; removeLabels(); map.current?.remove(); map.current = null; };
+    return () => {
+      active = false;
+      removeLabels();
+      savedPlaceMarkers.forEach(({ marker, root }) => {
+        root.unmount();
+        marker.remove();
+      });
+      map.current?.remove();
+      map.current = null;
+    };
   }, [located, mapMode, savedPlaces]);
 
   const focusSummary = (summary: PlaceSummary) => { setSelectedPlaceKey(summary.key); map.current?.flyTo({ center: [summary.longitude, summary.latitude], zoom: 16 }); };

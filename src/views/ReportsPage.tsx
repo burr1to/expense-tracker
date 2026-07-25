@@ -1,4 +1,4 @@
-import { Bank, FlagBanner, Sparkle, TrendDown, TrendUp } from "@phosphor-icons/react";
+import { Bank, DownloadSimple, FlagBanner, Sparkle, TrendDown, TrendUp } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
 import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -10,6 +10,7 @@ import { monthlySeries, summarizeLedger } from "../lib/ledger";
 import { financialMilestones } from "../lib/milestones";
 import type { CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount } from "../types";
 import { totalCurrentBalance } from "../lib/account-balances";
+import { isCompletedReportMonth } from "../lib/monthly-report";
 
 interface ReportsPageProps {
   month: Date;
@@ -20,9 +21,10 @@ interface ReportsPageProps {
   dueItems: DueItem[];
   onMonthChange: (date: Date) => void;
   onAdd: () => void;
+  allowPdfDownload?: boolean;
 }
 
-export function ReportsPage({ month, currency, transactions, customCategories, paymentAccounts, dueItems, onMonthChange, onAdd }: ReportsPageProps) {
+export function ReportsPage({ month, currency, transactions, customCategories, paymentAccounts, dueItems, onMonthChange, onAdd, allowPdfDownload = false }: ReportsPageProps) {
   const [activeCategoryIndex, setActiveCategoryIndex] = useState<number | null>(null);
   const current = transactions.filter((item) => isInMonth(item.occurredOn, month));
   const summary = summarizeLedger(current, customCategories);
@@ -30,10 +32,12 @@ export function ReportsPage({ month, currency, transactions, customCategories, p
   const milestones = financialMilestones(transactions, dueItems);
   const activeCategory = activeCategoryIndex === null ? undefined : summary.categories[activeCategoryIndex];
   const trackedBalance = totalCurrentBalance(paymentAccounts);
+  const reportMonthKey = format(month, "yyyy-MM");
+  const canDownloadPdf = allowPdfDownload && isCompletedReportMonth(reportMonthKey);
 
   return (
     <div className="page reports-page">
-      <header className="page-header"><div><span className="eyebrow">The bigger picture</span><h1>Reports</h1><p>See where your money moved and how the months compare.</p></div><MonthPicker month={month} onChange={onMonthChange} /></header>
+      <header className="page-header"><div><span className="eyebrow">The bigger picture</span><h1>Reports</h1><p>See where your money moved and how the months compare.</p></div><div className="report-header-actions"><MonthPicker month={month} onChange={onMonthChange} />{canDownloadPdf && <a className="secondary-button" href={`/api/reports/monthly?month=${reportMonthKey}`} download={`SaveYoRupee-${reportMonthKey}-monthly-report.pdf`}><DownloadSimple size={17} />Download PDF</a>}</div></header>
       <section className="report-kpis">
         <div><span>Savings rate</span><strong className={summary.savedPercentage < 0 ? "negative" : ""}>{summary.savedPercentage}%</strong><small>{summary.savedPercentage >= 0 ? <><TrendUp size={15} /> of income retained</> : <><TrendDown size={15} /> spending above income</>}</small></div>
         <div><span>Tracked balance</span><strong>{formatMoney(trackedBalance, currency)}</strong><small>{paymentAccounts.length} {paymentAccounts.length === 1 ? "account" : "accounts"} checked manually</small></div>

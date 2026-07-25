@@ -9,6 +9,7 @@ import { useAuth } from "../context/AuthContext";
 import { useLedger } from "../context/LedgerContext";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { toDateInput } from "../lib/dates";
+import { monthlyReportNotice } from "../lib/monthly-report";
 import { appRoutes, viewFromPathname } from "../lib/routes";
 import type { AppView, LedgerTransaction, SavedPlace, TransactionDraft, TransactionLocationDraft } from "../types";
 import { AuthPage } from "../views/AuthPage";
@@ -17,6 +18,7 @@ import { BrandIcon } from "./BrandIcon";
 import { ButtonSpinner } from "./ButtonSpinner";
 import { ReminderBell } from "./ReminderBell";
 import { TransactionForm } from "./TransactionForm";
+import { OnboardingGuide, type OnboardingStepId } from "./OnboardingGuide";
 
 export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const { user, isDemo, loading: authLoading, signOut } = useAuth();
@@ -35,6 +37,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const [locked, setLocked] = useState(false);
   const [amountsHidden, setAmountsHidden] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const reportNotice = user && !isDemo ? monthlyReportNotice() : null;
 
   useEffect(() => { setAmountsHidden(ledger.profile.hideAmounts); }, [ledger.profile.hideAmounts]);
   useEffect(() => { window.scrollTo({ top: 0, behavior: "auto" }); }, [pathname]);
@@ -56,6 +59,12 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   }, [ledger.profile.autoLockMinutes, ledger.profile.hasPin, locked, user, isDemo]);
 
   const navigate = (nextView: AppView) => router.push(appRoutes[nextView]);
+  const runOnboardingAction = (step: OnboardingStepId) => {
+    if (step === "pin") router.push(`${appRoutes.settings}#security-heading`);
+    else if (step === "account") router.push(`${appRoutes.accounts}#add-account`);
+    else if (step === "budget") router.push(`${appRoutes.plan}#add-budget`);
+    else openAdd();
+  };
   const openDue = (id?: string, action?: "repay") => {
     const params = new URLSearchParams();
     if (id) params.set("due", id);
@@ -146,11 +155,22 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   return (
     <LedgerWorkspaceContext.Provider value={workspace}>
       <AppShell view={view} onAdd={openAdd} onSignOut={() => void logOut()} signingOut={signingOut}>
+        {!isDemo && user && !ledger.loading && !ledger.error && (
+          <OnboardingGuide
+            userId={user.id}
+            hasPin={ledger.profile.hasPin}
+            hasAccount={ledger.paymentAccounts.length > 0}
+            hasTransaction={ledger.transactions.length > 0}
+            hasBudget={ledger.budgets.length > 0}
+            onAction={runOnboardingAction}
+          />
+        )}
         {content}
       </AppShell>
       <ReminderBell
         items={ledger.dueItems}
         currency={ledger.profile.currency}
+        monthlyReport={reportNotice}
         onOpenDue={openDue}
         onComplete={ledger.completeDueItem}
         onSnooze={ledger.snoozeDueItem}
