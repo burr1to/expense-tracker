@@ -14,6 +14,7 @@ interface LedgerWorkspaceContextValue {
   month: Date;
   setMonth: Dispatch<SetStateAction<Date>>;
   homeFocus: DashboardFocus | null;
+  recentlyAddedTransactionId: string | null;
   setHomeSelectedDate: Dispatch<SetStateAction<string>>;
   openAdd: () => void;
   openAddAtPlace: (place: SavedPlace) => void;

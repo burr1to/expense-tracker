@@ -59,6 +59,7 @@ describe("monthly report model", () => {
     });
     expect(report.budgets[0]).toMatchObject({ spentMinor: 25_000, remainingMinor: 5_000, usedPercentage: 83 });
     expect(report.categories[0]).toMatchObject({ label: "Food & Dining", amountMinor: 25_000 });
+    expect(report.incomeCategories[0]).toMatchObject({ label: "Salary", amountMinor: 100_000 });
   });
 
   it("produces a downloadable multi-section PDF", () => {
@@ -66,7 +67,7 @@ describe("monthly report model", () => {
     const pdf = generateMonthlyReportPdf(report);
     const content = pdf.toString("latin1");
     expect(content.startsWith("%PDF-1.4")).toBe(true);
-    expect(content).toContain("Monthly Report");
+    expect(content).toContain("MONTHLY FINANCIAL REPORT");
     expect(content).toMatch(/\/Count [2-9]/);
     expect(content.endsWith("%%EOF\n")).toBe(true);
   });

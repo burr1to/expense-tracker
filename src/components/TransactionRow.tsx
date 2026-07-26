@@ -1,5 +1,6 @@
 import { CalendarBlank, CopySimple, MapPinLine, Paperclip, PencilSimple, Tag, Trash, Wallet } from "@phosphor-icons/react";
-import type { CSSProperties } from "react";
+import { useContext, type CSSProperties } from "react";
+import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { getCategory } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
 import { formatTransactionDate } from "../lib/dates";
@@ -21,10 +22,12 @@ interface TransactionRowProps {
 }
 
 export function TransactionRow({ transaction, currency, onDuplicate, onEdit, onDelete, deletePending = false, compact = false, customCategories = [] }: TransactionRowProps) {
+  const workspace = useContext(LedgerWorkspaceContext);
   const category = getCategory(transaction.category, customCategories);
   const payment = transaction.paymentMode === "online" ? transaction.paymentAccount ? paymentAccountLabel(transaction.paymentAccount) : "Online payment" : transaction.paymentMode === "cheque" ? "Cheque" : "Cash";
+  const entering = workspace?.recentlyAddedTransactionId === transaction.id;
   return (
-    <article className={`transaction-row${compact ? " compact" : ""}`} aria-busy={deletePending}>
+    <article className={`transaction-row${compact ? " compact" : ""}${entering ? " is-new" : ""}`} aria-busy={deletePending}>
       <div className="transaction-icon" style={{ "--category-color": category.color } as CSSProperties}>
         <CategoryIcon category={transaction.category} size={21} />
       </div>

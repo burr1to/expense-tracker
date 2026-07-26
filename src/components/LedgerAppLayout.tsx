@@ -34,6 +34,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const [newTransactionLocation, setNewTransactionLocation] = useState<TransactionLocationDraft | null>(null);
   const [homeSelectedDate, setHomeSelectedDate] = useState(toDateInput);
   const [homeFocus, setHomeFocus] = useState<{ date: string; revision: number } | null>(null);
+  const [recentlyAddedTransactionId, setRecentlyAddedTransactionId] = useState<string | null>(null);
   const [locked, setLocked] = useState(false);
   const [amountsHidden, setAmountsHidden] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -42,6 +43,11 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   useEffect(() => { setAmountsHidden(ledger.profile.hideAmounts); }, [ledger.profile.hideAmounts]);
   useEffect(() => { window.scrollTo({ top: 0, behavior: "auto" }); }, [pathname]);
   useEffect(() => { document.body.dataset.hideAmounts = String(amountsHidden); }, [amountsHidden]);
+  useEffect(() => {
+    if (!recentlyAddedTransactionId) return;
+    const timeout = window.setTimeout(() => setRecentlyAddedTransactionId(null), 900);
+    return () => window.clearTimeout(timeout);
+  }, [recentlyAddedTransactionId]);
   useEffect(() => {
     if (!ledger.profile.hasPin || !ledger.profile.autoLockMinutes || locked || (!user && !isDemo)) return;
     let timer = window.setTimeout(() => setLocked(true), ledger.profile.autoLockMinutes * 60_000);
@@ -107,7 +113,8 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     setFormOpen(true);
   };
   const saveTransaction = async (draft: TransactionDraft, id?: string) => {
-    await ledger.saveTransaction(draft, id);
+    const savedId = await ledger.saveTransaction(draft, id);
+    if (!id && savedId) setRecentlyAddedTransactionId(savedId);
     if (!id && view === "home") {
       setMonth(parseISO(draft.occurredOn));
       setHomeFocus((current) => ({ date: draft.occurredOn, revision: (current?.revision ?? 0) + 1 }));
@@ -134,6 +141,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     month,
     setMonth,
     homeFocus,
+    recentlyAddedTransactionId,
     setHomeSelectedDate,
     openAdd,
     openAddAtPlace,

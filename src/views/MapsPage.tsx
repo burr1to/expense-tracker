@@ -130,7 +130,6 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [mapMode, setMapMode] = useState<MapMode>("pins");
   const [selectedPlaceKey, setSelectedPlaceKey] = useState<string | null>(null);
-  const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [placePickerOpen, setPlacePickerOpen] = useState(false);
   const [editingSavedPlaceId, setEditingSavedPlaceId] = useState<string | null>(null);
@@ -202,16 +201,25 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
   }, [selectedPlaceKey, selectedSummary]);
 
   useEffect(() => {
-    if (!mapReady || !selectedSummary) return;
-    map.current?.flyTo({ center: [selectedSummary.longitude, selectedSummary.latitude], zoom: 16 });
-  }, [mapReady, selectedSummary]);
+    if (!selectedSummary) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelectedPlaceKey(null);
+    };
+    const lockPageScroll = window.matchMedia("(max-width: 640px)").matches;
+    const previousOverflow = document.body.style.overflow;
+    if (lockPageScroll) document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      if (lockPageScroll) document.body.style.overflow = previousOverflow;
+    };
+  }, [selectedSummary]);
 
   useEffect(() => {
     if (!mapNode.current) return;
     let active = true;
     let removeLabels = () => {};
     const savedPlaceMarkers: { marker: import("maplibre-gl").Marker; root: Root }[] = [];
-    setMapReady(false);
     setMapError(null);
     void import("maplibre-gl").then((module) => {
       if (!active || !mapNode.current) return;
@@ -240,6 +248,7 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
       });
       instance.on("idle", () => setMapError(null));
       instance.on("load", () => {
+        const compactMarkers = window.matchMedia("(max-width: 640px)").matches;
         instance.addSource("transactions", { type: "geojson", data: { type: "FeatureCollection", features }, cluster: mapMode === "pins", clusterRadius: 46, clusterMaxZoom: 15 });
         if (mapMode === "heatmap") {
           instance.addLayer({ id: "transaction-heatmap", type: "heatmap", source: "transactions", maxzoom: 17, paint: {
@@ -251,8 +260,8 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
           } });
           instance.addLayer({ id: "transaction-heatmap-points", type: "circle", source: "transactions", minzoom: 15, paint: { "circle-color": ["match", ["get", "kind"], "income", "#2a936f", "#e06a5f"], "circle-radius": 7, "circle-stroke-color": "#ffffff", "circle-stroke-width": 2, "circle-opacity": 0.88 } });
         } else {
-          instance.addLayer({ id: "transaction-clusters", type: "circle", source: "transactions", filter: ["has", "point_count"], paint: { "circle-color": "#135dea", "circle-radius": ["step", ["get", "point_count"], 19, 10, 25, 30, 31], "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 } });
-          instance.addLayer({ id: "transaction-cluster-count", type: "symbol", source: "transactions", filter: ["has", "point_count"], layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 12 }, paint: { "text-color": "#ffffff" } });
+          instance.addLayer({ id: "transaction-clusters", type: "circle", source: "transactions", filter: ["has", "point_count"], paint: { "circle-color": "#135dea", "circle-radius": ["step", ["get", "point_count"], compactMarkers ? 14 : 19, 10, compactMarkers ? 18 : 25, 30, compactMarkers ? 22 : 31], "circle-stroke-color": "#ffffff", "circle-stroke-width": compactMarkers ? 2 : 3 } });
+          instance.addLayer({ id: "transaction-cluster-count", type: "symbol", source: "transactions", filter: ["has", "point_count"], layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": compactMarkers ? 10 : 12 }, paint: { "text-color": "#ffffff" } });
           instance.addLayer({ id: "transaction-expenses", type: "circle", source: "transactions", filter: ["all", ["!", ["has", "point_count"]], ["==", ["get", "kind"], "expense"]], paint: { "circle-color": "#e06a5f", "circle-radius": 9, "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 } });
           instance.addLayer({ id: "transaction-income", type: "circle", source: "transactions", filter: ["all", ["!", ["has", "point_count"]], ["==", ["get", "kind"], "income"]], paint: { "circle-color": "#2a936f", "circle-radius": 9, "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 } });
         }
@@ -290,7 +299,6 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
         const allFeatures = [...features, ...savedPlaceFeatures];
         if (allFeatures.length > 1) { const bounds = new module.LngLatBounds(); allFeatures.forEach((feature) => bounds.extend(feature.geometry.coordinates as [number, number])); instance.fitBounds(bounds, { padding: 65, maxZoom: 15 }); }
         else if (allFeatures[0]) instance.flyTo({ center: allFeatures[0].geometry.coordinates as [number, number], zoom: 15 });
-        setMapReady(true);
       });
     });
     return () => {
@@ -335,7 +343,7 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
         {mapMode === "heatmap" && <div className="heatmap-legend"><span>Lower spend</span><i /><span>Higher spend</span></div>}
         {mapError && <span className="map-load-warning" role="status">{mapError}</span>}
         {!located.length && !savedPlaces.length && <div className="map-empty-state"><MapPin size={32} weight="duotone" /><strong>Your map is ready</strong><p>Save a place first, or add a transaction with an exact Kathmandu location.</p><button className="primary-button small" onClick={() => setPlacePickerOpen(true)}>Save your first place</button></div>}
-        {selectedSummary && <article className="map-selected-card"><button className="icon-button" aria-label="Close selected place" onClick={() => setSelectedPlaceKey(null)}>×</button><div className="place-summary-card"><span className="eyebrow">Selected place</span><h2><SavedPlaceIcon icon={selectedSummary.icon} size={20} />{selectedSummary.label}</h2><p>{selectedSummary.address}</p><div className="place-summary-stats"><div><strong className="map-amount">{formatMoney(selectedSummary.totalExpenseMinor, currency)}</strong><small>Spent</small></div><div><strong className="map-amount">{formatMoney(selectedSummary.totalIncomeMinor, currency)}</strong><small>Received</small></div><div><strong className="map-amount">{formatMoney(selectedSummary.netMinor, currency)}</strong><small>Net</small></div><div><strong>{selectedSummary.transactions.length}</strong><small>Entries</small></div></div>{selectedSummary.transactions.length > 0 && <small className="place-summary-category">Top category: {getCategory(selectedSummary.topCategory, customCategories).label}</small>}{selectedSavedPlace && <button type="button" className="secondary-button small add-at-place-button" onClick={() => onAddAtPlace(selectedSavedPlace)}><Plus size={15} />Add transaction here</button>}{selectedSummary.monthlyTotals.length > 0 && <div className="place-trend"><span className="section-label">Monthly spending</span>{selectedSummary.monthlyTotals.map((item) => { const max = Math.max(...selectedSummary.monthlyTotals.map((entry) => entry.amountMinor)); return <div className="place-trend-row" key={item.month}><span>{item.month}</span><i><b style={{ width: `${max ? Math.max(6, item.amountMinor / max * 100) : 0}%` }} /></i><strong className="map-amount">{formatMoney(item.amountMinor, currency)}</strong></div>; })}</div>}</div><div className="place-history"><div className="section-heading"><div><span className="section-label">History</span><h3>Transactions at this place</h3></div></div>{selectedSummary.transactions.map((transaction) => <div className="place-history-row" key={transaction.id}><TransactionRow compact transaction={transaction} currency={currency} customCategories={customCategories} /><button type="button" className="text-button" onClick={() => onEdit(transaction)}><PencilSimple size={14} />Edit</button></div>)}{!selectedSummary.transactions.length && <p className="mapped-list-empty">Add a transaction here, or edit an existing transaction and choose this saved place.</p>}</div></article>}
+        {selectedSummary && <div className="map-selected-backdrop" onClick={() => setSelectedPlaceKey(null)}><article className="map-selected-card" role="dialog" aria-label={`${selectedSummary.label} details`} onClick={(event) => event.stopPropagation()}><button className="icon-button" aria-label="Close selected place" onClick={() => setSelectedPlaceKey(null)}><X size={16} /></button><div className="place-summary-card"><span className="eyebrow">Selected place</span><h2><SavedPlaceIcon icon={selectedSummary.icon} size={20} />{selectedSummary.label}</h2><p>{selectedSummary.address}</p><div className="place-summary-stats"><div><strong className="map-amount">{formatMoney(selectedSummary.totalExpenseMinor, currency)}</strong><small>Spent</small></div><div><strong className="map-amount">{formatMoney(selectedSummary.totalIncomeMinor, currency)}</strong><small>Received</small></div><div><strong className="map-amount">{formatMoney(selectedSummary.netMinor, currency)}</strong><small>Net</small></div><div><strong>{selectedSummary.transactions.length}</strong><small>Entries</small></div></div>{selectedSummary.transactions.length > 0 && <small className="place-summary-category">Top category: {getCategory(selectedSummary.topCategory, customCategories).label}</small>}{selectedSavedPlace && <button type="button" className="secondary-button small add-at-place-button" onClick={() => onAddAtPlace(selectedSavedPlace)}><Plus size={15} />Add transaction here</button>}{selectedSummary.monthlyTotals.length > 0 && <div className="place-trend"><span className="section-label">Monthly spending</span>{selectedSummary.monthlyTotals.map((item) => { const max = Math.max(...selectedSummary.monthlyTotals.map((entry) => entry.amountMinor)); return <div className="place-trend-row" key={item.month}><span>{item.month}</span><i><b style={{ width: `${max ? Math.max(6, item.amountMinor / max * 100) : 0}%` }} /></i><strong className="map-amount">{formatMoney(item.amountMinor, currency)}</strong></div>; })}</div>}</div><div className="place-history"><div className="section-heading"><div><span className="section-label">History</span><h3>Transactions at this place</h3></div></div>{selectedSummary.transactions.map((transaction) => <div className="place-history-row" key={transaction.id}><TransactionRow compact transaction={transaction} currency={currency} customCategories={customCategories} /><button type="button" className="text-button" onClick={() => onEdit(transaction)}><PencilSimple size={14} />Edit</button></div>)}{!selectedSummary.transactions.length && <p className="mapped-list-empty">Add a transaction here, or edit an existing transaction and choose this saved place.</p>}</div></article></div>}
       </section>
       <aside className="mapped-transaction-list">
         <div className="section-heading"><div><span className="section-label">Location summaries</span><h2>Places in Kathmandu</h2></div></div>

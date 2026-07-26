@@ -93,6 +93,7 @@ export interface MonthlyReport {
     expenseChangePercentage: number | null;
   };
   categories: AmountGroup[];
+  incomeCategories: AmountGroup[];
   subcategories: AmountGroup[];
   budgets: Array<MonthlyReportBudget & { spentMinor: number; remainingMinor: number; usedPercentage: number }>;
   accounts: Array<MonthlyReportAccount & { incomeMinor: number; expenseMinor: number; transfersInMinor: number; transfersOutMinor: number }>;
@@ -197,6 +198,7 @@ export function buildMonthlyReport(input: MonthlyReportInput, now = new Date()):
       expenseChangePercentage: percentageChange(expenseMinor, previousExpenseMinor),
     },
     categories: groupAmounts(expenseTransactions, (item) => item.categoryLabel),
+    incomeCategories: groupAmounts(input.transactions.filter((item) => item.kind === "income"), (item) => item.categoryLabel),
     subcategories: groupAmounts(expenseTransactions, (item) => item.subcategory?.trim() || "Unspecified"),
     budgets: input.budgets.map((budget) => {
       const spentMinor = spentByCategory.get(budget.category) ?? 0;

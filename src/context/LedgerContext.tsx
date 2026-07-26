@@ -16,7 +16,7 @@ interface AccountTransferDraft { fromAccountId: string; toAccountId: string; amo
 interface LedgerData { profile: Profile; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; goals: SavingsGoal[]; customCategories: CustomCategory[]; paymentAccounts: PaymentAccount[]; savedPlaces: SavedPlace[]; transfers: AccountTransfer[]; dueItems: DueItem[] }
 interface LedgerContextValue extends LedgerData {
   loading: boolean; error: string | null;
-  saveTransaction: (draft: TransactionDraft, id?: string) => Promise<void>; importTransactions: (drafts: TransactionDraft[]) => Promise<number>; deleteTransaction: (id: string) => Promise<void>;
+  saveTransaction: (draft: TransactionDraft, id?: string) => Promise<string | undefined>; importTransactions: (drafts: TransactionDraft[]) => Promise<number>; deleteTransaction: (id: string) => Promise<void>;
   saveSavedPlace: (draft: SavedPlaceDraft, id?: string) => Promise<void>; deleteSavedPlace: (id: string) => Promise<void>;
   saveBudget: (draft: BudgetDraft, id?: string) => Promise<void>; deleteBudget: (id: string) => Promise<void>;
   saveRecurring: (draft: RecurringDraft, id?: string) => Promise<void>; deleteRecurring: (id: string) => Promise<void>; confirmRecurring: (id: string) => Promise<void>;
@@ -57,15 +57,24 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  const mutate = useCallback(async (action: string, payload?: unknown, id?: string) => {
+  const mutate = useCallback(async (action: string, payload?: unknown, id?: string, onData?: (next: LedgerData) => void) => {
     const response = await fetch("/api/ledger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, payload, id }) });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error ?? "Could not save your changes.");
-    setData(body as LedgerData);
+    const next = body as LedgerData;
+    setData(next);
+    onData?.(next);
   }, []);
 
   const transactionPayload = (draft: TransactionDraft) => ({ kind: draft.kind, category: draft.category, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn, note: draft.note.trim(), subcategory: draft.subcategory.trim() || null, area: draft.area.trim() || null, paymentMode: draft.paymentMode, paymentAccountId: draft.paymentMode === "online" ? draft.paymentAccountId || null : null, location: draft.location ?? null, receipt: draft.receipt, removeReceipt: draft.removeReceipt });
-  const saveTransaction = useCallback(async (draft: TransactionDraft, id?: string) => mutate("saveTransaction", transactionPayload(draft), id), [mutate]);
+  const saveTransaction = useCallback(async (draft: TransactionDraft, id?: string) => {
+    let savedId = id;
+    const previousIds = new Set(data.transactions.map((transaction) => transaction.id));
+    await mutate("saveTransaction", transactionPayload(draft), id, (next) => {
+      savedId ??= next.transactions.find((transaction) => !previousIds.has(transaction.id))?.id;
+    });
+    return savedId;
+  }, [data.transactions, mutate]);
   const importTransactions = useCallback(async (drafts: TransactionDraft[]) => { await mutate("importTransactions", drafts.map(transactionPayload)); return drafts.length; }, [mutate]);
   const deleteTransaction = useCallback(async (id: string) => mutate("deleteTransaction", undefined, id), [mutate]);
   const saveSavedPlace = useCallback(async (draft: SavedPlaceDraft, id?: string) => mutate("saveSavedPlace", draft, id), [mutate]);

@@ -65,6 +65,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
   const [receipt, setReceipt] = useState<ReceiptUpload | undefined>();
   const [removeReceipt, setRemoveReceipt] = useState(false);
   const [receiptError, setReceiptError] = useState<string | null>(null);
+  const [receiptUploading, setReceiptUploading] = useState(false);
   const [suggestionQuery, setSuggestionQuery] = useState("");
   const [appliedSuggestionId, setAppliedSuggestionId] = useState<string | null>(template?.id ?? null);
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
@@ -101,9 +102,9 @@ export function TransactionForm({ open, currency, transaction, template, initial
   const suggestions = useMemo(() => getTransactionSuggestions(transactions, kind, suggestionQuery), [kind, suggestionQuery, transactions]);
   const subcategory = subcategoriesFor(category);
   const categoryColor = allCategoriesFor(kind, customCategories).find((item) => item.id === category)?.color ?? "#557f69";
-  const discardAndClose = () => { if (receipt) void discardReceipt(receipt); onClose(); };
+  const discardAndClose = () => { if (receiptUploading) return; if (receipt) void discardReceipt(receipt); onClose(); };
 
-  useEffect(() => { reset(defaults); setLocation(defaultLocation); setLocationPickerOpen(false); setSubmitError(null); setReceipt(undefined); setRemoveReceipt(false); setReceiptError(null); setSuggestionQuery(""); setAppliedSuggestionId(template?.id ?? null); }, [defaults, defaultLocation, open, reset, template?.id]);
+  useEffect(() => { reset(defaults); setLocation(defaultLocation); setLocationPickerOpen(false); setSubmitError(null); setReceipt(undefined); setRemoveReceipt(false); setReceiptError(null); setReceiptUploading(false); setSuggestionQuery(""); setAppliedSuggestionId(template?.id ?? null); }, [defaults, defaultLocation, open, reset, template?.id]);
 
   if (!open) return null;
 
@@ -135,6 +136,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
   };
 
   const submit = handleSubmit(async (draft) => {
+    if (receiptUploading) return;
     try {
       setSubmitError(null);
       await onSave({ ...draft, location, receipt, removeReceipt }, transaction?.id);
@@ -153,7 +155,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
             <span className="eyebrow">Quick entry</span>
             <h2 id="transaction-title">{transaction ? "Edit transaction" : "Add transaction"}</h2>
           </div>
-          <button className="icon-button" onClick={discardAndClose} aria-label="Close"><X size={22} /></button>
+          <button className="icon-button" onClick={discardAndClose} aria-label="Close" disabled={receiptUploading}><X size={22} /></button>
         </header>
 
         <form onSubmit={submit} className="transaction-form">
@@ -216,12 +218,12 @@ export function TransactionForm({ open, currency, transaction, template, initial
             <Controller control={control} name="occurredOn" render={({ field }) => <DatePickerInput label="Date" value={field.value} onChange={(value) => field.onChange(value ?? "")} valueFormat="MMM D, YYYY" firstDayOfWeek={0} required />} />
             <TextInput label="Note" placeholder={kind === "expense" ? "What was it for?" : "Where from?"} {...register("note")} />
           </div>
-          <div className="receipt-field"><label><Paperclip size={17} /><span>{receipt ? receipt.name : transaction?.receipt && !removeReceipt ? transaction.receipt.name : "Attach receipt or document"}</span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (!file) return; setReceiptError(null); void uploadReceipt(file).then((value) => { if (receipt) void discardReceipt(receipt); setReceipt(value); setRemoveReceipt(false); }).catch((error) => setReceiptError(error instanceof Error ? error.message : "Could not attach this file.")); }} /></label>{transaction?.receipt && !removeReceipt && !receipt && <ReceiptPreview receipt={transaction.receipt} className="text-button receipt-view-button"><Eye size={14} />Preview</ReceiptPreview>}{(receipt || transaction?.receipt) && <button type="button" className="text-button danger-text" onClick={() => { if (receipt) void discardReceipt(receipt); setReceipt(undefined); setRemoveReceipt(true); }}>Remove</button>}</div>
+          <div className="receipt-field" aria-busy={receiptUploading}><label className={receiptUploading ? "uploading" : undefined}>{receiptUploading ? <ButtonSpinner /> : <Paperclip size={17} />}<span>{receiptUploading ? "Uploading receipt…" : receipt ? receipt.name : transaction?.receipt && !removeReceipt ? transaction.receipt.name : "Attach receipt or document"}</span><input type="file" disabled={receiptUploading} accept="image/jpeg,image/png,image/webp,application/pdf" onChange={async (event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (!file) return; setReceiptError(null); setReceiptUploading(true); try { const value = await uploadReceipt(file); if (receipt) void discardReceipt(receipt); setReceipt(value); setRemoveReceipt(false); } catch (error) { setReceiptError(error instanceof Error ? error.message : "Could not attach this file."); } finally { setReceiptUploading(false); } }} /></label>{transaction?.receipt && !removeReceipt && !receipt && !receiptUploading && <ReceiptPreview receipt={transaction.receipt} className="text-button receipt-view-button"><Eye size={14} />Preview</ReceiptPreview>}{(receipt || transaction?.receipt) && <button type="button" className="text-button danger-text" disabled={receiptUploading} onClick={() => { if (receipt) void discardReceipt(receipt); setReceipt(undefined); setRemoveReceipt(true); }}>Remove</button>}</div>
           <p className="field-hint">Maximum file size: 3 MB.</p>
           {receiptError && <small className="field-error">{receiptError}</small>}
           {errors.note && <small className="field-error">{errors.note.message}</small>}
           {submitError && <div className="form-error" role="alert">{submitError}</div>}
-          <button className="primary-button full-width" type="submit" disabled={isSubmitting}>{isSubmitting ? <><ButtonSpinner />Saving…</> : transaction ? "Save changes" : `Add ${kind}`}</button>
+          <button className="primary-button full-width" type="submit" disabled={isSubmitting || receiptUploading}>{isSubmitting ? <><ButtonSpinner />Saving…</> : receiptUploading ? <><ButtonSpinner />Uploading receipt…</> : transaction ? "Save changes" : `Add ${kind}`}</button>
         </form>
       </section>
       <LocationPicker open={locationPickerOpen} value={location} recentLocations={recentLocations} savedPlaces={savedPlaces} onClose={() => setLocationPickerOpen(false)} onSelect={(next) => { setLocation(next); setValue("area", next.label, { shouldValidate: true }); }} />
