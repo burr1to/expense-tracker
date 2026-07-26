@@ -18,6 +18,7 @@ A mobile-first personal income and expense tracker with monthly reporting, plann
 - Reminder dates feed the always-visible bell on desktop and mobile.
 - Settling an item can optionally create the matching income or expense ledger entry.
 - JPG, PNG, WebP, and PDF receipts up to 3 MB can be kept privately with a transaction or due.
+- The experimental receipt scanner can photograph a JPG, PNG, or WebP receipt, ask Gemini 3.5 Flash-Lite for category splits, and require a complete review before atomically adding the transactions. Camera photos are resized and re-encoded before upload to remove EXIF/GPS metadata, and an in-progress upload or analysis can be cancelled. One private scan source is shared by all resulting splits.
 
 ## Account balances and transfers
 
@@ -42,9 +43,10 @@ Supabase hosts PostgreSQL and the private receipt Storage bucket. The browser up
 2. Copy `.env.example` to `.env.local`.
 3. Set `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and the comma-separated `BETA_ALLOWED_EMAILS` allowlist.
 4. Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and the server-only `SUPABASE_SECRET_KEY`. A legacy `SUPABASE_SERVICE_ROLE_KEY` is also accepted. `SUPABASE_RECEIPTS_BUCKET` defaults to `receipts`; the private bucket is created on the first upload with the app's 3 MB and MIME-type restrictions.
-5. For production password-reset mail, set `RESEND_API_KEY` and `AUTH_EMAIL_FROM`. In development, reset links are printed in the server terminal when Resend is not configured.
-6. Optionally set `NEXT_PUBLIC_MAP_STYLE_URL` and `PHOTON_SEARCH_URL` for alternative production map providers. Development defaults to OpenFreeMap Positron vector tiles and Photon search with visible attribution.
-7. Apply the checked-in schema and generate the client:
+5. To test camera receipt analysis, create a key at [Google AI Studio](https://aistudio.google.com/app/apikey) and set the server-only `GEMINI_API_KEY`. Never use a `NEXT_PUBLIC_` prefix or paste the key into client code. The Gemini free tier may use submitted images to improve Google products, so use synthetic/test receipts until the project is moved to an appropriate paid/private processing tier.
+6. For production password-reset mail, set `RESEND_API_KEY` and `AUTH_EMAIL_FROM`. In development, reset links are printed in the server terminal when Resend is not configured.
+7. Optionally set `NEXT_PUBLIC_MAP_STYLE_URL` and `PHOTON_SEARCH_URL` for alternative production map providers. Development defaults to OpenFreeMap Positron vector tiles and Photon search with visible attribution.
+8. Apply the checked-in schema and generate the client:
 
 ```bash
 npm install

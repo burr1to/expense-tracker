@@ -33,7 +33,8 @@ model User {
   dueItems          DueItem[]
   duePayments       DuePayment[]
   receipts          ReceiptAttachment[]
-  savedPlaces     SavedPlace[]
+  receiptScans      ReceiptScan[]
+  savedPlaces       SavedPlace[]
 }
 
 model Session {
@@ -99,30 +100,33 @@ model Transaction {
   locationAccuracy  Int?
   locationSource    String?
   savedPlaceId      String?
+  receiptScanId     String?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   paymentAccount    PaymentAccount?    @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
-  savedPlace        SavedPlace?         @relation(fields: [savedPlaceId], references: [id], onDelete: SetNull)
+  savedPlace        SavedPlace?        @relation(fields: [savedPlaceId], references: [id], onDelete: SetNull)
   receipt           ReceiptAttachment?
+  receiptScan       ReceiptScan?       @relation(fields: [receiptScanId], references: [id], onDelete: SetNull)
 
   @@index([userId, occurredOn])
   @@index([paymentAccountId])
   @@index([savedPlaceId])
+  @@index([receiptScanId])
 }
 
 model SavedPlace {
-  id        String        @id @default(cuid())
-  userId    String
-  name      String
-  icon      String        @default("pin")
-  address   String        @default("Kathmandu, Nepal")
-  latitude  Float
-  longitude Float
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  lastUsedAt DateTime     @default(now())
-  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String        @id @default(cuid())
+  userId       String
+  name         String
+  icon         String        @default("pin")
+  address      String        @default("Kathmandu, Nepal")
+  latitude     Float
+  longitude    Float
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  lastUsedAt   DateTime      @default(now())
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions Transaction[]
 
   @@index([userId, lastUsedAt])
@@ -239,25 +243,25 @@ model CustomCategory {
 }
 
 model DueItem {
-  id          String             @id @default(cuid())
-  userId      String
-  kind        String
-  title       String
-  person      String             @default("")
-  amountMinor Int
-  category    String
-  occurredOn  DateTime?          @db.Date
-  dueOn       DateTime           @db.Date
-  remindOn    DateTime?          @db.Date
-  snoozedUntil DateTime?         @db.Date
-  note        String             @default("")
-  status      String             @default("open")
-  completedOn DateTime?          @db.Date
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  payments    DuePayment[]
-  receipt     ReceiptAttachment?
+  id           String             @id @default(cuid())
+  userId       String
+  kind         String
+  title        String
+  person       String             @default("")
+  amountMinor  Int
+  category     String
+  occurredOn   DateTime?          @db.Date
+  dueOn        DateTime           @db.Date
+  remindOn     DateTime?          @db.Date
+  snoozedUntil DateTime?          @db.Date
+  note         String             @default("")
+  status       String             @default("open")
+  completedOn  DateTime?          @db.Date
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments     DuePayment[]
+  receipt      ReceiptAttachment?
 
   @@index([userId, dueOn])
   @@index([userId, remindOn])
@@ -293,6 +297,20 @@ model ReceiptAttachment {
   user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   dueItem       DueItem?     @relation(fields: [dueItemId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model ReceiptScan {
+  id           String        @id @default(cuid())
+  userId       String
+  name         String
+  mimeType     String
+  size         Int
+  storagePath  String        @unique
+  createdAt    DateTime      @default(now())
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
 
   @@index([userId])
 }

@@ -8,10 +8,11 @@ import { ButtonSpinner } from "../components/ButtonSpinner";
 import { LedgerDatePickerInput as DatePickerInput } from "../components/LedgerDatePickerInput";
 import { MonthPicker } from "../components/MonthPicker";
 import { TransactionRow } from "../components/TransactionRow";
+import { ReceiptScanner } from "../components/ReceiptScanner";
 import { allCategoriesFor, CATEGORIES, getCategory } from "../lib/categories";
 import { parseTransactionCsv, TRANSACTION_CSV_TEMPLATE } from "../lib/csv";
 import { isInMonth } from "../lib/dates";
-import type { CurrencyCode, CustomCategory, LedgerTransaction, PaymentAccount, PaymentMode, TransactionDraft, TransactionKind } from "../types";
+import type { CurrencyCode, CustomCategory, LedgerTransaction, PaymentAccount, PaymentMode, ReceiptUpload, TransactionDraft, TransactionKind } from "../types";
 
 interface TransactionsPageProps {
   month: Date;
@@ -19,9 +20,10 @@ interface TransactionsPageProps {
   onMonthChange: (date: Date) => void;
   onAdd: (occurredOn: string) => void; onDuplicate: (transaction: LedgerTransaction) => void; onEdit: (transaction: LedgerTransaction) => void; onDelete: (transaction: LedgerTransaction) => Promise<void>;
   onImport: (drafts: TransactionDraft[]) => Promise<number>;
+  onSaveReceiptSplit: (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => Promise<number>;
 }
 
-export function TransactionsPage({ month, currency, transactions, customCategories, paymentAccounts, onMonthChange, onAdd, onDuplicate, onEdit, onDelete, onImport }: TransactionsPageProps) {
+export function TransactionsPage({ month, currency, transactions, customCategories, paymentAccounts, onMonthChange, onAdd, onDuplicate, onEdit, onDelete, onImport, onSaveReceiptSplit }: TransactionsPageProps) {
   const [query, setQuery] = useState(""); const [kind, setKind] = useState<TransactionKind | "all">("all");
   const [category, setCategory] = useState("all"); const [from, setFrom] = useState(""); const [to, setTo] = useState(""); const [min, setMin] = useState(""); const [max, setMax] = useState(""); const [paymentMode, setPaymentMode] = useState<PaymentMode | "all">("all");
   const [preview, setPreview] = useState<TransactionDraft[] | null>(null); const [importErrors, setImportErrors] = useState<string[]>([]); const [importing, setImporting] = useState(false); const fileRef = useRef<HTMLInputElement>(null);
@@ -58,7 +60,7 @@ export function TransactionsPage({ month, currency, transactions, customCategori
   };
 
   return <div className="page list-page">
-    <header className="page-header"><div><span className="eyebrow">Your ledger</span><h1>Transactions</h1><p>Every income and expense entry, in one clear timeline.</p></div><div className="transaction-actions"><div className="header-actions"><input ref={fileRef} className="visually-hidden" type="file" accept=".csv,text/csv" onChange={(event) => event.target.files?.[0] && void readFile(event.target.files[0])} /><button className="secondary-button" onClick={() => fileRef.current?.click()}><UploadSimple size={18} />Import CSV</button><button className="primary-button" onClick={() => onAdd(selectedDayKey)}><Plus size={18} />Add transaction</button></div><div className="csv-template-help"><span>New to CSV imports?</span><a href={templateHref} download="transaction-import-template.csv"><DownloadSimple size={14} />Download CSV template</a></div></div></header>
+    <header className="page-header"><div><span className="eyebrow">Your ledger</span><h1>Transactions</h1><p>Every income and expense entry, in one clear timeline.</p></div><div className="transaction-actions"><div className="header-actions"><input ref={fileRef} className="visually-hidden" type="file" accept=".csv,text/csv" onChange={(event) => event.target.files?.[0] && void readFile(event.target.files[0])} /><ReceiptScanner currency={currency} fallbackOccurredOn={selectedDayKey} customCategories={customCategories} paymentAccounts={paymentAccounts} onSave={onSaveReceiptSplit} /><button className="secondary-button csv-import-trigger" onClick={() => fileRef.current?.click()}><UploadSimple size={18} />Import CSV</button><button className="primary-button" onClick={() => onAdd(selectedDayKey)}><Plus size={18} />Add transaction</button></div><div className="csv-template-help"><span>New to CSV imports?</span><a href={templateHref} download="transaction-import-template.csv"><DownloadSimple size={14} />Download CSV template</a></div></div></header>
     <section className="transaction-scope">
       <div><span className="section-label">Viewing month</span><MonthPicker month={month} onChange={changeMonth} /><Popover position="bottom-start" shadow="md" withArrow><Popover.Target><button className="current-date" aria-label={`Choose day. Selected ${format(selectedDay, "EEEE, MMMM d, yyyy")}`}>{format(selectedDay, "EEEE, MMMM d")} <CaretDown size={13} weight="bold" /></button></Popover.Target><Popover.Dropdown className="day-picker-popover"><DatePicker value={selectedDayKey} onChange={selectDay} firstDayOfWeek={0} /></Popover.Dropdown></Popover></div>
       <nav className="filter-tabs" aria-label="Transaction type">{(["all", "expense", "income"] as const).map((value) => <button key={value} className={kind === value ? "active" : ""} aria-pressed={kind === value} onClick={() => setKind(value)}>{value[0].toUpperCase() + value.slice(1)}</button>)}</nav>

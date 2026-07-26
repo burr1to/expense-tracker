@@ -34,6 +34,7 @@ export interface LedgerTransaction {
   locationAccuracy: number | null;
   locationSource: LocationSource | null;
   savedPlaceId: string | null;
+  receiptScanId?: string | null;
   createdAt: string;
   receipt?: ReceiptMeta | null;
 }

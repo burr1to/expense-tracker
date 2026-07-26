@@ -36,8 +36,12 @@ export const auth = betterAuth({
     deleteUser: {
       enabled: true,
       beforeDelete: async (user) => {
-        const receipts = await getPrisma().receiptAttachment.findMany({ where: { userId: user.id }, select: { storagePath: true } });
-        await removeStoredReceipts(receipts.map((receipt) => receipt.storagePath));
+        const db = getPrisma();
+        const [attachments, scans] = await Promise.all([
+          db.receiptAttachment.findMany({ where: { userId: user.id }, select: { storagePath: true } }),
+          db.receiptScan.findMany({ where: { userId: user.id }, select: { storagePath: true } }),
+        ]);
+        await removeStoredReceipts([...attachments.map((receipt) => receipt.storagePath), ...scans.map((receipt) => receipt.storagePath)]);
       },
     },
   },
