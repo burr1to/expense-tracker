@@ -9,6 +9,7 @@ import { NEPAL_MOBILE_BANKS } from "../../../lib/payment-accounts";
 import { removeStoredReceipts, verifyStoredReceipt } from "../../../lib/receipt-storage";
 import { KATHMANDU_BOUNDS } from "../../../lib/kathmandu-locations";
 import { withCurrentAccountBalance } from "../../../lib/account-balances";
+import { CATEGORIES } from "../../../lib/categories";
 import type { AccountTransfer, LedgerTransaction, PaymentAccount } from "../../../types";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +41,12 @@ const transactionSchema = z.object({
 });
 const receiptSchema = z.object({ name: z.string().trim().min(1).max(120), mimeType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]), size: z.number().int().positive().max(3 * 1024 * 1024), storagePath: z.string().min(1).max(300) });
 const savedTransactionSchema = transactionSchema.extend({ receipt: receiptSchema.optional(), removeReceipt: z.boolean().optional() });
+const receiptSplitTransactionSchema = transactionSchema.refine((transaction) => transaction.kind === "expense", { message: "Receipt scans can only create expenses.", path: ["kind"] });
+const receiptSplitSchema = z.object({
+  receipt: receiptSchema.extend({ mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]) }),
+  totalMinor: z.number().int().positive(),
+  transactions: z.array(receiptSplitTransactionSchema).min(1).max(20),
+});
 const budgetSchema = z.object({ monthKey: z.string().regex(/^\d{4}-\d{2}$/), category: z.string().min(1).max(80), amountMinor: z.number().int().positive() });
 const recurringSchema = z.object({ kind: z.enum(["income", "expense"]), category: z.string().min(1).max(80), amountMinor: z.number().int().positive(), note: z.string().max(240), tags: z.array(z.string().max(40)).max(8), dayOfMonth: z.number().int().min(1).max(28), nextDueOn: z.string().date() });
 const goalSchema = z.object({ name: z.string().trim().min(1).max(80), targetMinor: z.number().int().positive(), savedMinor: z.number().int().min(0), targetDate: z.string().date().nullable() });
@@ -69,7 +76,10 @@ async function userId() {
 }
 
 function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
-  const transactions: LedgerTransaction[] = data.transactions.map((item) => ({ ...item, kind: item.kind as LedgerTransaction["kind"], paymentMode: item.paymentMode as LedgerTransaction["paymentMode"], locationSource: item.locationSource as LedgerTransaction["locationSource"], occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString(), paymentAccount: null }));
+  const transactions: LedgerTransaction[] = data.transactions.map((item) => {
+    const { receiptScan, ...transaction } = item;
+    return { ...transaction, receipt: transaction.receipt ?? receiptScan, kind: item.kind as LedgerTransaction["kind"], paymentMode: item.paymentMode as LedgerTransaction["paymentMode"], locationSource: item.locationSource as LedgerTransaction["locationSource"], occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString(), paymentAccount: null };
+  });
   const transfers: AccountTransfer[] = data.transfers.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString() }));
   const paymentAccounts: PaymentAccount[] = data.paymentAccounts.map((item) => serializeAccount(item, transactions, transfers));
   const accountById = new Map(paymentAccounts.map((item) => [item.id, item]));
@@ -101,7 +111,7 @@ async function loadLedger(id: string) {
   const db = getPrisma();
   const [user, transactions, budgets, recurring, goals, categories, paymentAccounts, savedPlaces, transfers, dueItems] = await Promise.all([
     db.user.findUniqueOrThrow({ where: { id }, select: { id: true, name: true, currency: true, hideAmounts: true, autoLockMinutes: true, pinHash: true } }),
-    db.transaction.findMany({ where: { userId: id }, orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }], include: { receipt: { select: receiptSelect }, paymentAccount: true } }),
+    db.transaction.findMany({ where: { userId: id }, orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }], include: { receipt: { select: receiptSelect }, receiptScan: { select: receiptSelect }, paymentAccount: true } }),
     db.budget.findMany({ where: { userId: id }, orderBy: { monthKey: "desc" } }),
     db.recurringEntry.findMany({ where: { userId: id }, orderBy: { nextDueOn: "asc" } }),
     db.savingsGoal.findMany({ where: { userId: id }, orderBy: { createdAt: "asc" }, include: { contributions: { orderBy: { createdAt: "desc" } } } }),
@@ -150,19 +160,29 @@ export async function POST(request: Request) {
           locationSource: location?.source ?? null,
           savedPlaceId,
         };
-        let transactionId = recordId;
-        if (recordId) {
-          const existing = await db.transaction.findFirstOrThrow({ where: { id: recordId, userId: id } });
-          await db.transaction.update({ where: { id: existing.id }, data });
-        } else transactionId = (await db.transaction.create({ data: { ...data, userId: id } })).id;
-        if (!transactionId) throw new Error("Could not identify the saved transaction.");
-        const oldReceipt = removeReceipt || receipt ? await db.receiptAttachment.findFirst({ where: { transactionId, userId: id }, select: { storagePath: true } }) : null;
-        if (removeReceipt && !receipt) await db.receiptAttachment.deleteMany({ where: { transactionId, userId: id } });
-        if (receipt) {
-          const stored = await receiptData(receipt, id);
-          await db.receiptAttachment.upsert({ where: { transactionId }, update: stored, create: { ...stored, userId: id, transactionId } });
-        }
-        if (oldReceipt?.storagePath && oldReceipt.storagePath !== receipt?.storagePath) await removeStoredReceipts([oldReceipt.storagePath]);
+        const storedReceipt = receipt ? await receiptData(receipt, id) : null;
+        const pathsToRemove = await db.$transaction(async (transaction) => {
+          let transactionId = recordId;
+          let detachedScanPath: string | null = null;
+          if (recordId) {
+            const existing = await transaction.transaction.findFirstOrThrow({ where: { id: recordId, userId: id }, select: { id: true, receiptScanId: true } });
+            await transaction.transaction.update({ where: { id: existing.id }, data: { ...data, ...((removeReceipt || receipt) && existing.receiptScanId ? { receiptScanId: null } : {}) } });
+            if ((removeReceipt || receipt) && existing.receiptScanId) {
+              const remaining = await transaction.transaction.count({ where: { receiptScanId: existing.receiptScanId } });
+              if (!remaining) {
+                const scan = await transaction.receiptScan.findFirst({ where: { id: existing.receiptScanId, userId: id }, select: { storagePath: true } });
+                await transaction.receiptScan.deleteMany({ where: { id: existing.receiptScanId, userId: id } });
+                detachedScanPath = scan?.storagePath ?? null;
+              }
+            }
+          } else transactionId = (await transaction.transaction.create({ data: { ...data, userId: id } })).id;
+          if (!transactionId) throw new Error("Could not identify the saved transaction.");
+          const oldReceipt = removeReceipt || receipt ? await transaction.receiptAttachment.findFirst({ where: { transactionId, userId: id }, select: { storagePath: true } }) : null;
+          if (removeReceipt && !receipt) await transaction.receiptAttachment.deleteMany({ where: { transactionId, userId: id } });
+          if (storedReceipt) await transaction.receiptAttachment.upsert({ where: { transactionId }, update: storedReceipt, create: { ...storedReceipt, userId: id, transactionId } });
+          return [oldReceipt?.storagePath && oldReceipt.storagePath !== receipt?.storagePath ? oldReceipt.storagePath : null, detachedScanPath];
+        });
+        await removeStoredReceipts(pathsToRemove);
         break;
       }
       case "importTransactions": {
@@ -186,11 +206,65 @@ export async function POST(request: Request) {
         })) });
         break;
       }
+      case "saveReceiptSplit": {
+        const value = receiptSplitSchema.parse(input.payload);
+        const splitTotal = value.transactions.reduce((sum, transaction) => sum + transaction.amountMinor, 0);
+        if (splitTotal !== value.totalMinor) throw new Error("Split amounts must equal the receipt total.");
+        const customCategories = await db.customCategory.findMany({ where: { userId: id, kind: { in: ["expense", "both"] } }, select: { id: true } });
+        const allowedCategories = new Set([...CATEGORIES.filter((category) => category.kind === "expense" || category.kind === "both").map((category) => category.id), ...customCategories.map((category) => category.id)]);
+        if (value.transactions.some((transaction) => !allowedCategories.has(transaction.category))) throw new Error("One or more receipt categories are invalid.");
+        const accountIds = [...new Set(value.transactions.flatMap((transaction) => transaction.paymentAccountId ? [transaction.paymentAccountId] : []))];
+        if (accountIds.length) {
+          const ownedAccounts = await db.paymentAccount.count({ where: { userId: id, id: { in: accountIds } } });
+          if (ownedAccounts !== accountIds.length) throw new Error("One or more online payment accounts are invalid.");
+        }
+        await receiptData(value.receipt, id);
+        try {
+          await db.$transaction(async (transaction) => {
+            const scan = await transaction.receiptScan.create({ data: {
+              userId: id,
+              name: value.receipt.name,
+              mimeType: value.receipt.mimeType,
+              size: value.receipt.size,
+              storagePath: value.receipt.storagePath,
+            } });
+            await transaction.transaction.createMany({ data: value.transactions.map(({ location, ...entry }) => ({
+              ...entry,
+              occurredOn: asDate(entry.occurredOn),
+              userId: id,
+              receiptScanId: scan.id,
+              locationLabel: location?.label ?? null,
+              locationAddress: location?.address ?? null,
+              locationLatitude: location?.latitude ?? null,
+              locationLongitude: location?.longitude ?? null,
+              locationAccuracy: location?.accuracy ?? null,
+              locationSource: location?.source ?? null,
+              savedPlaceId: null,
+            })) });
+          });
+        } catch (error) {
+          const alreadySaved = typeof error === "object" && error !== null && "code" in error && error.code === "P2002"
+            && await db.receiptScan.count({ where: { userId: id, storagePath: value.receipt.storagePath } });
+          if (!alreadySaved) throw error;
+        }
+        break;
+      }
       case "deleteTransaction": {
         if (!recordId) throw new Error("Missing transaction id.");
-        const receipt = await db.receiptAttachment.findFirst({ where: { transactionId: recordId, userId: id }, select: { storagePath: true } });
-        await db.transaction.deleteMany({ where: { id: recordId, userId: id } });
-        await removeStoredReceipts([receipt?.storagePath]);
+        const existing = await db.transaction.findFirst({ where: { id: recordId, userId: id }, select: { receiptScanId: true, receipt: { select: { storagePath: true } } } });
+        let scanPath: string | null = null;
+        if (existing?.receiptScanId) {
+          const receiptScanId = existing.receiptScanId;
+          scanPath = await db.$transaction(async (transaction) => {
+            await transaction.transaction.deleteMany({ where: { id: recordId, userId: id } });
+            const remaining = await transaction.transaction.count({ where: { receiptScanId } });
+            if (remaining) return null;
+            const scan = await transaction.receiptScan.findFirst({ where: { id: receiptScanId, userId: id }, select: { storagePath: true } });
+            await transaction.receiptScan.deleteMany({ where: { id: receiptScanId, userId: id } });
+            return scan?.storagePath ?? null;
+          });
+        } else await db.transaction.deleteMany({ where: { id: recordId, userId: id } });
+        await removeStoredReceipts([existing?.receipt?.storagePath, scanPath]);
         break;
       }
       case "saveSavedPlace": {

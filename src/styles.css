@@ -443,6 +443,39 @@ h1, h2, strong { letter-spacing: -0.025em; }
 .import-preview { margin: 18px 0; border-top: 1px solid var(--line); }
 .import-preview > div { display: grid; grid-template-columns: 95px 1fr 80px 110px; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; }
+.receipt-scan-trigger { position: relative; }
+.receipt-scan-trigger > span { padding: 2px 4px; border: 1px solid color-mix(in srgb, var(--blue) 35%, var(--line)); border-radius: 4px; color: var(--blue); font-size: 8px; font-weight: 850; letter-spacing: .06em; }
+.receipt-scan-dialog { width: min(760px, 100%); max-height: calc(100vh - 32px); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); box-shadow: var(--shadow); }
+.receipt-scan-dialog > header { position: sticky; z-index: 2; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 20px 22px 15px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 94%, transparent); backdrop-filter: blur(12px); }
+.receipt-scan-dialog h2 { margin: 1px 0 0; font-size: 23px; }
+.receipt-capture-step { display: grid; justify-items: center; gap: 18px; padding: 34px 28px 28px; text-align: center; }
+.receipt-capture-step > div:nth-child(2) { max-width: 540px; }
+.receipt-capture-step strong { font-size: 16px; }
+.receipt-capture-step p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.receipt-camera-mark { width: 68px; height: 68px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--blue) 28%, var(--line)); border-radius: 14px; background: color-mix(in srgb, var(--blue) 8%, var(--paper-strong)); color: var(--blue); }
+.receipt-privacy-note, .receipt-review-warning { width: 100%; display: flex; align-items: flex-start; gap: 9px; padding: 11px 12px; border: 1px solid #e2c99a; border-radius: 8px; background: #fff8e8; color: #72531c; text-align: left; font-size: 11px; line-height: 1.45; }
+.receipt-privacy-note svg, .receipt-review-warning svg { flex: 0 0 auto; margin-top: 1px; }
+.receipt-privacy-note strong { display: block; font-size: 11px; }
+.receipt-capture-preview { max-width: min(100%, 360px); max-height: 280px; border: 1px solid var(--line); border-radius: 10px; object-fit: contain; }
+.receipt-capture-step > .primary-button { max-width: 360px; }
+.receipt-review-step { display: grid; gap: 16px; padding: 20px 22px 24px; }
+.receipt-analysis-summary { display: grid; grid-template-columns: 1.3fr 1fr 1fr; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.35); }
+.receipt-analysis-summary > div { min-width: 0; display: grid; gap: 4px; padding: 12px 14px; border-right: 1px solid var(--line); }
+.receipt-analysis-summary > div:last-child { border-right: 0; }
+.receipt-analysis-summary span { color: var(--muted); font-size: 9px; font-weight: 750; text-transform: uppercase; letter-spacing: .05em; }
+.receipt-analysis-summary strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.receipt-analysis-summary strong.matches { color: var(--green); }
+.receipt-analysis-summary strong.mismatch { color: var(--coral); }
+.receipt-common-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; }
+.receipt-common-fields > :last-child:nth-child(3) { grid-column: 1 / -1; }
+.receipt-split-list { display: grid; gap: 10px; }
+.receipt-split-card { display: grid; gap: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--paper-strong) 64%, transparent); }
+.receipt-split-heading { display: flex; align-items: center; justify-content: space-between; }
+.receipt-split-heading > span { color: var(--muted); font-size: 9px; font-weight: 850; text-transform: uppercase; letter-spacing: .07em; }
+.receipt-split-grid { display: grid; grid-template-columns: .85fr 1.15fr; gap: 10px; }
+.receipt-split-card > small { color: var(--muted); font-size: 9px; }
+.add-receipt-split { width: fit-content; }
+.receipt-total-error { margin: -2px 0 0; color: var(--coral); font-size: 11px; font-weight: 650; }
 .delete-account-dialog { background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); }
 .delete-account-dialog-header { background: transparent; padding: 24px 24px 8px; }
 .delete-account-dialog-title { display: flex; align-items: center; gap: 11px; font-size: 21px; font-weight: 780; }
@@ -1208,6 +1241,22 @@ body[data-hide-amounts="true"] :is(.amount, .map-amount, .summary-strip strong, 
 .onboarding-guide.complete { border-color: #9fc3aa; background: #dfede2; }
 .onboarding-guide.complete .onboarding-guide-mark { background: #3d7658; }
 .onboarding-guide-shell + .page { padding-top: 24px; }
+
+@media (max-width: 900px) {
+  .receipt-scan-dialog { width: 100%; max-height: 94dvh; align-self: end; border-right: 0; border-bottom: 0; border-left: 0; border-radius: 18px 18px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  .receipt-scan-dialog > header { padding: 16px 18px 13px; }
+  .receipt-scan-dialog h2 { font-size: 20px; }
+  .receipt-capture-step { gap: 15px; padding: 24px 18px 20px; }
+  .receipt-review-step { gap: 13px; padding: 15px 16px 18px; }
+  .receipt-analysis-summary { grid-template-columns: 1fr 1fr; }
+  .receipt-analysis-summary > div:first-child { grid-column: 1 / -1; border-right: 0; border-bottom: 1px solid var(--line); }
+  .receipt-common-fields, .receipt-split-grid { grid-template-columns: 1fr; }
+  .receipt-common-fields > :last-child:nth-child(3) { grid-column: auto; }
+  .receipt-split-card { padding: 12px; }
+  .receipt-review-step .dialog-actions { position: sticky; bottom: 0; margin: 2px -16px -18px; padding: 11px 16px calc(11px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 95%, transparent); backdrop-filter: blur(10px); }
+  .receipt-review-step .dialog-actions > * { flex: 1; }
+  .header-actions .receipt-scan-trigger > span { display: none; }
+}
 #security-heading, #add-account, #add-budget { scroll-margin-top: 18px; }
 
 @media (min-width: 641px) {

@@ -42,7 +42,12 @@ export async function DELETE(request: Request) {
   try {
     const { storagePath } = z.object({ storagePath: z.string().min(1).max(300) }).parse(await request.json());
     if (!isOwnedReceiptPath(storagePath, session.user.id)) return NextResponse.json({ error: "Invalid receipt storage path." }, { status: 403 });
-    const attached = await getPrisma().receiptAttachment.count({ where: { userId: session.user.id, storagePath } });
+    const db = getPrisma();
+    const [attachmentCount, scanCount] = await Promise.all([
+      db.receiptAttachment.count({ where: { userId: session.user.id, storagePath } }),
+      db.receiptScan.count({ where: { userId: session.user.id, storagePath } }),
+    ]);
+    const attached = attachmentCount + scanCount;
     if (attached) return NextResponse.json({ error: "Attached receipts cannot be discarded." }, { status: 409 });
     await removeStoredReceipts([storagePath]);
     return new NextResponse(null, { status: 204 });

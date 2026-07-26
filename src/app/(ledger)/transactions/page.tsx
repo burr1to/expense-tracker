@@ -26,5 +26,6 @@ export default function TransactionsRoute() {
     onEdit={openEdit}
     onDelete={removeTransaction}
     onImport={ledger.importTransactions}
+    onSaveReceiptSplit={ledger.saveReceiptSplit}
   />;
 }
