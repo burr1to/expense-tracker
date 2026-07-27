@@ -9,6 +9,7 @@ import { LedgerDatePickerInput as DatePickerInput } from "../components/LedgerDa
 import { MonthPicker } from "../components/MonthPicker";
 import { TransactionRow } from "../components/TransactionRow";
 import { ReceiptScanner } from "../components/ReceiptScanner";
+import { isFullBackupCsv } from "../lib/backup";
 import { allCategoriesFor, CATEGORIES, getCategory } from "../lib/categories";
 import { parseTransactionCsv, TRANSACTION_CSV_TEMPLATE } from "../lib/csv";
 import { isInMonth } from "../lib/dates";
@@ -43,7 +44,16 @@ export function TransactionsPage({ month, currency, transactions, customCategori
     .filter((item) => `${item.note} ${getCategory(item.category, customCategories).label} ${item.subcategory ?? ""} ${item.area ?? ""} ${item.paymentAccount?.provider ?? ""}`.toLowerCase().includes(query.toLowerCase()))
     .sort((a, b) => `${b.occurredOn}${b.createdAt}`.localeCompare(`${a.occurredOn}${a.createdAt}`)), [transactions, month, selectedDayKey, kind, category, from, to, min, max, paymentMode, query, customCategories]);
 
-  const readFile = async (file: File) => { const result = parseTransactionCsv(await file.text(), customCategories, paymentAccounts); setPreview(result.rows); setImportErrors(result.errors); };
+  const readFile = async (file: File) => {
+    const csv = await file.text();
+    if (isFullBackupCsv(csv)) {
+      setPreview([]);
+      setImportErrors(["This is a full-backup CSV. Restore it from Profile → Backup so accounts, plans, places, dues, and receipts stay connected."]);
+      return;
+    }
+    const result = parseTransactionCsv(csv, customCategories, paymentAccounts);
+    setPreview(result.rows); setImportErrors(result.errors);
+  };
   const importRows = async () => { if (!preview?.length) return; setImporting(true); try { await onImport(preview); setPreview(null); setImportErrors([]); } finally { setImporting(false); } };
   const remove = async (transaction: LedgerTransaction) => { if (deletingId) return; setDeletingId(transaction.id); try { await onDelete(transaction); } finally { setDeletingId(null); } };
   const clearFilters = () => { setCategory("all"); setFrom(""); setTo(""); setMin(""); setMax(""); setPaymentMode("all"); };

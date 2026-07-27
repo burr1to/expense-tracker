@@ -14,6 +14,7 @@ interface CategoryDraft { name: string; kind: TransactionKind | "both"; color: s
 interface PaymentAccountDraft { type: PaymentAccountType; provider: string; label: string; balance: string; balanceAsOf: string }
 interface AccountTransferDraft { fromAccountId: string; toAccountId: string; amount: string; occurredOn: string; note: string }
 interface LedgerData { profile: Profile; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; goals: SavingsGoal[]; customCategories: CustomCategory[]; paymentAccounts: PaymentAccount[]; savedPlaces: SavedPlace[]; transfers: AccountTransfer[]; dueItems: DueItem[] }
+export interface BackupRestoreResult { restoredAt: string; exportedAt: string; counts: Record<string, number> }
 interface LedgerContextValue extends LedgerData {
   loading: boolean; error: string | null;
   saveTransaction: (draft: TransactionDraft, id?: string) => Promise<string | undefined>; importTransactions: (drafts: TransactionDraft[]) => Promise<number>; saveReceiptSplit: (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => Promise<number>; deleteTransaction: (id: string) => Promise<void>;
@@ -29,6 +30,7 @@ interface LedgerContextValue extends LedgerData {
   recordDuePayment: (id: string, amount: string, occurredOn: string, note: string, addToLedger: boolean) => Promise<void>;
   completeDueItem: (id: string, addToLedger: boolean) => Promise<void>;
   savePin: (pin: string, currentPin?: string) => Promise<void>; removePin: (currentPin: string) => Promise<void>; verifyPin: (pin: string) => Promise<void>;
+  restoreBackup: (file: File, password: string) => Promise<BackupRestoreResult>;
   updateProfile: (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes">>) => Promise<void>; resetDemo: () => void;
 }
 
@@ -110,10 +112,20 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     const body = await response.json();
     if (!response.ok) throw new Error(body.error ?? "That PIN did not match.");
   }, []);
+  const restoreBackup = useCallback(async (file: File, password: string) => {
+    const form = new FormData();
+    form.append("backup", file);
+    form.append("password", password);
+    const response = await fetch("/api/backup", { method: "POST", body: form });
+    const body = await response.json() as BackupRestoreResult & { error?: string };
+    if (!response.ok) throw new Error(body.error ?? "Could not restore this backup.");
+    await refresh();
+    return body;
+  }, [refresh]);
   const updateProfile = useCallback(async (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes">>) => mutate("updateProfile", { ...data.profile, ...changes }), [data.profile, mutate]);
   const resetDemo = useCallback(() => undefined, []);
 
-  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, saveTransaction, importTransactions, saveReceiptSplit, deleteTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, deleteCustomCategory, savePaymentAccount, updatePaymentAccountBalance, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, updateProfile, resetDemo }), [data, loading, error, saveTransaction, importTransactions, saveReceiptSplit, deleteTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, deleteCustomCategory, savePaymentAccount, updatePaymentAccountBalance, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, updateProfile, resetDemo]);
+  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, saveTransaction, importTransactions, saveReceiptSplit, deleteTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, deleteCustomCategory, savePaymentAccount, updatePaymentAccountBalance, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, resetDemo }), [data, loading, error, saveTransaction, importTransactions, saveReceiptSplit, deleteTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, deleteCustomCategory, savePaymentAccount, updatePaymentAccountBalance, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, resetDemo]);
   return <LedgerContext.Provider value={value}>{children}</LedgerContext.Provider>;
 }
 

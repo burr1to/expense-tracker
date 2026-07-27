@@ -56,7 +56,10 @@ interface PlaceSummary {
   monthlyTotals: { month: string; amountMinor: number }[];
 }
 
+const coordinatesMatch = (first: { latitude: number; longitude: number }, second: { latitude: number; longitude: number }) => first.latitude.toFixed(5) === second.latitude.toFixed(5) && first.longitude.toFixed(5) === second.longitude.toFixed(5);
+
 const initialFilters: MapFilters = { kind: "all", category: "all", paymentAccountId: "all", dateFilter: "all", fromDate: "", toDate: "", minAmount: "", maxAmount: "" };
+const placeHistoryPageSize = 4;
 const startOfThisMonth = () => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`; };
 const startOfLast3Months = () => { const date = new Date(); date.setMonth(date.getMonth() - 2, 1); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`; };
 const startOfThisYear = () => `${new Date().getFullYear()}-01-01`;
@@ -98,7 +101,13 @@ function buildSummaries(transactions: LedgerTransaction[], savedPlaces: SavedPla
     groups.set(key, current);
   });
   savedPlaces.forEach((place) => {
-    if (groups.has(place.id)) return;
+    const matchingSummary = groups.get(place.id) ?? [...groups.values()].find((summary) => coordinatesMatch(summary, place));
+    if (matchingSummary) {
+      matchingSummary.label = place.name;
+      matchingSummary.address = place.address;
+      matchingSummary.icon = place.icon ?? "pin";
+      return;
+    }
     groups.set(place.id, {
       key: place.id,
       label: place.name,
@@ -130,11 +139,18 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [mapMode, setMapMode] = useState<MapMode>("pins");
   const [selectedPlaceKey, setSelectedPlaceKey] = useState<string | null>(null);
+  const [placeHistoryPage, setPlaceHistoryPage] = useState(0);
   const [mapError, setMapError] = useState<string | null>(null);
   const [placePickerOpen, setPlacePickerOpen] = useState(false);
   const [editingSavedPlaceId, setEditingSavedPlaceId] = useState<string | null>(null);
   const [editingSavedPlaceName, setEditingSavedPlaceName] = useState("");
   const [editingSavedPlaceIcon, setEditingSavedPlaceIcon] = useState<SavedPlaceIconName>("pin");
+  const [saveSelectedPlaceOpen, setSaveSelectedPlaceOpen] = useState(false);
+  const [selectedPlaceName, setSelectedPlaceName] = useState("");
+  const [selectedPlaceIcon, setSelectedPlaceIcon] = useState<SavedPlaceIconName>("pin");
+  const [savingSelectedPlace, setSavingSelectedPlace] = useState(false);
+  const [saveSelectedPlaceError, setSaveSelectedPlaceError] = useState<string | null>(null);
+  const [justSavedPlace, setJustSavedPlace] = useState<SavedPlaceDraft | null>(null);
   const mapNode = useRef<HTMLDivElement>(null);
   const map = useRef<import("maplibre-gl").Map | null>(null);
   const located = useMemo(() => {
@@ -154,8 +170,15 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
     });
   }, [filters, transactions]);
   const summaries = useMemo(() => buildSummaries(located, savedPlaces), [located, savedPlaces]);
-  const selectedSummary = summaries.find((summary) => summary.key === selectedPlaceKey) ?? null;
-  const selectedSavedPlace = savedPlaces.find((place) => place.id === selectedPlaceKey) ?? null;
+  const selectedSavedPlaceByKey = savedPlaces.find((place) => place.id === selectedPlaceKey);
+  const selectedSummary = summaries.find((summary) => summary.key === selectedPlaceKey) ?? (selectedSavedPlaceByKey ? summaries.find((summary) => coordinatesMatch(summary, selectedSavedPlaceByKey)) : null) ?? null;
+  const selectedSavedPlace = selectedSummary ? savedPlaces.find((place) => place.id === selectedPlaceKey || coordinatesMatch(place, selectedSummary)) ?? null : null;
+  const justSavedSelectedPlace = selectedSummary && justSavedPlace && coordinatesMatch(justSavedPlace, selectedSummary) ? justSavedPlace : null;
+  const selectedPlaceDisplay = selectedSavedPlace ?? justSavedSelectedPlace;
+  const placeHistoryCount = selectedSummary?.transactions.length ?? 0;
+  const placeHistoryPageCount = Math.max(1, Math.ceil(placeHistoryCount / placeHistoryPageSize));
+  const visiblePlaceHistoryPage = Math.min(placeHistoryPage, placeHistoryPageCount - 1);
+  const visiblePlaceHistory = selectedSummary?.transactions.slice(visiblePlaceHistoryPage * placeHistoryPageSize, (visiblePlaceHistoryPage + 1) * placeHistoryPageSize) ?? [];
   const categories = useMemo(() => {
     const unique = new Map<string, { value: string; label: string }>();
     [...allCategoriesFor("expense", customCategories), ...allCategoriesFor("income", customCategories)].forEach((category) => unique.set(category.id, { value: category.id, label: category.label }));
@@ -199,6 +222,25 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
   useEffect(() => {
     if (selectedPlaceKey && !selectedSummary) setSelectedPlaceKey(null);
   }, [selectedPlaceKey, selectedSummary]);
+
+  useEffect(() => {
+    setSaveSelectedPlaceOpen(false);
+    setSelectedPlaceName("");
+    setSelectedPlaceIcon("pin");
+    setSaveSelectedPlaceError(null);
+  }, [selectedPlaceKey]);
+
+  useEffect(() => {
+    setPlaceHistoryPage(0);
+  }, [selectedPlaceKey]);
+
+  useEffect(() => {
+    setPlaceHistoryPage((page) => Math.min(page, placeHistoryPageCount - 1));
+  }, [placeHistoryPageCount]);
+
+  useEffect(() => {
+    if (justSavedPlace && savedPlaces.some((place) => coordinatesMatch(place, justSavedPlace))) setJustSavedPlace(null);
+  }, [justSavedPlace, savedPlaces]);
 
   useEffect(() => {
     if (!selectedSummary) return;
@@ -248,8 +290,7 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
       });
       instance.on("idle", () => setMapError(null));
       instance.on("load", () => {
-        const compactMarkers = window.matchMedia("(max-width: 640px)").matches;
-        instance.addSource("transactions", { type: "geojson", data: { type: "FeatureCollection", features }, cluster: mapMode === "pins", clusterRadius: 46, clusterMaxZoom: 15 });
+        instance.addSource("transactions", { type: "geojson", data: { type: "FeatureCollection", features } });
         if (mapMode === "heatmap") {
           instance.addLayer({ id: "transaction-heatmap", type: "heatmap", source: "transactions", maxzoom: 17, paint: {
             "heatmap-weight": ["interpolate", ["linear"], ["get", "amount"], 0, 0, 1000, 0.15, 10000, 0.5, 100000, 1],
@@ -258,20 +299,17 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
             "heatmap-opacity": 0.84,
             "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(19,93,234,0)", 0.2, "#8ad5d0", 0.45, "#f3d26a", 0.7, "#e06a5f", 1, "#9b1c31"],
           } });
-          instance.addLayer({ id: "transaction-heatmap-points", type: "circle", source: "transactions", minzoom: 15, paint: { "circle-color": ["match", ["get", "kind"], "income", "#2a936f", "#e06a5f"], "circle-radius": 7, "circle-stroke-color": "#ffffff", "circle-stroke-width": 2, "circle-opacity": 0.88 } });
         } else {
-          instance.addLayer({ id: "transaction-clusters", type: "circle", source: "transactions", filter: ["has", "point_count"], paint: { "circle-color": "#135dea", "circle-radius": ["step", ["get", "point_count"], compactMarkers ? 14 : 19, 10, compactMarkers ? 18 : 25, 30, compactMarkers ? 22 : 31], "circle-stroke-color": "#ffffff", "circle-stroke-width": compactMarkers ? 2 : 3 } });
-          instance.addLayer({ id: "transaction-cluster-count", type: "symbol", source: "transactions", filter: ["has", "point_count"], layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": compactMarkers ? 10 : 12 }, paint: { "text-color": "#ffffff" } });
-          instance.addLayer({ id: "transaction-expenses", type: "circle", source: "transactions", filter: ["all", ["!", ["has", "point_count"]], ["==", ["get", "kind"], "expense"]], paint: { "circle-color": "#e06a5f", "circle-radius": 9, "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 } });
-          instance.addLayer({ id: "transaction-income", type: "circle", source: "transactions", filter: ["all", ["!", ["has", "point_count"]], ["==", ["get", "kind"], "income"]], paint: { "circle-color": "#2a936f", "circle-radius": 9, "circle-stroke-color": "#ffffff", "circle-stroke-width": 3 } });
+          instance.addLayer({ id: "transaction-expenses", type: "circle", source: "transactions", filter: ["==", ["get", "kind"], "expense"], paint: { "circle-color": "#e06a5f", "circle-radius": 6, "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });
+          instance.addLayer({ id: "transaction-income", type: "circle", source: "transactions", filter: ["==", ["get", "kind"], "income"], paint: { "circle-color": "#2a936f", "circle-radius": 6, "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 } });
         }
-        const pointLayers = mapMode === "heatmap" ? ["transaction-heatmap-points"] : ["transaction-expenses", "transaction-income"];
+        const pointLayers = mapMode === "pins" ? ["transaction-expenses", "transaction-income"] : [];
         const selectPoint = (event: import("maplibre-gl").MapMouseEvent & { features?: import("maplibre-gl").MapGeoJSONFeature[] }) => {
           const properties = event.features?.[0]?.properties;
           if (properties?.placeKey) setSelectedPlaceKey(String(properties.placeKey));
         };
         pointLayers.forEach((layer) => instance.on("click", layer, selectPoint));
-        savedPlaces.forEach((place) => {
+        if (mapMode === "pins") savedPlaces.forEach((place) => {
           const element = document.createElement("button");
           element.type = "button";
           element.className = "saved-place-map-marker";
@@ -289,8 +327,7 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
           savedPlaceMarkers.push({ marker, root });
         });
         if (mapMode === "pins") {
-          instance.on("click", "transaction-clusters", (event) => instance.easeTo({ center: event.lngLat, zoom: Math.min(instance.getZoom() + 2, 16) }));
-          ["transaction-expenses", "transaction-income", "transaction-clusters"].forEach((layer) => { instance.on("mouseenter", layer, () => { instance.getCanvas().style.cursor = "pointer"; }); instance.on("mouseleave", layer, () => { instance.getCanvas().style.cursor = ""; }); });
+          ["transaction-expenses", "transaction-income"].forEach((layer) => { instance.on("mouseenter", layer, () => { instance.getCanvas().style.cursor = "pointer"; }); instance.on("mouseleave", layer, () => { instance.getCanvas().style.cursor = ""; }); });
         }
         const savedPlaceFeatures = savedPlaces.map((place) => ({
           type: "Feature" as const,
@@ -320,6 +357,24 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
     await onSaveSavedPlace({ name, icon: editingSavedPlaceIcon, address: place.address, latitude: place.latitude, longitude: place.longitude }, place.id);
     setEditingSavedPlaceId(null);
   };
+  const saveSelectedPlace = async () => {
+    if (!selectedSummary || selectedSavedPlace) return;
+    const name = selectedPlaceName.trim();
+    if (!name) return;
+    const draft: SavedPlaceDraft = { name, icon: selectedPlaceIcon, address: selectedSummary.address || "Kathmandu, Nepal", latitude: selectedSummary.latitude, longitude: selectedSummary.longitude };
+    setSavingSelectedPlace(true);
+    setSaveSelectedPlaceError(null);
+    try {
+      await onSaveSavedPlace(draft);
+      // The persistence callback returns no id; retain this local match until savedPlaces refreshes.
+      setJustSavedPlace(draft);
+      setSaveSelectedPlaceOpen(false);
+    } catch (error) {
+      setSaveSelectedPlaceError(error instanceof Error ? error.message : "Unable to save this place. Please try again.");
+    } finally {
+      setSavingSelectedPlace(false);
+    }
+  };
 
   return <div className="page maps-page">
     <header className="page-header maps-header"><div><span className="eyebrow">Kathmandu location history</span><h1>Transaction map</h1><p>Save the places that matter, then connect transactions to them to understand your location patterns.</p></div><div className="maps-header-actions"><button className="secondary-button" onClick={onAdd}><MapPin size={18} />Add transaction</button><button className="primary-button" onClick={() => setPlacePickerOpen(true)}><Plus size={18} />Save a place</button></div></header>
@@ -343,14 +398,14 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
         {mapMode === "heatmap" && <div className="heatmap-legend"><span>Lower spend</span><i /><span>Higher spend</span></div>}
         {mapError && <span className="map-load-warning" role="status">{mapError}</span>}
         {!located.length && !savedPlaces.length && <div className="map-empty-state"><MapPin size={32} weight="duotone" /><strong>Your map is ready</strong><p>Save a place first, or add a transaction with an exact Kathmandu location.</p><button className="primary-button small" onClick={() => setPlacePickerOpen(true)}>Save your first place</button></div>}
-        {selectedSummary && <div className="map-selected-backdrop" onClick={() => setSelectedPlaceKey(null)}><article className="map-selected-card" role="dialog" aria-label={`${selectedSummary.label} details`} onClick={(event) => event.stopPropagation()}><button className="icon-button" aria-label="Close selected place" onClick={() => setSelectedPlaceKey(null)}><X size={16} /></button><div className="place-summary-card"><span className="eyebrow">Selected place</span><h2><SavedPlaceIcon icon={selectedSummary.icon} size={20} />{selectedSummary.label}</h2><p>{selectedSummary.address}</p><div className="place-summary-stats"><div><strong className="map-amount">{formatMoney(selectedSummary.totalExpenseMinor, currency)}</strong><small>Spent</small></div><div><strong className="map-amount">{formatMoney(selectedSummary.totalIncomeMinor, currency)}</strong><small>Received</small></div><div><strong className="map-amount">{formatMoney(selectedSummary.netMinor, currency)}</strong><small>Net</small></div><div><strong>{selectedSummary.transactions.length}</strong><small>Entries</small></div></div>{selectedSummary.transactions.length > 0 && <small className="place-summary-category">Top category: {getCategory(selectedSummary.topCategory, customCategories).label}</small>}{selectedSavedPlace && <button type="button" className="secondary-button small add-at-place-button" onClick={() => onAddAtPlace(selectedSavedPlace)}><Plus size={15} />Add transaction here</button>}{selectedSummary.monthlyTotals.length > 0 && <div className="place-trend"><span className="section-label">Monthly spending</span>{selectedSummary.monthlyTotals.map((item) => { const max = Math.max(...selectedSummary.monthlyTotals.map((entry) => entry.amountMinor)); return <div className="place-trend-row" key={item.month}><span>{item.month}</span><i><b style={{ width: `${max ? Math.max(6, item.amountMinor / max * 100) : 0}%` }} /></i><strong className="map-amount">{formatMoney(item.amountMinor, currency)}</strong></div>; })}</div>}</div><div className="place-history"><div className="section-heading"><div><span className="section-label">History</span><h3>Transactions at this place</h3></div></div>{selectedSummary.transactions.map((transaction) => <div className="place-history-row" key={transaction.id}><TransactionRow compact transaction={transaction} currency={currency} customCategories={customCategories} /><button type="button" className="text-button" onClick={() => onEdit(transaction)}><PencilSimple size={14} />Edit</button></div>)}{!selectedSummary.transactions.length && <p className="mapped-list-empty">Add a transaction here, or edit an existing transaction and choose this saved place.</p>}</div></article></div>}
+        {selectedSummary && <div className="map-selected-backdrop" onClick={() => setSelectedPlaceKey(null)}><article className="map-selected-card" role="dialog" aria-label={`${selectedPlaceDisplay?.name ?? selectedSummary.label} details`} onClick={(event) => event.stopPropagation()}><button className="icon-button" aria-label="Close selected place" onClick={() => setSelectedPlaceKey(null)}><X size={16} /></button><div className="place-summary-card"><span className="eyebrow">Selected place</span><h2><SavedPlaceIcon icon={selectedPlaceDisplay?.icon ?? selectedSummary.icon} size={20} />{selectedPlaceDisplay?.name ?? selectedSummary.label}</h2><p>{selectedPlaceDisplay?.address ?? selectedSummary.address}</p><div className="place-summary-stats"><div><strong className="map-amount">{formatMoney(selectedSummary.totalExpenseMinor, currency)}</strong><small>Spent</small></div><div><strong className="map-amount">{formatMoney(selectedSummary.totalIncomeMinor, currency)}</strong><small>Received</small></div><div><strong className="map-amount">{formatMoney(selectedSummary.netMinor, currency)}</strong><small>Net</small></div><div><strong>{selectedSummary.transactions.length}</strong><small>Entries</small></div></div>{selectedSummary.transactions.length > 0 && <small className="place-summary-category">Top category: {getCategory(selectedSummary.topCategory, customCategories).label}</small>}{!selectedPlaceDisplay && <div className="save-selected-place">{saveSelectedPlaceOpen ? <><TextInput aria-label="Place name" size="xs" value={selectedPlaceName} onChange={(event) => setSelectedPlaceName(event.currentTarget.value)} placeholder="Name this place" autoFocus /><fieldset className="saved-place-icon-picker compact"><legend>Icon</legend>{savedPlaceIconOptions.map((option) => <button type="button" className={selectedPlaceIcon === option.value ? "active" : undefined} aria-label={option.label} aria-pressed={selectedPlaceIcon === option.value} key={option.value} onClick={() => setSelectedPlaceIcon(option.value)}><SavedPlaceIcon icon={option.value} size={15} /></button>)}</fieldset>{saveSelectedPlaceError && <p className="save-selected-place-error" role="alert">{saveSelectedPlaceError}</p>}<div className="saved-place-editor-actions"><button type="button" className="text-button" disabled={savingSelectedPlace} onClick={() => { setSaveSelectedPlaceOpen(false); setSaveSelectedPlaceError(null); }}>Cancel</button><button type="button" className="primary-button small" disabled={!selectedPlaceName.trim() || savingSelectedPlace} onClick={() => void saveSelectedPlace()}>{savingSelectedPlace ? "Saving…" : "Save place"}</button></div></> : <button type="button" className="secondary-button small" onClick={() => { setSelectedPlaceName(selectedSummary.label); setSelectedPlaceIcon(selectedSummary.icon); setSaveSelectedPlaceError(null); setSaveSelectedPlaceOpen(true); }}><Plus size={15} />Save place</button>}</div>}{selectedSavedPlace && <button type="button" className="secondary-button small add-at-place-button" onClick={() => onAddAtPlace(selectedSavedPlace)}><Plus size={15} />Add transaction here</button>}{selectedSummary.monthlyTotals.length > 0 && <div className="place-trend"><span className="section-label">Monthly spending</span>{selectedSummary.monthlyTotals.map((item) => { const max = Math.max(...selectedSummary.monthlyTotals.map((entry) => entry.amountMinor)); return <div className="place-trend-row" key={item.month}><span>{item.month}</span><i><b style={{ width: `${max ? Math.max(6, item.amountMinor / max * 100) : 0}%` }} /></i><strong className="map-amount">{formatMoney(item.amountMinor, currency)}</strong></div>; })}</div>}</div><div className="place-history"><div className="section-heading"><div><span className="section-label">History</span><h3>Transactions at this place</h3></div></div>{visiblePlaceHistory.map((transaction) => <div className="place-history-row" key={transaction.id}><TransactionRow compact transaction={transaction} currency={currency} customCategories={customCategories} /><button type="button" className="text-button" onClick={() => onEdit(transaction)}><PencilSimple size={14} />Edit</button></div>)}{placeHistoryCount > placeHistoryPageSize && <nav className="place-history-pagination" aria-label="Place transaction history pages"><span aria-live="polite">Showing {visiblePlaceHistoryPage * placeHistoryPageSize + 1}–{Math.min((visiblePlaceHistoryPage + 1) * placeHistoryPageSize, placeHistoryCount)} of {placeHistoryCount}</span><div><button type="button" className="secondary-button small" disabled={visiblePlaceHistoryPage === 0} onClick={() => setPlaceHistoryPage((page) => Math.max(0, page - 1))}>Previous</button><button type="button" className="secondary-button small" disabled={visiblePlaceHistoryPage >= placeHistoryPageCount - 1} onClick={() => setPlaceHistoryPage((page) => Math.min(placeHistoryPageCount - 1, page + 1))}>Next</button></div></nav>}{!placeHistoryCount && <p className="mapped-list-empty">Add a transaction here, or edit an existing transaction and choose this saved place.</p>}</div></article></div>}
       </section>
       <aside className="mapped-transaction-list">
         <div className="section-heading"><div><span className="section-label">Location summaries</span><h2>Places in Kathmandu</h2></div></div>
-        <div className="mapped-place-list">{summaries.map((summary) => <button type="button" className={selectedPlaceKey === summary.key ? "mapped-entry active" : "mapped-entry"} key={summary.key} onClick={() => focusSummary(summary)}><SavedPlaceIcon icon={summary.icon} size={18} weight="fill" /><span><strong>{summary.label}</strong><small>{summary.transactions.length} {summary.transactions.length === 1 ? "entry" : "entries"} · <span className="map-amount">{formatMoney(summary.totalExpenseMinor, currency)}</span> spent</small></span><ArrowRight size={15} /></button>)}{!summaries.length && <p className="mapped-list-empty">Saved and mapped places will appear here.</p>}</div>
+        <div className="mapped-place-list">{summaries.map((summary) => <button type="button" className={selectedSummary?.key === summary.key ? "mapped-entry active" : "mapped-entry"} key={summary.key} onClick={() => focusSummary(summary)}><SavedPlaceIcon icon={summary.icon} size={18} weight="fill" /><span><strong>{summary.label}</strong><small>{summary.transactions.length} {summary.transactions.length === 1 ? "entry" : "entries"} · <span className="map-amount">{formatMoney(summary.totalExpenseMinor, currency)}</span> spent</small></span><ArrowRight size={15} /></button>)}{!summaries.length && <p className="mapped-list-empty">Saved and mapped places will appear here.</p>}</div>
         <div className="saved-places-panel">
           <div className="section-heading"><div><span className="section-label"><ClockCounterClockwise size={14} />Saved places</span><h3>Reusable locations</h3></div><button type="button" className="icon-button" onClick={() => setPlacePickerOpen(true)} aria-label="Save a new place"><Plus size={15} /></button></div>
-          {savedPlaces.map((place) => <div className={editingSavedPlaceId === place.id ? "saved-place-row editing" : "saved-place-row"} key={place.id}>{editingSavedPlaceId === place.id ? <div className="saved-place-editor"><TextInput aria-label="Saved place name" size="xs" value={editingSavedPlaceName} onChange={(event) => setEditingSavedPlaceName(event.currentTarget.value)} /><fieldset className="saved-place-icon-picker compact"><legend>Icon</legend>{savedPlaceIconOptions.map((option) => <button type="button" className={editingSavedPlaceIcon === option.value ? "active" : undefined} aria-label={option.label} aria-pressed={editingSavedPlaceIcon === option.value} key={option.value} onClick={() => setEditingSavedPlaceIcon(option.value)}><SavedPlaceIcon icon={option.value} size={15} /></button>)}</fieldset><div className="saved-place-editor-actions"><button type="button" className="text-button" onClick={() => setEditingSavedPlaceId(null)}>Cancel</button><button type="button" className="primary-button small" disabled={!editingSavedPlaceName.trim()} onClick={() => void savePlaceRename(place)}>Save</button></div></div> : <><button type="button" className="saved-place-focus" onClick={() => { const summary = summaries.find((item) => item.key === place.id); if (summary) focusSummary(summary); }}><SavedPlaceIcon icon={place.icon ?? "pin"} size={17} /><span><strong>{place.name}</strong><small>{place.address}</small></span></button><button type="button" className="icon-button" onClick={() => { setEditingSavedPlaceId(place.id); setEditingSavedPlaceName(place.name); setEditingSavedPlaceIcon(place.icon ?? "pin"); }} aria-label={`Edit ${place.name}`}><PencilSimple size={14} /></button><button type="button" className="icon-button danger-text" onClick={() => { if (window.confirm(`Delete saved place ${place.name}?`)) void onDeleteSavedPlace(place.id); }} aria-label={`Delete ${place.name}`}><Trash size={14} /></button></>}</div>)}
+          {savedPlaces.map((place) => <div className={editingSavedPlaceId === place.id ? "saved-place-row editing" : "saved-place-row"} key={place.id}>{editingSavedPlaceId === place.id ? <div className="saved-place-editor"><TextInput aria-label="Saved place name" size="xs" value={editingSavedPlaceName} onChange={(event) => setEditingSavedPlaceName(event.currentTarget.value)} /><fieldset className="saved-place-icon-picker compact"><legend>Icon</legend>{savedPlaceIconOptions.map((option) => <button type="button" className={editingSavedPlaceIcon === option.value ? "active" : undefined} aria-label={option.label} aria-pressed={editingSavedPlaceIcon === option.value} key={option.value} onClick={() => setEditingSavedPlaceIcon(option.value)}><SavedPlaceIcon icon={option.value} size={15} /></button>)}</fieldset><div className="saved-place-editor-actions"><button type="button" className="text-button" onClick={() => setEditingSavedPlaceId(null)}>Cancel</button><button type="button" className="primary-button small" disabled={!editingSavedPlaceName.trim()} onClick={() => void savePlaceRename(place)}>Save</button></div></div> : <><button type="button" className="saved-place-focus" onClick={() => { const summary = summaries.find((item) => item.key === place.id || coordinatesMatch(item, place)); if (summary) focusSummary(summary); }}><SavedPlaceIcon icon={place.icon ?? "pin"} size={17} /><span><strong>{place.name}</strong><small>{place.address}</small></span></button><button type="button" className="icon-button" onClick={() => { setEditingSavedPlaceId(place.id); setEditingSavedPlaceName(place.name); setEditingSavedPlaceIcon(place.icon ?? "pin"); }} aria-label={`Edit ${place.name}`}><PencilSimple size={14} /></button><button type="button" className="icon-button danger-text" onClick={() => { if (window.confirm(`Delete saved place ${place.name}?`)) void onDeleteSavedPlace(place.id); }} aria-label={`Delete ${place.name}`}><Trash size={14} /></button></>}</div>)}
           {!savedPlaces.length && <div className="saved-place-empty"><p>Name places like Home, Office, or your favorite shop.</p><button type="button" className="secondary-button small" onClick={() => setPlacePickerOpen(true)}><Plus size={15} />Save a place</button></div>}
         </div>
       </aside>
