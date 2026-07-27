@@ -57,7 +57,9 @@ html { background: var(--paper); }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--paper); }
 button, input, select { font: inherit; }
 button { color: inherit; }
-button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid rgba(85, 127, 105, .3); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [role="button"]:focus-visible, [role="option"]:focus-visible { outline: 3px solid rgba(85, 127, 105, .3); outline-offset: 2px; }
+.recharts-surface:focus { outline: 0; }
+.recharts-surface:focus-visible { outline: 2px solid rgba(85, 127, 105, .42); outline-offset: 2px; }
 .sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 h1, h2, p { margin-top: 0; }
 h1, h2, strong { letter-spacing: -0.025em; }
@@ -1077,8 +1079,8 @@ body[data-hide-amounts="true"] :is(.amount, .map-amount, .summary-strip strong, 
   .header-actions { gap: 6px; }
   .transaction-actions { gap: 7px; }
   .csv-template-help > span { display: none; }
-  .header-actions .secondary-button { width: 44px; padding: 0; font-size: 0; }
-  .header-actions .primary-button { width: 44px; padding: 0; font-size: 0; }
+  .header-actions > .secondary-button { width: 44px; padding: 0; font-size: 0; }
+  .header-actions > .primary-button { width: 44px; padding: 0; font-size: 0; }
   .transaction-scope { align-items: stretch; display: grid; gap: 16px; padding-bottom: 16px; margin-bottom: 18px; }
   .transaction-scope > div { min-width: 0; }
   .transaction-scope .section-label { margin-left: 0; }
@@ -1271,7 +1273,7 @@ body[data-hide-amounts="true"] :is(.amount, .map-amount, .summary-strip strong, 
   .receipt-common-fields, .receipt-split-grid { grid-template-columns: 1fr; }
   .receipt-common-fields > :last-child:nth-child(3) { grid-column: auto; }
   .receipt-split-card { padding: 12px; }
-  .receipt-review-step .dialog-actions { position: sticky; bottom: 0; margin: 2px -16px -18px; padding: 11px 16px calc(11px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 95%, transparent); backdrop-filter: blur(10px); }
+  .receipt-review-step .dialog-actions { position: sticky; z-index: 3; bottom: 0; isolation: isolate; margin: 2px -16px -18px; padding: 11px 16px calc(11px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--paper); backdrop-filter: blur(10px); }
   .receipt-review-step .dialog-actions > * { flex: 1; }
   .header-actions .receipt-scan-trigger > span { display: none; }
 }
@@ -1292,16 +1294,16 @@ body[data-hide-amounts="true"] :is(.amount, .map-amount, .summary-strip strong, 
 
 @media (hover: none) and (pointer: coarse) {
   button, input, select, textarea, [role="button"], [role="option"] { -webkit-tap-highlight-color: transparent; }
-  button:focus, button:focus-visible,
-  input:focus, input:focus-visible,
-  select:focus, select:focus-visible,
-  textarea:focus, textarea:focus-visible,
-  [role="button"]:focus, [role="button"]:focus-visible,
-  [role="option"]:focus, [role="option"]:focus-visible { outline: 0 !important; }
-  .recharts-surface:focus, .recharts-surface:focus-visible { outline: 0; }
+  button:focus:not(:focus-visible),
+  input:focus:not(:focus-visible),
+  select:focus:not(:focus-visible),
+  textarea:focus:not(:focus-visible),
+  [role="button"]:focus:not(:focus-visible),
+  [role="option"]:focus:not(:focus-visible) { outline: 0 !important; }
+  .recharts-surface:focus:not(:focus-visible) { outline: 0; }
   .reminder-panel button:focus-visible { outline: 3px solid rgba(85,127,105,.38) !important; outline-offset: 2px; }
-  .mantine-Input-input:focus, .mantine-Input-input:focus-within { border-color: var(--line); box-shadow: none; }
-  .current-date:focus, .current-date:focus-visible { outline: 0; }
+  .mantine-Input-input:focus:not(:focus-visible) { border-color: var(--line); box-shadow: none; }
+  .current-date:focus:not(:focus-visible) { outline: 0; }
 }
 
 /* A slightly denser visual rhythm across the app. */
@@ -1623,8 +1625,8 @@ strong {
 
   .primary-button, .secondary-button { min-height: 38px; padding-inline: 12px; font-size: 11px; }
   .page-header > .primary-button,
-  .header-actions .secondary-button,
-  .header-actions .primary-button { width: 40px; }
+  .header-actions > .secondary-button,
+  .header-actions > .primary-button { width: 40px; }
   .privacy-toggle,
   .reminder-trigger { width: 32px; height: 32px; }
   .privacy-toggle { top: 12px; right: 12px; }
