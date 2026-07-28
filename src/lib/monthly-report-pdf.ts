@@ -422,9 +422,9 @@ class FlowRenderer {
       page.text(`${due.kind} | ${due.status} | paid ${money(this.report, due.paidMinor)}`, MARGIN + 280, y + 2, { size: 7, color: COLOR.muted, maxWidth: 140 });
       page.text(money(this.report, due.amountMinor), PAGE_WIDTH - MARGIN - 8, y + 1, { size: 8.5, bold: true, align: "right" });
     });
-    this.simpleTable("Recurring items", "Active monthly income and expense plans", this.report.recurring, "No active recurring items.", (page, recurring, y, index) => {
+    this.simpleTable("Recurring items", "Active scheduled income and expense plans", this.report.recurring, "No active recurring items.", (page, recurring, y, index) => {
       if (index % 2 === 0) page.rect(MARGIN, y - 4, CONTENT_WIDTH, 29, "#ebe9dc");
-      page.text(`Day ${recurring.dayOfMonth}`, MARGIN + 9, y + 2, { size: 7.5, color: COLOR.muted });
+      page.text(recurring.scheduleLabel, MARGIN + 9, y + 2, { size: 7.5, color: COLOR.muted, maxWidth: 70 });
       page.text(recurring.note || recurring.categoryLabel, MARGIN + 83, y + 2, { size: 8, bold: true, maxWidth: 260 });
       page.text(recurring.kind.toUpperCase(), MARGIN + 357, y + 2, { size: 7, bold: true, color: recurring.kind === "income" ? COLOR.green : COLOR.coral });
       page.text(money(this.report, recurring.amountMinor), PAGE_WIDTH - MARGIN - 8, y + 1, { size: 8.5, bold: true, align: "right" });

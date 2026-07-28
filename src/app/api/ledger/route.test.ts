@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
     savingsGoal: { findMany: vi.fn() },
     customCategory: { findMany: vi.fn() },
     paymentAccount: { count: vi.fn(), findMany: vi.fn() },
+    accountReconciliation: { findFirst: vi.fn(), findMany: vi.fn() },
     savedPlace: { findMany: vi.fn() },
     accountTransfer: { findMany: vi.fn() },
     dueItem: { findMany: vi.fn() },
@@ -87,6 +88,7 @@ describe("saveReceiptSplit ledger action", () => {
     mocks.db.customCategory.findMany.mockResolvedValue([]);
     mocks.db.paymentAccount.findMany.mockResolvedValue([]);
     mocks.db.paymentAccount.count.mockResolvedValue(0);
+    mocks.db.accountReconciliation.findMany.mockResolvedValue([]);
     mocks.db.savedPlace.findMany.mockResolvedValue([]);
     mocks.db.accountTransfer.findMany.mockResolvedValue([]);
     mocks.db.dueItem.findMany.mockResolvedValue([]);

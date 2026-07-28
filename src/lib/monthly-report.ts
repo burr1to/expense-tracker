@@ -54,7 +54,8 @@ export interface MonthlyReportRecurring {
   categoryLabel: string;
   amountMinor: number;
   note: string;
-  dayOfMonth: number;
+  scheduleLabel: string;
+  nextDueOn: string;
   active: boolean;
 }
 
@@ -221,7 +222,7 @@ export function buildMonthlyReport(input: MonthlyReportInput, now = new Date()):
     }),
     transfers: [...input.transfers].sort((a, b) => b.occurredOn.localeCompare(a.occurredOn)),
     dues: [...input.dues].sort((a, b) => a.dueOn.localeCompare(b.dueOn)),
-    recurring: input.recurring.filter((item) => item.active).sort((a, b) => a.dayOfMonth - b.dayOfMonth),
+    recurring: input.recurring.filter((item) => item.active).sort((a, b) => a.nextDueOn.localeCompare(b.nextDueOn)),
     transactions: [...input.transactions].sort((a, b) => a.occurredOn.localeCompare(b.occurredOn) || a.id.localeCompare(b.id)),
   };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateCurrentAccountBalance, totalCurrentBalance } from "./account-balances";
+import { calculateCurrentAccountBalance, expectedAccountBalanceThrough, totalCurrentBalance } from "./account-balances";
 import type { AccountTransfer, LedgerTransaction, PaymentAccount } from "../types";
 
 const account = (overrides: Partial<PaymentAccount> = {}): PaymentAccount => ({
@@ -58,6 +58,28 @@ describe("account balances", () => {
 
   it("does not double-count activity that predates the snapshot", () => {
     expect(calculateCurrentAccountBalance(account(), [transaction({ occurredOn: "2026-07-19" })], [transfer({ occurredOn: "2026-07-20", createdAt: "2026-07-20T09:00:00.000Z" })])).toBe(10000);
+  });
+
+  it("calculates a reconciliation closing balance only through the checked date", () => {
+    expect(expectedAccountBalanceThrough(
+      account(),
+      [
+        transaction({ id: "income", kind: "income", amountMinor: 2_000, occurredOn: "2026-07-21" }),
+        transaction({ id: "expense", amountMinor: 500, occurredOn: "2026-07-22" }),
+        transaction({ id: "later", amountMinor: 9_000, occurredOn: "2026-08-01" }),
+      ],
+      [
+        transfer({ id: "incoming", fromAccountId: "other", toAccountId: "wallet", amountMinor: 1_000, occurredOn: "2026-07-23" }),
+        transfer({ id: "outgoing", fromAccountId: "wallet", toAccountId: "other", amountMinor: 250, occurredOn: "2026-07-24" }),
+      ],
+      "2026-07-31",
+    )).toEqual({
+      incomeMinor: 2_000,
+      expenseMinor: 500,
+      transfersInMinor: 1_000,
+      transfersOutMinor: 250,
+      expectedBalanceMinor: 12_250,
+    });
   });
 
   it("can total the currently tracked accounts", () => {

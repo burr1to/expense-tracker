@@ -12,6 +12,7 @@ const signatureFor = (transaction: LedgerTransaction) => [
   transaction.category,
   normalize(transaction.subcategory),
   normalize(transaction.area),
+  normalize(transaction.locationLabel),
   normalize(transaction.note),
   transaction.paymentMode,
   transaction.paymentAccountId ?? "",
@@ -22,11 +23,21 @@ const searchableText = (transaction: LedgerTransaction) => normalize([
   transaction.category,
   transaction.subcategory,
   transaction.area,
+  transaction.locationLabel,
+  transaction.locationAddress,
   transaction.paymentAccount?.provider,
   transaction.paymentAccount?.label,
 ].filter(Boolean).join(" "));
 
 const chronology = (transaction: LedgerTransaction) => `${transaction.occurredOn}\u001f${transaction.createdAt}`;
+
+export function transactionSuggestionTitle(transaction: LedgerTransaction) {
+  const place = transaction.locationLabel?.trim() || transaction.area?.trim();
+  const subcategory = transaction.subcategory?.trim();
+  if (place) return subcategory ? `${place} (${subcategory})` : place;
+  if (subcategory) return `(${subcategory})`;
+  return transaction.note.trim();
+}
 
 export function getTransactionSuggestions(
   transactions: readonly LedgerTransaction[],

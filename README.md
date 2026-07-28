@@ -25,6 +25,8 @@ A mobile-first personal income and expense tracker with monthly reporting, plann
 - Track a manually checked balance for each supported bank or digital wallet.
 - Account balances are snapshots: transactions and transfers recorded after the snapshot adjust the displayed current balance automatically.
 - Move money between tracked accounts with transfers; transfers do not count as income or expenses.
+- Reconcile each bank or wallet manually once per month by comparing the calculated closing balance with the provider's real balance.
+- Approved reconciliations update the account snapshot, preserve any explained difference in a locked audit record, and prevent later changes to already-audited activity.
 - The dashboard and Reports page show the total tracked balance and how it is distributed across accounts.
 
 ## Stack

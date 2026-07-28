@@ -4,6 +4,7 @@ export type AppView = "home" | "plan" | "dues" | "reports" | "transactions" | "a
 export type TransactionCategory = string;
 export type PaymentMode = "cash" | "cheque" | "online";
 export type PaymentAccountType = "mobile_banking" | "esewa" | "khalti" | "connect_ips";
+export type RecurrenceUnit = "week" | "month" | "year";
 
 export interface Profile {
   id: string;
@@ -114,6 +115,26 @@ export interface AccountTransfer {
   createdAt: string;
 }
 
+export interface AccountReconciliation {
+  id: string;
+  userId: string;
+  paymentAccountId: string;
+  monthKey: string;
+  checkedOn: string;
+  startingBalanceMinor: number;
+  startingBalanceAsOf: string;
+  incomeMinor: number;
+  expenseMinor: number;
+  transfersInMinor: number;
+  transfersOutMinor: number;
+  expectedBalanceMinor: number;
+  actualBalanceMinor: number;
+  adjustmentMinor: number;
+  adjustmentNote: string;
+  approvedAt: string;
+  createdAt: string;
+}
+
 export interface Budget {
   id: string;
   userId: string;
@@ -130,9 +151,23 @@ export interface RecurringEntry {
   amountMinor: number;
   note: string;
   tags: string[];
-  dayOfMonth: number;
+  dayOfMonth: number | null;
+  recurrenceUnit: RecurrenceUnit;
+  recurrenceInterval: number;
+  anchorDate: string;
   nextDueOn: string;
   active: boolean;
+}
+
+export interface RecurringDraft {
+  kind: TransactionKind;
+  category: TransactionCategory;
+  amount: string;
+  note: string;
+  tags: string;
+  recurrenceUnit: RecurrenceUnit;
+  recurrenceInterval: number;
+  startOn: string;
 }
 
 export interface SavingsGoal {

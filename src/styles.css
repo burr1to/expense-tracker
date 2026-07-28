@@ -261,6 +261,8 @@ h1, h2, strong { letter-spacing: -0.025em; }
 .transaction-scope { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; padding: 0 0 20px; margin-bottom: 22px; border-bottom: 1px solid var(--line); }
 .transaction-scope .section-label { margin: 0 0 10px 43px; color: var(--muted); }
 .transaction-scope .month-label { font-size: clamp(25px, 2.7vw, 36px); }
+.transaction-scope-controls { display: grid; justify-items: end; gap: 8px; }
+.transaction-history-scope { justify-self: end; }
 .toolbar { display: flex; gap: 18px; margin-bottom: 16px; }
 .search-field { width: min(480px, 100%); }
 .search-field .mantine-Input-wrapper { width: 100%; }
@@ -272,6 +274,7 @@ h1, h2, strong { letter-spacing: -0.025em; }
 .filter-tabs button.active { background: var(--ink); color: var(--paper); }
 .ledger-list { border-top: 1px solid var(--line); }
 .ledger-list-heading { display: flex; justify-content: space-between; padding: 16px 0 7px; color: var(--muted); font-size: 11px; }
+.transaction-history-pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 0 4px; color: var(--muted); font-size: 11px; }
 
 .report-kpis { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-bottom: 30px; }
 .report-kpis > div { padding: 24px; display: grid; gap: 6px; border-right: 1px solid var(--line); }
@@ -563,7 +566,7 @@ h1, h2, strong { letter-spacing: -0.025em; }
 .goal-contribution strong { color: var(--green); font-size: 10px; white-space: nowrap; }
 .goal-contributions > p { margin: 9px 0 0; color: var(--muted); font-size: 10px; }
 .recurring-list { border-top: 1px solid var(--line); }
-.recurring-list article { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto 36px; gap: 11px; align-items: center; padding: 15px 0; border-bottom: 1px solid var(--line); }
+.recurring-list article { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto 36px 36px; gap: 11px; align-items: center; padding: 15px 0; border-bottom: 1px solid var(--line); }
 .recurring-list article > div:nth-child(2) { display: grid; gap: 2px; }
 .recurring-list article span, .recurring-list article small { color: var(--muted); font-size: 11px; }
 .calendar-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(240px, .65fr); gap: 25px; }
@@ -592,13 +595,6 @@ h1, h2, strong { letter-spacing: -0.025em; }
 .calendar-day-summary strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-entry-list > div { display: flex; justify-content: space-between; gap: 15px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
 .calendar-day p { color: var(--muted); }
-.monthly-report-strip { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 14px 16px; margin: -18px 0 25px; border: 1px solid color-mix(in srgb, var(--blue) 28%, var(--line)); background: color-mix(in srgb, var(--blue) 7%, var(--paper-strong)); border-radius: 12px; }
-.monthly-report-strip > div { min-width: 0; display: flex; gap: 10px; align-items: center; }
-.monthly-report-strip > div > div { min-width: 0; display: grid; gap: 2px; }
-.monthly-report-strip > div > svg { flex: 0 0 auto; color: var(--blue); }
-.monthly-report-strip span { color: var(--muted); font-size: 11px; }
-.monthly-report-strip > a { flex: 0 0 auto; min-height: 36px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border-radius: 8px; background: var(--blue); color: white; font-size: 10px; font-weight: 780; }
-.monthly-report-strip + .due-strip { margin-top: 0; }
 .due-strip { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 13px 16px; margin: -18px 0 25px; border: 1px solid #badfc9; background: #edf8f1; border-radius: 12px; }
 .due-strip > div { display: flex; gap: 10px; align-items: center; }
 .due-strip > div:first-child > div { display: grid; gap: 2px; }
@@ -1079,8 +1075,8 @@ body[data-hide-amounts="true"] :is(.amount, .map-amount, .summary-strip strong, 
   .header-actions { gap: 6px; }
   .transaction-actions { gap: 7px; }
   .csv-template-help > span { display: none; }
-  .header-actions > .secondary-button { width: 44px; padding: 0; font-size: 0; }
-  .header-actions > .primary-button { width: 44px; padding: 0; font-size: 0; }
+  .header-actions > .secondary-button { width: 44px; padding: 0; gap: 0; font-size: 0; }
+  .header-actions > .primary-button { width: 44px; padding: 0; gap: 0; font-size: 0; }
   .transaction-scope { align-items: stretch; display: grid; gap: 16px; padding-bottom: 16px; margin-bottom: 18px; }
   .transaction-scope > div { min-width: 0; }
   .transaction-scope .section-label { margin-left: 0; }
@@ -1088,6 +1084,8 @@ body[data-hide-amounts="true"] :is(.amount, .map-amount, .summary-strip strong, 
   .transaction-scope .month-picker .icon-button { display: inline-grid; flex: 0 0 36px; }
   .transaction-scope .month-label { justify-content: center; min-width: 0; font-size: 25px; }
   .transaction-scope .filter-tabs { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); overflow: visible; }
+  .transaction-scope .transaction-history-scope { grid-template-columns: repeat(2, 1fr); }
+  .transaction-scope-controls { justify-items: stretch; }
   .transaction-scope .filter-tabs button { min-height: 38px; }
   .toolbar { display: grid; }
   .advanced-filters { grid-template-columns: repeat(2, 1fr); margin: 0 0 18px; }
@@ -1150,8 +1148,12 @@ body[data-hide-amounts="true"] :is(.amount, .map-amount, .summary-strip strong, 
   .budget-pacing-copy > div:first-child span { text-align: right; }
   .budget-pacing-meta { gap: 3px 8px; }
   .goal-grid { grid-template-columns: 1fr; }
-  .recurring-list article { grid-template-columns: 38px minmax(0, 1fr) auto; }
-  .recurring-list article .icon-button { grid-column: 3; }
+  .recurring-list article { grid-template-columns: 38px minmax(0, 1fr) 34px 34px; }
+  .recurring-list article > div:nth-child(2) { grid-column: 2 / -1; }
+  .recurring-list article > .secondary-button { grid-column: 2; grid-row: 2; justify-self: start; }
+  .recurring-list article > .icon-button { grid-row: 2; }
+  .recurring-list article > .icon-button:not(.danger) { grid-column: 3; }
+  .recurring-list article > .icon-button.danger { grid-column: 4; }
   .calendar-layout { gap: 18px; }
   .calendar-panel { margin: 0 -14px; border-left: 0; border-right: 0; border-radius: 0; padding: 14px 10px; }
   .calendar-grid > button { min-height: 86px; padding: 5px; }
@@ -1159,8 +1161,6 @@ body[data-hide-amounts="true"] :is(.amount, .map-amount, .summary-strip strong, 
   .calendar-summary { font-size: 9px; }
   .calendar-day { border-left: 0; border-top: 1px solid var(--line); padding: 20px 0; }
   .calendar-day-summary strong { font-size: 9px; }
-  .monthly-report-strip { margin: -5px 0 18px; align-items: flex-start; display: grid; }
-  .monthly-report-strip > a { width: 100%; justify-content: center; }
   .monthly-report-notification { grid-template-columns: 34px minmax(0, 1fr); }
   .monthly-report-notification .reminder-action { grid-column: 1 / -1; width: 100%; }
   .report-header-actions { justify-items: start; }
@@ -1664,6 +1664,10 @@ strong {
   }
 
   .chart-section, .category-section, .report-panel, .settings-panel { padding: 14px; }
+  .settings-page .backup-panel { padding-inline: 20px; }
+  .backup-download,
+  .backup-file-button { width: 100%; justify-content: center; }
+  .backup-secondary-action { gap: 12px; padding-inline: 12px; }
   .chart-wrap { height: 140px; }
   .section-heading h2 { font-size: 16px; }
   .transaction-row { grid-template-columns: 32px minmax(0, 1fr) auto; min-height: 38px; gap: 7px; }
@@ -1749,4 +1753,71 @@ strong {
   .place-spending-row { grid-template-columns: 34px minmax(180px, 1.25fr) auto minmax(240px, .9fr) 18px; gap: 12px; padding: 11px 3px; }
   .place-trend-stats { grid-column: auto; grid-template-columns: repeat(3, minmax(64px, 1fr)); padding: 0; }
   .place-trend-arrow { display: block; }
+}
+
+/* Monthly account reconciliation and immutable audit history. */
+.account-reconciliation-section { padding: 25px; border: 1px solid var(--line); border-radius: var(--panel-radius); background: rgba(255,255,255,.42); }
+.reconciliation-heading { margin-bottom: 20px; }
+.reconciliation-heading p { max-width: 68ch; margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.reconciliation-heading > svg { flex: 0 0 auto; color: var(--blue); }
+.reconciliation-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(230px, .7fr); gap: 22px; align-items: start; }
+.reconciliation-workspace, .reconciliation-history { min-width: 0; border: 1px solid var(--line); border-radius: var(--panel-radius); background: color-mix(in srgb, var(--paper-strong) 78%, transparent); }
+.reconciliation-workspace { padding: 20px; }
+.reconciliation-controls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, .55fr); gap: 12px; margin-bottom: 18px; }
+.reconciliation-form { display: grid; gap: 16px; }
+.reconciliation-period-copy { display: grid; gap: 4px; padding: 11px 13px; border-left: 3px solid var(--blue); background: color-mix(in srgb, var(--blue) 6%, transparent); }
+.reconciliation-period-copy span { font-size: 11px; }
+.reconciliation-period-copy small { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.reconciliation-calculation { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.reconciliation-calculation > div { min-width: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding: 9px 2px; border-bottom: 1px solid color-mix(in srgb, var(--line) 68%, transparent); }
+.reconciliation-calculation > div:last-child { border-bottom: 0; }
+.reconciliation-calculation span { color: var(--muted); font-size: 10px; }
+.reconciliation-calculation strong { overflow-wrap: anywhere; font-size: 12px; text-align: right; }
+.reconciliation-calculation strong.positive { color: var(--green); }
+.reconciliation-calculation strong.negative { color: var(--coral) !important; }
+.reconciliation-calculation .reconciliation-total { padding-block: 12px; }
+.reconciliation-calculation .reconciliation-total span, .reconciliation-calculation .reconciliation-total strong { color: var(--ink); font-size: 13px; font-weight: 800; }
+.reconciliation-difference { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; align-items: center; padding: 12px; border-radius: var(--control-radius); }
+.reconciliation-difference > span { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; }
+.reconciliation-difference > div { display: grid; gap: 3px; }
+.reconciliation-difference strong { font-size: 11px; }
+.reconciliation-difference small { color: var(--muted); font-size: 9px; line-height: 1.4; }
+.reconciliation-difference.matched { background: color-mix(in srgb, var(--green) 9%, transparent); }
+.reconciliation-difference.matched > span { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); }
+.reconciliation-difference.different { background: color-mix(in srgb, var(--gold) 13%, transparent); }
+.reconciliation-difference.different > span { background: color-mix(in srgb, var(--gold) 20%, transparent); color: #8b6411; }
+.reconciliation-approve { width: 100%; justify-content: center; }
+.reconciliation-approved { display: grid; gap: 16px; }
+.reconciliation-approved-title { display: flex; align-items: center; gap: 10px; }
+.reconciliation-approved-title > span { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); }
+.reconciliation-approved-title > div { min-width: 0; display: grid; gap: 3px; }
+.reconciliation-approved-title strong { font-size: 13px; }
+.reconciliation-approved-title small { color: var(--muted); font-size: 9px; }
+.reconciliation-note { margin: 0; padding: 11px 13px; border-left: 3px solid var(--green); background: color-mix(in srgb, var(--green) 6%, transparent); font-size: 10px; line-height: 1.5; }
+.reconciliation-unavailable { display: flex; gap: 11px; align-items: flex-start; padding: 15px; background: color-mix(in srgb, var(--gold) 11%, transparent); }
+.reconciliation-unavailable svg { flex: 0 0 auto; color: #8b6411; }
+.reconciliation-unavailable div { display: grid; gap: 4px; }
+.reconciliation-unavailable strong { font-size: 12px; }
+.reconciliation-unavailable p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.reconciliation-history { padding: 18px; }
+.reconciliation-history > div:first-child { margin-bottom: 12px; }
+.reconciliation-history h3 { margin: 4px 0 0; font-size: 15px; }
+.reconciliation-history > article { display: grid; gap: 5px; padding: 12px 0; border-top: 1px solid var(--line); }
+.reconciliation-history > article > strong { font-size: 14px; }
+.reconciliation-history > article > small, .reconciliation-history > article > time { color: var(--muted); font-size: 9px; line-height: 1.4; }
+.reconciliation-history-status { display: flex; align-items: center; gap: 5px; color: var(--green); font-size: 10px; font-weight: 800; }
+.reconciliation-history-empty { display: grid; justify-items: center; gap: 8px; padding: 28px 10px 10px; color: var(--muted); text-align: center; }
+.reconciliation-history-empty p { max-width: 26ch; margin: 0; font-size: 10px; line-height: 1.5; }
+.account-audit-managed { display: inline-flex !important; align-items: center; gap: 4px; color: var(--green) !important; font-weight: 750; }
+
+@media (max-width: 640px) {
+  .account-reconciliation-section { margin-inline: -14px; padding: 16px 14px; border-right: 0; border-left: 0; border-radius: 0; background: rgba(255,255,255,.28); }
+  .reconciliation-heading { padding-inline: 6px; }
+  .reconciliation-layout { grid-template-columns: 1fr; gap: 12px; }
+  .reconciliation-workspace, .reconciliation-history { border-right: 0; border-left: 0; border-radius: 0; }
+  .reconciliation-workspace { margin-inline: -14px; padding: 16px 20px; }
+  .reconciliation-history { margin-inline: -14px; padding: 16px 20px; }
+  .reconciliation-controls { grid-template-columns: 1fr; }
+  .reconciliation-calculation > div { padding-block: 8px; }
+  .reconciliation-calculation .reconciliation-total { padding-block: 11px; }
 }

@@ -10,7 +10,7 @@ import { formatMoney } from "../lib/currency";
 import { toDateInput } from "../lib/dates";
 import { discardReceipt, uploadReceipt } from "../lib/receipts";
 import { paymentAccountLabel } from "../lib/payment-accounts";
-import { getTransactionSuggestions, type TransactionSuggestion } from "../lib/transaction-suggestions";
+import { getTransactionSuggestions, transactionSuggestionTitle, type TransactionSuggestion } from "../lib/transaction-suggestions";
 import type { CurrencyCode, CustomCategory, LedgerTransaction, PaymentAccount, PaymentMode, ReceiptUpload, SavedPlace, TransactionDraft, TransactionKind, TransactionLocationDraft } from "../types";
 import { CategoryIcon } from "./CategoryIcon";
 import { ButtonSpinner } from "./ButtonSpinner";
@@ -173,7 +173,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
                 const payment = previous.paymentMode === "online" ? previous.paymentAccount ? paymentAccountLabel(previous.paymentAccount) : "Online" : previous.paymentMode === "cheque" ? "Cheque" : "Cash";
                 return <button key={previous.id} type="button" className={appliedSuggestionId === previous.id ? "repeat-suggestion selected" : "repeat-suggestion"} aria-pressed={appliedSuggestionId === previous.id} onClick={() => applySuggestion(suggestion)}>
                   <span className="repeat-suggestion-icon" style={{ "--category-color": definition.color } as CSSProperties}><CategoryIcon category={previous.category} size={18} /></span>
-                  <span className="repeat-suggestion-copy"><strong>{previous.note || previous.subcategory || definition.label}</strong><small>{definition.label}{previous.area ? ` · ${previous.area}` : ""} · {payment}</small></span>
+                  <span className="repeat-suggestion-copy"><strong>{transactionSuggestionTitle(previous) || definition.label}</strong><small>{definition.label} · {payment}</small></span>
                   <span className="repeat-suggestion-value"><strong>{formatMoney(previous.amountMinor, currency)}</strong><small>{suggestion.useCount > 1 ? `Used ${suggestion.useCount}×` : format(parseISO(previous.occurredOn), "MMM d")}</small></span>
                 </button>;
               })}

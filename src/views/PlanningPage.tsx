@@ -1,4 +1,4 @@
-import { CalendarDots, Check, Flag, Plus, Repeat, Trash, WarningCircle } from "@phosphor-icons/react";
+import { CalendarDots, Check, Flag, PencilSimple, Plus, Repeat, Trash, WarningCircle } from "@phosphor-icons/react";
 import { NumberInput, Select, TextInput } from "@mantine/core";
 import { eachDayOfInterval, endOfMonth, format, getDay, isSameDay, isSameMonth, parseISO, startOfMonth } from "date-fns";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
@@ -12,7 +12,8 @@ import { dailyCashFlow } from "../lib/calendar";
 import { formatMoney } from "../lib/currency";
 import { monthKey } from "../lib/dates";
 import { calculateBudgetPacing } from "../lib/planning-insights";
-import type { Budget, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, RecurringEntry, SavingsGoal, TransactionKind } from "../types";
+import { recurrenceLabel } from "../lib/recurrence";
+import type { Budget, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, RecurrenceUnit, RecurringDraft, RecurringEntry, SavingsGoal, TransactionKind } from "../types";
 
 type PlanTab = "budgets" | "goals" | "recurring" | "calendar";
 const previewMinor = (value: string) => Math.round(Number(value.replace(/,/g, "")) * 100) || 0;
@@ -22,7 +23,7 @@ interface PlanningPageProps {
   onMonthChange: (date: Date) => void;
   onSaveBudget: (draft: { category: string; amount: string; monthKey: string }, id?: string) => Promise<void>;
   onDeleteBudget: (id: string) => Promise<void>;
-  onSaveRecurring: (draft: { kind: TransactionKind; category: string; amount: string; note: string; tags: string; dayOfMonth: number }, id?: string) => Promise<void>;
+  onSaveRecurring: (draft: RecurringDraft, id?: string) => Promise<void>;
   onDeleteRecurring: (id: string) => Promise<void>;
   onConfirmRecurring: (id: string) => Promise<void>;
   onSaveGoal: (draft: { name: string; target: string; saved: string; targetDate: string }, id?: string) => Promise<void>;
@@ -110,12 +111,93 @@ function RecurringKindToggle({ value, disabled, onChange }: { value: Transaction
 }
 
 function RecurringSection({ currency, recurringEntries, customCategories, onSaveRecurring, onDeleteRecurring, onConfirmRecurring }: PlanningPageProps) {
-  const [kind, setKind] = useState<TransactionKind>("expense"); const [category, setCategory] = useState("housing"); const [amount, setAmount] = useState(""); const [note, setNote] = useState(""); const [day, setDay] = useState(1); const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false); const [pendingEntry, setPendingEntry] = useState<{ id: string; action: "confirm" | "delete" } | null>(null);
-  const save = async (event: React.FormEvent) => { event.preventDefault(); if (saving) return; setSaving(true); try { setError(null); await onSaveRecurring({ kind, category, amount, note, tags: "", dayOfMonth: day }); setAmount(""); setNote(""); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save recurring entry."); } finally { setSaving(false); } };
-  const runEntryAction = async (id: string, action: "confirm" | "delete") => { if (pendingEntry) return; setPendingEntry({ id, action }); try { setError(null); await (action === "confirm" ? onConfirmRecurring(id) : onDeleteRecurring(id)); } catch (caught) { setError(caught instanceof Error ? caught.message : `Could not ${action} recurring entry.`); } finally { setPendingEntry(null); } };
   const today = format(new Date(), "yyyy-MM-dd");
-  return <section className="planner-layout"><article className="planner-form-panel"><span className="section-label">Repeat monthly</span><h2>Prepare a regular entry</h2><form onSubmit={save} className="stack-form" aria-busy={saving}><RecurringKindToggle value={kind} disabled={saving} onChange={(next) => { setKind(next); setCategory(next === "expense" ? "housing" : "salary"); }} /><Select label="Category" value={category} disabled={saving} onChange={(value) => value && setCategory(value)} data={allCategoriesFor(kind, customCategories).map((item) => ({ value: item.id, label: item.label }))} searchable allowDeselect={false} /><NumberInput label={`Amount in ${currency}`} value={amount} disabled={saving} onChange={(value) => setAmount(String(value))} required min={0} thousandSeparator="," decimalScale={2} /><TextInput label="Note" value={note} disabled={saving} onChange={(event) => setNote(event.target.value)} placeholder="Monthly rent" /><NumberInput label="Day of month" min={1} max={28} value={day} disabled={saving} onChange={(value) => setDay(Number(value))} /><button className="primary-button" disabled={saving}>{saving ? <><ButtonSpinner />Saving entry…</> : <><Plus size={17} />Save recurring entry</>}</button>{error && <div className="form-error" role="alert">{error}</div>}</form></article><article className="planner-content"><div className="section-heading"><div><span className="section-label">Confirm before logging</span><h2>Recurring entries</h2></div></div><div className="recurring-list">{recurringEntries.map((entry) => { const ready = entry.nextDueOn <= today; const confirming = pendingEntry?.id === entry.id && pendingEntry.action === "confirm"; const deleting = pendingEntry?.id === entry.id && pendingEntry.action === "delete"; return <article key={entry.id} aria-busy={confirming || deleting}><div className="transaction-icon"><CategoryIcon category={entry.category} /></div><div><strong>{entry.note || getCategory(entry.category, customCategories).label}</strong><span>{formatMoney(entry.amountMinor, currency)} · monthly on day {entry.dayOfMonth}</span><small>{deleting ? "Removing…" : `Next: ${format(parseISO(entry.nextDueOn), "MMM d, yyyy")}`}</small></div><button className="secondary-button small" disabled={!ready || confirming || deleting} onClick={() => void runEntryAction(entry.id, "confirm")}>{confirming ? <><ButtonSpinner />Confirming…</> : ready ? <><Check size={15} />Confirm</> : "Scheduled"}</button><button className="icon-button danger" disabled={confirming || deleting} onClick={() => void runEntryAction(entry.id, "delete")} aria-label={`Delete ${entry.note}`}>{deleting ? <ButtonSpinner /> : <Trash size={16} />}</button></article>; })}</div>{!recurringEntries.length && <EmptyState title="Nothing repeats yet" />}</article></section>;
+  const [kind, setKind] = useState<TransactionKind>("expense");
+  const [category, setCategory] = useState("housing");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [schedule, setSchedule] = useState("month:1");
+  const [startOn, setStartOn] = useState(today);
+  const [editing, setEditing] = useState<RecurringEntry | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false); const [pendingEntry, setPendingEntry] = useState<{ id: string; action: "confirm" | "delete" } | null>(null);
+  const resetForm = () => {
+    setAmount("");
+    setNote("");
+    setSchedule("month:1");
+    setStartOn(today);
+    setEditing(null);
+  };
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (saving || !startOn) return;
+    const [recurrenceUnit, interval] = schedule.split(":") as [RecurrenceUnit, string];
+    setSaving(true);
+    try {
+      setError(null);
+      await onSaveRecurring({ kind, category, amount, note, tags: "", recurrenceUnit, recurrenceInterval: Number(interval), startOn }, editing?.id);
+      resetForm();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save recurring entry.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const edit = (entry: RecurringEntry) => {
+    setEditing(entry);
+    setKind(entry.kind);
+    setCategory(entry.category);
+    setAmount(String(entry.amountMinor / 100));
+    setNote(entry.note);
+    setSchedule(`${entry.recurrenceUnit}:${entry.recurrenceInterval}`);
+    setStartOn(entry.anchorDate);
+    setError(null);
+  };
+  const runEntryAction = async (id: string, action: "confirm" | "delete") => { if (pendingEntry) return; setPendingEntry({ id, action }); try { setError(null); await (action === "confirm" ? onConfirmRecurring(id) : onDeleteRecurring(id)); } catch (caught) { setError(caught instanceof Error ? caught.message : `Could not ${action} recurring entry.`); } finally { setPendingEntry(null); } };
+  const scheduleOptions = [
+    { value: "week:1", label: "Weekly" },
+    { value: "week:2", label: "Every 2 weeks" },
+    { value: "month:1", label: "Monthly" },
+    { value: "month:3", label: "Every 3 months" },
+    { value: "year:1", label: "Yearly" },
+  ];
+  return <section className="planner-layout">
+    <article className="planner-form-panel">
+      <span className="section-label">{editing ? "Update schedule" : "Schedule a regular entry"}</span>
+      <h2>{editing ? "Edit recurring entry" : "Prepare what repeats"}</h2>
+      <form onSubmit={save} className="stack-form" aria-busy={saving}>
+        <RecurringKindToggle value={kind} disabled={saving} onChange={(next) => { setKind(next); setCategory(next === "expense" ? "housing" : "salary"); }} />
+        <Select label="Category" value={category} disabled={saving} onChange={(value) => value && setCategory(value)} data={allCategoriesFor(kind, customCategories).map((item) => ({ value: item.id, label: item.label }))} searchable allowDeselect={false} />
+        <NumberInput label={`Amount in ${currency}`} value={amount} disabled={saving} onChange={(value) => setAmount(String(value))} required min={0} thousandSeparator="," decimalScale={2} />
+        <TextInput label="Note" value={note} disabled={saving} onChange={(event) => setNote(event.target.value)} placeholder={kind === "expense" ? "Rent, subscription, or bill" : "Salary or regular income"} />
+        <Select label="Repeats" value={schedule} disabled={saving} onChange={(value) => value && setSchedule(value)} data={scheduleOptions} allowDeselect={false} />
+        <DatePickerInput label="First due date" description="The schedule advances from this date" value={startOn} onChange={(value) => setStartOn(value ?? "")} disabled={saving} valueFormat="MMM D, YYYY" firstDayOfWeek={0} required />
+        <button className="primary-button" disabled={saving || !startOn}>{saving ? <><ButtonSpinner />Saving schedule…</> : <><Plus size={17} />{editing ? "Update schedule" : "Save recurring entry"}</>}</button>
+        {editing && <button type="button" className="secondary-button" disabled={saving} onClick={resetForm}>Cancel editing</button>}
+        {error && <div className="form-error" role="alert">{error}</div>}
+      </form>
+    </article>
+    <article className="planner-content">
+      <div className="section-heading"><div><span className="section-label">Confirm before logging</span><h2>Recurring entries</h2></div></div>
+      <div className="recurring-list">{recurringEntries.map((entry) => {
+        const ready = entry.nextDueOn <= today;
+        const confirming = pendingEntry?.id === entry.id && pendingEntry.action === "confirm";
+        const deleting = pendingEntry?.id === entry.id && pendingEntry.action === "delete";
+        return <article key={entry.id} aria-busy={confirming || deleting}>
+          <div className="transaction-icon"><CategoryIcon category={entry.category} /></div>
+          <div>
+            <strong>{entry.note || getCategory(entry.category, customCategories).label}</strong>
+            <span>{formatMoney(entry.amountMinor, currency)} · {recurrenceLabel(entry)}</span>
+            <small>{deleting ? "Removing…" : `Next: ${format(parseISO(entry.nextDueOn), "MMM d, yyyy")}`}</small>
+          </div>
+          <button className="secondary-button small" disabled={!ready || confirming || deleting} onClick={() => void runEntryAction(entry.id, "confirm")}>{confirming ? <><ButtonSpinner />Confirming…</> : ready ? <><Check size={15} />Confirm</> : "Scheduled"}</button>
+          <button className="icon-button" disabled={confirming || deleting || saving} onClick={() => edit(entry)} aria-label={`Edit ${entry.note || "recurring entry"}`}><PencilSimple size={16} /></button>
+          <button className="icon-button danger" disabled={confirming || deleting} onClick={() => void runEntryAction(entry.id, "delete")} aria-label={`Delete ${entry.note || "recurring entry"}`}>{deleting ? <ButtonSpinner /> : <Trash size={16} />}</button>
+        </article>;
+      })}</div>
+      {!recurringEntries.length && <EmptyState title="Nothing repeats yet" />}
+    </article>
+  </section>;
 }
 
 function CalendarSection({ month, currency, transactions, onMonthChange }: PlanningPageProps) {

@@ -23,6 +23,7 @@ model User {
   sessions          Session[]
   accounts          Account[]
   paymentAccounts   PaymentAccount[]
+  reconciliations   AccountReconciliation[]
   transfers         AccountTransfer[]
   transactions      Transaction[]
   budgets           Budget[]
@@ -144,11 +145,37 @@ model PaymentAccount {
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
   user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reconciliations   AccountReconciliation[]
   transactions      Transaction[]
   outgoingTransfers AccountTransfer[] @relation("TransferFrom")
   incomingTransfers AccountTransfer[] @relation("TransferTo")
 
   @@index([userId])
+}
+
+model AccountReconciliation {
+  id                      String         @id @default(cuid())
+  userId                  String
+  paymentAccountId        String
+  monthKey                String
+  checkedOn               DateTime       @db.Date
+  startingBalanceMinor    Int
+  startingBalanceAsOf     DateTime       @db.Date
+  incomeMinor             Int
+  expenseMinor            Int
+  transfersInMinor        Int
+  transfersOutMinor       Int
+  expectedBalanceMinor    Int
+  actualBalanceMinor      Int
+  adjustmentMinor         Int
+  adjustmentNote          String         @default("")
+  approvedAt              DateTime       @default(now())
+  createdAt               DateTime       @default(now())
+  user                    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paymentAccount          PaymentAccount @relation(fields: [paymentAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentAccountId, monthKey])
+  @@index([userId, approvedAt])
 }
 
 model AccountTransfer {
@@ -183,19 +210,22 @@ model Budget {
 }
 
 model RecurringEntry {
-  id          String   @id @default(cuid())
-  userId      String
-  kind        String
-  category    String
-  amountMinor Int
-  note        String   @default("")
-  tags        String[] @default([])
-  dayOfMonth  Int
-  nextDueOn   DateTime @db.Date
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                 String   @id @default(cuid())
+  userId             String
+  kind               String
+  category           String
+  amountMinor        Int
+  note               String   @default("")
+  tags               String[] @default([])
+  dayOfMonth         Int?
+  recurrenceUnit     String   @default("month")
+  recurrenceInterval Int      @default(1)
+  anchorDate         DateTime @db.Date
+  nextDueOn          DateTime @db.Date
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, nextDueOn])
 }

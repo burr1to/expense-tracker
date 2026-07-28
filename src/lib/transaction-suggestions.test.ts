@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTransactionSuggestions } from "./transaction-suggestions";
+import { getTransactionSuggestions, transactionSuggestionTitle } from "./transaction-suggestions";
 import type { LedgerTransaction } from "../types";
 
 const transaction = (overrides: Partial<LedgerTransaction>): LedgerTransaction => ({
@@ -26,6 +26,30 @@ const transaction = (overrides: Partial<LedgerTransaction>): LedgerTransaction =
 });
 
 describe("transaction suggestions", () => {
+  it("uses the place as the title and shows the subcategory in brackets", () => {
+    expect(transactionSuggestionTitle(transaction({
+      area: "Mira's Coffee",
+      subcategory: "Cafe",
+      note: "Tea",
+    }))).toBe("Mira's Coffee (Cafe)");
+  });
+
+  it("uses a bracketed subcategory when no place was recorded", () => {
+    expect(transactionSuggestionTitle(transaction({
+      area: "",
+      subcategory: "Cafe",
+      note: "Tea",
+    }))).toBe("(Cafe)");
+  });
+
+  it("falls back to the note when neither a place nor subcategory was recorded", () => {
+    expect(transactionSuggestionTitle(transaction({
+      area: "",
+      subcategory: "",
+      note: "Tea",
+    }))).toBe("Tea");
+  });
+
   it("groups matching transaction details and keeps the newest example", () => {
     const older = transaction({ id: "older", occurredOn: "2026-06-10", amountMinor: 90000 });
     const newer = transaction({ id: "newer", occurredOn: "2026-07-10", amountMinor: 120000 });
@@ -50,10 +74,12 @@ describe("transaction suggestions", () => {
   it("filters by transaction kind and searchable place details", () => {
     const lunch = transaction({ id: "lunch" });
     const commute = transaction({ id: "commute", category: "transport", note: "Taxi", subcategory: "Ride share", area: "Patan" });
+    const pinned = transaction({ id: "pinned", locationLabel: "Mira's Coffee", area: "" });
     const salary = transaction({ id: "salary", kind: "income", category: "salary", note: "Monthly salary" });
 
-    expect(getTransactionSuggestions([lunch, commute, salary], "expense", "patan").map((item) => item.transaction.id)).toEqual(["commute"]);
-    expect(getTransactionSuggestions([lunch, commute, salary], "income").map((item) => item.transaction.id)).toEqual(["salary"]);
+    expect(getTransactionSuggestions([lunch, commute, pinned, salary], "expense", "patan").map((item) => item.transaction.id)).toEqual(["commute"]);
+    expect(getTransactionSuggestions([lunch, commute, pinned, salary], "expense", "mira").map((item) => item.transaction.id)).toEqual(["pinned"]);
+    expect(getTransactionSuggestions([lunch, commute, pinned, salary], "income").map((item) => item.transaction.id)).toEqual(["salary"]);
   });
 
   it("promotes frequently reused details and respects the result limit", () => {

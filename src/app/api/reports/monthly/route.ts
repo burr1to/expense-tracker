@@ -11,7 +11,8 @@ import {
 } from "../../../../lib/monthly-report";
 import { generateMonthlyReportPdf } from "../../../../lib/monthly-report-pdf";
 import { getPrisma } from "../../../../lib/prisma";
-import type { CurrencyCode } from "../../../../types";
+import { recurrenceLabel } from "../../../../lib/recurrence";
+import type { CurrencyCode, RecurrenceUnit } from "../../../../types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -47,7 +48,7 @@ export async function GET(request: Request) {
     db.transaction.findMany({ where: { userId: session.user.id, paymentAccountId: { not: null } }, orderBy: [{ occurredOn: "asc" }, { createdAt: "asc" }] }),
     db.accountTransfer.findMany({ where: { userId: session.user.id }, orderBy: [{ occurredOn: "asc" }, { createdAt: "asc" }] }),
     db.dueItem.findMany({ where: { userId: session.user.id }, include: { payments: true } }),
-    db.recurringEntry.findMany({ where: { userId: session.user.id, active: true }, orderBy: { dayOfMonth: "asc" } }),
+    db.recurringEntry.findMany({ where: { userId: session.user.id, active: true }, orderBy: { nextDueOn: "asc" } }),
   ]);
 
   const customLabels = new Map(categories.map((item) => [item.id, item.name]));
@@ -118,7 +119,8 @@ export async function GET(request: Request) {
       categoryLabel: categoryLabel(item.category),
       amountMinor: item.amountMinor,
       note: item.note,
-      dayOfMonth: item.dayOfMonth,
+      scheduleLabel: recurrenceLabel({ recurrenceUnit: item.recurrenceUnit as RecurrenceUnit, recurrenceInterval: item.recurrenceInterval }),
+      nextDueOn: dateOnly(item.nextDueOn),
       active: item.active,
     })),
   });

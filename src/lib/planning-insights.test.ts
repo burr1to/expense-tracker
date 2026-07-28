@@ -34,6 +34,9 @@ const recurring = (overrides: Partial<RecurringEntry>): RecurringEntry => ({
   note: "",
   tags: [],
   dayOfMonth: 20,
+  recurrenceUnit: "month",
+  recurrenceInterval: 1,
+  anchorDate: "2026-07-20",
   nextDueOn: "2026-07-20",
   active: true,
   ...overrides,
@@ -111,6 +114,19 @@ describe("budget pacing", () => {
     )[0];
 
     expect(result.upcomingMinor).toBe(0);
+  });
+
+  it("counts every weekly occurrence in the selected month", () => {
+    const result = calculateBudgetPacing(
+      [{ ...budget, amountMinor: 2000000 }],
+      [],
+      [recurring({ recurrenceUnit: "week", recurrenceInterval: 1, anchorDate: "2026-07-01", nextDueOn: "2026-07-01" })],
+      [],
+      new Date(2026, 6, 1),
+      new Date(2026, 6, 1),
+    )[0];
+
+    expect(result.upcomingRecurringMinor).toBe(1000000);
   });
 });
 

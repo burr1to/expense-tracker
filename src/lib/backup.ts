@@ -81,6 +81,27 @@ export const backupEntitySchemas = {
     note: z.string().max(240),
     createdAt: dateTime,
   }).refine((value) => value.fromAccountId !== value.toAccountId, "A transfer needs two different accounts."),
+  account_reconciliation: z.object({
+    paymentAccountId: z.string().min(1).max(200),
+    monthKey: z.string().regex(/^\d{4}-\d{2}$/),
+    checkedOn: date,
+    startingBalanceMinor: z.number().int(),
+    startingBalanceAsOf: date,
+    incomeMinor: z.number().int().nonnegative(),
+    expenseMinor: z.number().int().nonnegative(),
+    transfersInMinor: z.number().int().nonnegative(),
+    transfersOutMinor: z.number().int().nonnegative(),
+    expectedBalanceMinor: z.number().int(),
+    actualBalanceMinor: z.number().int(),
+    adjustmentMinor: z.number().int(),
+    adjustmentNote: z.string().max(300),
+    approvedAt: dateTime,
+    createdAt: dateTime,
+  }).superRefine((value, context) => {
+    if (!value.checkedOn.startsWith(`${value.monthKey}-`)) context.addIssue({ code: "custom", path: ["checkedOn"], message: "Reconciliation date must be inside its month." });
+    if (value.actualBalanceMinor - value.expectedBalanceMinor !== value.adjustmentMinor) context.addIssue({ code: "custom", path: ["adjustmentMinor"], message: "Reconciliation adjustment does not match its balances." });
+    if (value.adjustmentMinor !== 0 && !value.adjustmentNote.trim()) context.addIssue({ code: "custom", path: ["adjustmentNote"], message: "A reconciliation difference requires an explanation." });
+  }),
   budget: z.object({
     monthKey: z.string().regex(/^\d{4}-\d{2}$/),
     category: z.string().min(1).max(200),
@@ -94,7 +115,10 @@ export const backupEntitySchemas = {
     amountMinor: z.number().int().positive(),
     note: z.string().max(240),
     tags: z.array(z.string().max(40)).max(8),
-    dayOfMonth: z.number().int().min(1).max(28),
+    dayOfMonth: z.number().int().min(1).max(31).nullable().optional(),
+    recurrenceUnit: z.enum(["week", "month", "year"]).optional(),
+    recurrenceInterval: z.number().int().min(1).max(52).optional(),
+    anchorDate: date.optional(),
     nextDueOn: date,
     active: z.boolean(),
     createdAt: dateTime,
@@ -295,6 +319,8 @@ export function parseBackupCsv(input: string): ParsedBackup {
     } else if (record.entity === "account_transfer") {
       requireRelation("fromAccountId", accountIds);
       requireRelation("toAccountId", accountIds);
+    } else if (record.entity === "account_reconciliation") {
+      requireRelation("paymentAccountId", accountIds);
     } else if (record.entity === "savings_goal_contribution") requireRelation("goalId", goalIds);
     else if (record.entity === "due_payment") {
       requireRelation("dueItemId", dueIds);
@@ -303,6 +329,14 @@ export function parseBackupCsv(input: string): ParsedBackup {
       requireRelation("transactionId", transactionIds);
       requireRelation("dueItemId", dueIds);
     }
+  }
+
+  const reconciliationMonths = new Set<string>();
+  for (const record of records.filter((item) => item.entity === "account_reconciliation")) {
+    const payload = record.payload as BackupPayload<"account_reconciliation">;
+    const key = `${payload.paymentAccountId}:${payload.monthKey}`;
+    if (reconciliationMonths.has(key)) throw new Error(`Backup contains more than one reconciliation for ${payload.monthKey} on the same account.`);
+    reconciliationMonths.add(key);
   }
 
   const counts = records.reduce<Record<string, number>>((result, record) => {

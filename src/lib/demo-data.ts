@@ -60,7 +60,7 @@ export const DEMO_GOALS: SavingsGoal[] = [
 ];
 
 export const DEMO_RECURRING: RecurringEntry[] = [
-  { id: "r1", userId: "demo-user", kind: "income", category: "salary", amountMinor: 8540000, note: "Monthly salary", tags: ["work"], dayOfMonth: 10, nextDueOn: format(addMonths(now, 1), "yyyy-MM-10"), active: true },
-  { id: "r2", userId: "demo-user", kind: "expense", category: "housing", amountMinor: 2000000, note: "Apartment rent", tags: ["essential"], dayOfMonth: 2, nextDueOn: format(addMonths(now, 1), "yyyy-MM-02"), active: true },
-  { id: "r3", userId: "demo-user", kind: "expense", category: "entertainment", amountMinor: 39900, note: "Music subscription", tags: ["subscription"], dayOfMonth: now.getDate(), nextDueOn: format(now, "yyyy-MM-dd"), active: true },
+  { id: "r1", userId: "demo-user", kind: "income", category: "salary", amountMinor: 8540000, note: "Monthly salary", tags: ["work"], dayOfMonth: 10, recurrenceUnit: "month", recurrenceInterval: 1, anchorDate: format(now, "yyyy-MM-10"), nextDueOn: format(addMonths(now, 1), "yyyy-MM-10"), active: true },
+  { id: "r2", userId: "demo-user", kind: "expense", category: "housing", amountMinor: 2000000, note: "Apartment rent", tags: ["essential"], dayOfMonth: 2, recurrenceUnit: "month", recurrenceInterval: 1, anchorDate: format(now, "yyyy-MM-02"), nextDueOn: format(addMonths(now, 1), "yyyy-MM-02"), active: true },
+  { id: "r3", userId: "demo-user", kind: "expense", category: "entertainment", amountMinor: 39900, note: "Music subscription", tags: ["subscription"], dayOfMonth: now.getDate(), recurrenceUnit: "month", recurrenceInterval: 1, anchorDate: format(now, "yyyy-MM-dd"), nextDueOn: format(now, "yyyy-MM-dd"), active: true },
 ];

@@ -1,6 +1,7 @@
-import { addDays, compareAsc, format, getDate, getDaysInMonth, isSameMonth, startOfMonth } from "date-fns";
+import { addDays, compareAsc, endOfMonth, format, getDate, getDaysInMonth, isSameMonth, startOfMonth } from "date-fns";
 import { dueRemaining } from "./dues";
 import { isInMonth } from "./dates";
+import { recurringOccurrencesBetween } from "./recurrence";
 import type { Budget, DueItem, LedgerTransaction, RecurringEntry } from "../types";
 
 export type BudgetPacingTone = "healthy" | "watch" | "warning" | "over";
@@ -48,8 +49,16 @@ function monthTiming(month: Date, today: Date) {
   };
 }
 
-const upcomingRecurringForMonth = (entries: readonly RecurringEntry[], month: Date) =>
-  entries.filter((entry) => entry.active && isInMonth(entry.nextDueOn, month));
+interface RecurringOccurrence {
+  entry: RecurringEntry;
+  occurredOn: string;
+}
+
+const upcomingRecurringForMonth = (entries: readonly RecurringEntry[], month: Date): RecurringOccurrence[] => {
+  const start = format(startOfMonth(month), "yyyy-MM-dd");
+  const end = format(endOfMonth(month), "yyyy-MM-dd");
+  return entries.flatMap((entry) => recurringOccurrencesBetween(entry, start, end).map((occurredOn) => ({ entry, occurredOn })));
+};
 
 const upcomingDuesForMonth = (items: readonly DueItem[], month: Date) =>
   items.filter((item) => item.status === "open" && isInMonth(item.dueOn, month));
@@ -60,7 +69,8 @@ const upcomingRecurringForBreathingRoom = (entries: readonly RecurringEntry[], m
   // The dashboard is a near-term cash-flow view. Include overdue entries and
   // the next 30 days so a payment due just after month-end is still visible.
   const through = format(addDays(today, 30), "yyyy-MM-dd");
-  return entries.filter((entry) => entry.active && entry.nextDueOn <= through);
+  const todayKey = format(today, "yyyy-MM-dd");
+  return entries.flatMap((entry) => recurringOccurrencesBetween(entry, entry.nextDueOn < todayKey ? entry.nextDueOn : todayKey, through).map((occurredOn) => ({ entry, occurredOn })));
 };
 
 export function calculateBudgetPacing(
@@ -73,14 +83,14 @@ export function calculateBudgetPacing(
 ): BudgetPacing[] {
   const timing = monthTiming(month, today);
   const expenses = transactions.filter((item) => item.kind === "expense" && isInMonth(item.occurredOn, month));
-  const recurring = upcomingRecurringForMonth(recurringEntries, month).filter((entry) => entry.kind === "expense");
+  const recurring = upcomingRecurringForMonth(recurringEntries, month).filter(({ entry }) => entry.kind === "expense");
   const dues = upcomingDuesForMonth(dueItems, month).filter((item) => item.kind === "payment" || item.kind === "borrowed");
 
   return budgets
     .filter((budget) => budget.monthKey === `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`)
     .map((budget) => {
       const spentMinor = sum(expenses.filter((item) => item.category === budget.category).map((item) => item.amountMinor));
-      const upcomingRecurringMinor = sum(recurring.filter((entry) => entry.category === budget.category).map((entry) => entry.amountMinor));
+      const upcomingRecurringMinor = sum(recurring.filter(({ entry }) => entry.category === budget.category).map(({ entry }) => entry.amountMinor));
       const upcomingDuesMinor = sum(dues.filter((item) => item.category === budget.category).map(dueRemaining));
       const upcomingMinor = upcomingRecurringMinor + upcomingDuesMinor;
       const projectedMinor = spentMinor + upcomingMinor;
@@ -150,10 +160,10 @@ export function calculateMonthlyBreathingRoom(
   const loggedIncomeMinor = sum(monthTransactions.filter((item) => item.kind === "income").map((item) => item.amountMinor));
   const loggedExpensesMinor = sum(monthTransactions.filter((item) => item.kind === "expense").map((item) => item.amountMinor));
   const upcomingIncomeMinor =
-    sum(recurring.filter((entry) => entry.kind === "income").map((entry) => entry.amountMinor)) +
+    sum(recurring.filter(({ entry }) => entry.kind === "income").map(({ entry }) => entry.amountMinor)) +
     sum(dues.filter((item) => item.kind === "receivable" || item.kind === "lent").map(dueRemaining));
   const upcomingExpensesMinor =
-    sum(recurring.filter((entry) => entry.kind === "expense").map((entry) => entry.amountMinor)) +
+    sum(recurring.filter(({ entry }) => entry.kind === "expense").map(({ entry }) => entry.amountMinor)) +
     sum(dues.filter((item) => item.kind === "payment" || item.kind === "borrowed").map(dueRemaining));
   const projectedIncomeMinor = loggedIncomeMinor + upcomingIncomeMinor;
   const projectedExpensesMinor = loggedExpensesMinor + upcomingExpensesMinor;

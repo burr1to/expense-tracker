@@ -1,4 +1,4 @@
-import { ArrowRight, Bank, CalendarBlank, CaretDown, Check, DownloadSimple, FilePdf, Flag, Lightbulb, LockKey, MapPinLine, Minus, Plus, Repeat, TrendDown, TrendUp } from "@phosphor-icons/react";
+import { ArrowRight, Bank, CalendarBlank, CaretDown, Check, Flag, Lightbulb, LockKey, MapPinLine, Minus, Plus, Repeat, TrendDown, TrendUp } from "@phosphor-icons/react";
 import { Modal, PasswordInput, Popover } from "@mantine/core";
 import { DatePicker } from "@mantine/dates";
 import { format, isSameMonth, parseISO, startOfMonth } from "date-fns";
@@ -32,7 +32,6 @@ interface DashboardPageProps {
   paymentAccounts: PaymentAccount[];
   savedPlaces: SavedPlace[];
   hasPin: boolean;
-  monthlyReport?: { monthKey: string; monthLabel: string; href: string } | null;
   onMonthChange: (date: Date) => void;
   onAdd: (occurredOn: string) => void;
   onSelectedDayChange: (occurredOn: string) => void;
@@ -53,7 +52,7 @@ function placeTrendExplanation(trend: PlaceSpendingTrend) {
   return `Both purchase frequency and average spend contributed to the ${spendingDirection}.`;
 }
 
-export function DashboardPage({ month, focus, currency, transactions, budgets, recurringEntries, dueItems, goals, customCategories, paymentAccounts, savedPlaces, hasPin, monthlyReport, onMonthChange, onAdd, onSelectedDayChange, onNavigate, onOpenPlace, onConfirmRecurring, onVerifyPin }: DashboardPageProps) {
+export function DashboardPage({ month, focus, currency, transactions, budgets, recurringEntries, dueItems, goals, customCategories, paymentAccounts, savedPlaces, hasPin, onMonthChange, onAdd, onSelectedDayChange, onNavigate, onOpenPlace, onConfirmRecurring, onVerifyPin }: DashboardPageProps) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<Date>(() => isSameMonth(month, new Date()) ? new Date() : startOfMonth(month));
   const [spendingPeriod, setSpendingPeriod] = useState<SpendingPeriod>("weekly");
@@ -162,11 +161,6 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
         </div>
         <button className="desktop-quick-add primary-button" onClick={() => onAdd(selectedDayKey)}><Plus size={18} />Add transaction</button>
       </header>
-
-      {monthlyReport && <section className="monthly-report-strip" role="status">
-        <div><FilePdf size={24} weight="duotone" /><div><strong>{monthlyReport.monthLabel} report is ready</strong><span>Your full income and expense report can now be saved as a PDF.</span></div></div>
-        <a href={monthlyReport.href} download={`SaveYoRupee-${monthlyReport.monthKey}-monthly-report.pdf`}><DownloadSimple size={16} />Download report</a>
-      </section>}
 
       {dueEntries.length > 0 && <section className="due-strip"><div><CalendarBlank size={23} weight="duotone" /><div><strong>{dueEntries.length} recurring {dueEntries.length === 1 ? "entry is" : "entries are"} ready</strong><span>Confirm before adding anything to your ledger.</span></div></div><div>{dueEntries.slice(0, 2).map((entry) => { const confirming = confirmingId === entry.id; return <button key={entry.id} disabled={Boolean(confirmingId)} onClick={() => void confirmRecurring(entry.id)}>{confirming ? <ButtonSpinner /> : <Check size={15} />}{confirming ? "Confirming…" : entry.note || getCategory(entry.category, customCategories).label}</button>; })}</div></section>}
 
