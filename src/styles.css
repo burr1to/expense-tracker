@@ -1848,7 +1848,7 @@ strong {
 }
 
 /* Purposeful motion: route continuity, tactile feedback, and clear overlays. */
-.route-transition { min-width: 0; animation: route-content-enter 320ms var(--motion-emphasized) both; }
+.route-transition { min-width: 0; animation: route-content-enter 320ms var(--motion-emphasized); }
 @keyframes route-content-enter {
   from { opacity: 0; transform: translateY(8px); }
 }
