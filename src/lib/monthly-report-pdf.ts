@@ -119,7 +119,7 @@ class PdfPage {
     if (stroke) this.commands.push(`${rgb(stroke)} RG 0.8 w ${path} S`);
   }
 
-  line(x1: number, y1: number, x2: number, y2: number, color = COLOR.line, width = 1) {
+  line(x1: number, y1: number, x2: number, y2: number, color: string = COLOR.line, width = 1) {
     this.commands.push(`${rgb(color)} RG ${width.toFixed(2)} w ${x1.toFixed(2)} ${(PAGE_HEIGHT - y1).toFixed(2)} m ${x2.toFixed(2)} ${(PAGE_HEIGHT - y2).toFixed(2)} l S`);
   }
 
@@ -171,6 +171,17 @@ function changeLabel(value: number | null) {
   return `${value > 0 ? "+" : ""}${value}% vs prior month`;
 }
 
+function reportMonthDayCount(report: MonthlyReport) {
+  const lastDay = new Date(`${report.monthKey}-01T00:00:00.000Z`);
+  lastDay.setUTCMonth(lastDay.getUTCMonth() + 1);
+  lastDay.setUTCDate(0);
+  return lastDay.getUTCDate();
+}
+
+function shareOf(amountMinor: number, totalMinor: number) {
+  return totalMinor > 0 ? Math.round((amountMinor / totalMinor) * 100) : 0;
+}
+
 function chartGroups(items: readonly AmountGroup[], limit = 6) {
   if (items.length <= limit) return [...items];
   const visible = items.slice(0, limit - 1);
@@ -190,31 +201,72 @@ function drawPanel(page: PdfPage, x: number, y: number, width: number, height: n
 
 function drawCategoryChart(page: PdfPage, report: MonthlyReport, items: readonly AmountGroup[], x: number, y: number, width: number, height: number, title: string, color: string, total: number) {
   drawPanel(page, x, y, width, height, title, `${items.reduce((sum, item) => sum + item.count, 0)} entries`);
-  const rows = chartGroups(items);
+  const rows = chartGroups(items, 5);
   if (!rows.length) {
     page.text("No activity recorded", x + 16, y + 92, { size: 9, color: COLOR.muted });
     return;
   }
   const maximum = Math.max(...rows.map((item) => item.amountMinor), 1);
-  const rowHeight = 25;
-  const startY = y + 57;
+  const rowHeight = 22;
+  const startY = y + 55;
   rows.forEach((item, index) => {
     const rowY = startY + index * rowHeight;
     const amount = money(report, item.amountMinor, true);
     page.text(item.label, x + 16, rowY, { size: 8, bold: true, maxWidth: width - 105 });
-    page.text(amount, x + width - 16, rowY, { size: 7.5, bold: true, align: "right", color });
-    page.roundRect(x + 16, rowY + 13, width - 32, 5, 2.5, COLOR.line);
-    page.roundRect(x + 16, rowY + 13, Math.max(3, (width - 32) * (item.amountMinor / maximum)), 5, 2.5, color);
-    page.text(`${total > 0 ? Math.round((item.amountMinor / total) * 100) : 0}%`, x + width - 16, rowY + 20, { size: 6.5, color: COLOR.muted, align: "right" });
+    page.text(`${amount} | ${shareOf(item.amountMinor, total)}%`, x + width - 16, rowY, { size: 7, bold: true, align: "right", color });
+    page.roundRect(x + 16, rowY + 12, width - 32, 5, 2.5, COLOR.line);
+    page.roundRect(x + 16, rowY + 12, Math.max(3, (width - 32) * (item.amountMinor / maximum)), 5, 2.5, color);
+  });
+}
+
+function drawFocusStrip(page: PdfPage, report: MonthlyReport, x: number, y: number, width: number, height: number) {
+  drawPanel(page, x, y, width, height, "Month in focus", "Useful signals behind the headline totals");
+  const dayCount = reportMonthDayCount(report);
+  const activeDays = new Set(report.transactions.map((item) => item.occurredOn)).size;
+  const largestExpense = report.transactions
+    .filter((item) => item.kind === "expense")
+    .reduce<MonthlyReport["transactions"][number] | null>((largest, item) => !largest || item.amountMinor > largest.amountMinor ? item : largest, null);
+  const topCategory = report.categories[0];
+  const overBudgetCount = report.budgets.filter((item) => item.remainingMinor < 0).length;
+  const signals = [
+    {
+      label: "TOP SPEND",
+      value: topCategory?.label ?? "No spending",
+      note: topCategory ? `${money(report, topCategory.amountMinor, true)} | ${shareOf(topCategory.amountMinor, report.summary.expenseMinor)}% of spend` : "Nothing recorded",
+      color: COLOR.coral,
+    },
+    {
+      label: "AVERAGE DAILY SPEND",
+      value: money(report, Math.round(report.summary.expenseMinor / dayCount), true),
+      note: `Across ${dayCount} calendar days`,
+      color: COLOR.ink,
+    },
+    {
+      label: "LARGEST EXPENSE",
+      value: largestExpense ? money(report, largestExpense.amountMinor, true) : "None",
+      note: largestExpense ? largestExpense.note || largestExpense.categoryLabel : "Nothing recorded",
+      color: COLOR.coral,
+    },
+    {
+      label: "ACTIVITY & BUDGETS",
+      value: `${activeDays} active ${activeDays === 1 ? "day" : "days"}`,
+      note: report.budgets.length ? `${overBudgetCount} of ${report.budgets.length} budgets over` : "No budgets set",
+      color: overBudgetCount ? COLOR.gold : COLOR.green,
+    },
+  ];
+  const columnWidth = (width - 32) / signals.length;
+  signals.forEach((signal, index) => {
+    const signalX = x + 16 + index * columnWidth;
+    if (index) page.line(signalX, y + 43, signalX, y + height - 13, COLOR.line, 0.65);
+    page.text(signal.label, signalX + (index ? 12 : 0), y + 44, { size: 6.3, bold: true, color: COLOR.muted, maxWidth: columnWidth - 16 });
+    page.text(signal.value, signalX + (index ? 12 : 0), y + 57, { size: 9.5, bold: true, color: signal.color, maxWidth: columnWidth - 16 });
+    page.text(signal.note, signalX + (index ? 12 : 0), y + 72, { size: 6.2, color: COLOR.muted, maxWidth: columnWidth - 16 });
   });
 }
 
 function drawDailyChart(page: PdfPage, report: MonthlyReport, x: number, y: number, width: number, height: number) {
   drawPanel(page, x, y, width, height, "Daily cash flow", "Income and spending across the month");
-  const daysInMonth = new Date(`${report.monthKey}-01T00:00:00.000Z`);
-  daysInMonth.setUTCMonth(daysInMonth.getUTCMonth() + 1);
-  daysInMonth.setUTCDate(0);
-  const dayCount = daysInMonth.getUTCDate();
+  const dayCount = reportMonthDayCount(report);
   const daily = Array.from({ length: dayCount }, (_, index) => ({ day: index + 1, income: 0, expense: 0 }));
   for (const transaction of report.transactions) {
     const day = Number(transaction.occurredOn.slice(8, 10));
@@ -249,7 +301,7 @@ function drawDailyChart(page: PdfPage, report: MonthlyReport, x: number, y: numb
 
 function drawCoverPage(report: MonthlyReport) {
   const page = new PdfPage();
-  page.rect(0, 0, PAGE_WIDTH, 173, COLOR.ink);
+  page.rect(0, 0, PAGE_WIDTH, 185, COLOR.ink);
   page.circle(550, 36, 86, "#30483b");
   page.circle(518, 42, 43, COLOR.sage);
   page.roundRect(MARGIN, 27, 28, 28, 6, COLOR.sage);
@@ -269,18 +321,19 @@ function drawCoverPage(report: MonthlyReport) {
   const cardWidth = (CONTENT_WIDTH - gap * 3) / 4;
   metrics.forEach((metric, index) => {
     const x = MARGIN + index * (cardWidth + gap);
-    page.roundRect(x, 141, cardWidth, 91, 11, COLOR.paperStrong, COLOR.line);
-    page.rect(x, 141, 4, 91, metric.color);
-    page.text(metric.label.toUpperCase(), x + 14, 157, { size: 7, bold: true, color: COLOR.muted, maxWidth: cardWidth - 24 });
-    page.text(metric.value, x + 14, 178, { size: 16, bold: true, color: metric.color, maxWidth: cardWidth - 24 });
-    page.text(metric.note, x + 14, 207, { size: 6.5, color: COLOR.muted, maxWidth: cardWidth - 24 });
+    page.roundRect(x, 153, cardWidth, 94, 11, COLOR.paperStrong, COLOR.line);
+    page.rect(x, 153, 4, 94, metric.color);
+    page.text(metric.label.toUpperCase(), x + 14, 170, { size: 7, bold: true, color: COLOR.muted, maxWidth: cardWidth - 24 });
+    page.text(metric.value, x + 14, 192, { size: 16, bold: true, color: metric.color, maxWidth: cardWidth - 24 });
+    page.text(metric.note, x + 14, 220, { size: 6.5, color: COLOR.muted, maxWidth: cardWidth - 24 });
   });
 
+  drawFocusStrip(page, report, MARGIN, 268, CONTENT_WIDTH, 85);
   const panelGap = 14;
   const panelWidth = (CONTENT_WIDTH - panelGap) / 2;
-  drawCategoryChart(page, report, report.categories, MARGIN, 255, panelWidth, 213, "Spending by category", COLOR.coral, report.summary.expenseMinor);
-  drawCategoryChart(page, report, report.incomeCategories, MARGIN + panelWidth + panelGap, 255, panelWidth, 213, "Earnings by source", COLOR.green, report.summary.incomeMinor);
-  drawDailyChart(page, report, MARGIN, 486, CONTENT_WIDTH, 298);
+  drawCategoryChart(page, report, report.categories, MARGIN, 374, panelWidth, 188, "Spending by category", COLOR.coral, report.summary.expenseMinor);
+  drawCategoryChart(page, report, report.incomeCategories, MARGIN + panelWidth + panelGap, 374, panelWidth, 188, "Earnings by source", COLOR.green, report.summary.incomeMinor);
+  drawDailyChart(page, report, MARGIN, 583, CONTENT_WIDTH, 201);
   return page;
 }
 
@@ -310,82 +363,145 @@ class FlowRenderer {
   }
 
   private ensure(height: number, title: string, eyebrow = "Monthly report") {
-    if (this.pages.length === 1 || this.y + height > 792) this.newPage(title, eyebrow);
+    if (this.pages.length === 1 || this.y + height > 792) {
+      this.newPage(title, eyebrow);
+      return true;
+    }
+    return false;
   }
 
-  private section(title: string, description: string) {
-    this.ensure(42, title);
+  private section(title: string, description: string, firstRowHeight = 0) {
+    if (this.ensure(42 + firstRowHeight, title)) {
+      this.page.text(description, MARGIN, this.y, { size: 7.5, color: COLOR.muted, maxWidth: CONTENT_WIDTH });
+      this.page.line(MARGIN, this.y + 17, PAGE_WIDTH - MARGIN, this.y + 17, COLOR.line, 0.7);
+      this.y += 28;
+      return;
+    }
     this.page.text(title, MARGIN, this.y, { size: 12, bold: true });
     this.page.text(description, PAGE_WIDTH - MARGIN, this.y + 2, { size: 7.5, color: COLOR.muted, align: "right", maxWidth: 250 });
     this.page.line(MARGIN, this.y + 21, PAGE_WIDTH - MARGIN, this.y + 21, COLOR.line, 0.7);
     this.y += 34;
   }
 
+  private detailSnapshot() {
+    const overBudgetCount = this.report.budgets.filter((item) => item.remainingMinor < 0).length;
+    const balanceMinor = this.report.accounts.reduce((sum, item) => sum + item.balanceMinor, 0);
+    const signals = [
+      {
+        label: "SPENDING MIX",
+        value: `${this.report.categories.length} ${this.report.categories.length === 1 ? "category" : "categories"}`,
+        note: `${this.report.subcategories.length} subcategories`,
+        color: COLOR.coral,
+      },
+      {
+        label: "BUDGET HEALTH",
+        value: this.report.budgets.length ? `${overBudgetCount} over limit` : "No budgets",
+        note: this.report.budgets.length ? `${this.report.budgets.length - overBudgetCount} within limit` : "Add budgets to compare",
+        color: overBudgetCount ? COLOR.gold : COLOR.green,
+      },
+      {
+        label: "TRACKED BALANCE",
+        value: money(this.report, balanceMinor, true),
+        note: `${this.report.accounts.length} tracked ${this.report.accounts.length === 1 ? "account" : "accounts"}`,
+        color: balanceMinor >= 0 ? COLOR.sage : COLOR.coral,
+      },
+      {
+        label: "COMMITMENTS",
+        value: `${this.report.dues.length} ${this.report.dues.length === 1 ? "due" : "dues"}`,
+        note: `${this.report.recurring.length} recurring plans`,
+        color: COLOR.ink,
+      },
+    ];
+    drawPanel(this.page, MARGIN, this.y, CONTENT_WIDTH, 99, "Detail snapshot", "A quick index for the sections that follow");
+    const columnWidth = (CONTENT_WIDTH - 32) / signals.length;
+    signals.forEach((signal, index) => {
+      const x = MARGIN + 16 + index * columnWidth;
+      if (index) this.page.line(x, this.y + 44, x, this.y + 84, COLOR.line, 0.65);
+      this.page.text(signal.label, x + (index ? 12 : 0), this.y + 47, { size: 6.3, bold: true, color: COLOR.muted, maxWidth: columnWidth - 16 });
+      this.page.text(signal.value, x + (index ? 12 : 0), this.y + 62, { size: 9.5, bold: true, color: signal.color, maxWidth: columnWidth - 16 });
+      this.page.text(signal.note, x + (index ? 12 : 0), this.y + 78, { size: 6.3, color: COLOR.muted, maxWidth: columnWidth - 16 });
+    });
+    this.y += 119;
+  }
+
   private amountRows(title: string, description: string, items: readonly AmountGroup[], color: string) {
-    this.section(title, description);
+    this.section(title, description, items.length ? 38 : 30);
     if (!items.length) {
       this.page.text("No activity recorded.", MARGIN + 10, this.y + 4, { size: 8.5, color: COLOR.muted });
-      this.y += 30;
+      this.y += 34;
       return;
     }
     const maximum = Math.max(...items.map((item) => item.amountMinor), 1);
+    const total = items.reduce((sum, item) => sum + item.amountMinor, 0);
     items.forEach((item, index) => {
-      this.ensure(32, `${title} (continued)`);
-      if (index % 2 === 0) this.page.rect(MARGIN, this.y - 4, CONTENT_WIDTH, 29, "#ebe9dc");
-      this.page.text(item.label, MARGIN + 9, this.y + 3, { size: 8.5, bold: true, maxWidth: 175 });
-      this.page.text(`${item.count} ${item.count === 1 ? "entry" : "entries"}`, MARGIN + 190, this.y + 3, { size: 7, color: COLOR.muted });
-      this.page.roundRect(MARGIN + 267, this.y + 5, 133, 6, 3, COLOR.line);
-      this.page.roundRect(MARGIN + 267, this.y + 5, Math.max(3, 133 * (item.amountMinor / maximum)), 6, 3, color);
-      this.page.text(money(this.report, item.amountMinor), PAGE_WIDTH - MARGIN - 8, this.y + 1, { size: 8.5, bold: true, color, align: "right" });
-      this.y += 29;
+      this.ensure(38, `${title} (continued)`);
+      if (index % 2 === 0) this.page.rect(MARGIN, this.y - 4, CONTENT_WIDTH, 33, "#ebe9dc");
+      this.page.text(item.label, MARGIN + 9, this.y + 4, { size: 8.5, bold: true, maxWidth: 175 });
+      this.page.text(`${item.count} ${item.count === 1 ? "entry" : "entries"} | ${shareOf(item.amountMinor, total)}%`, MARGIN + 190, this.y + 4, { size: 7, color: COLOR.muted });
+      this.page.roundRect(MARGIN + 287, this.y + 7, 113, 6, 3, COLOR.line);
+      this.page.roundRect(MARGIN + 287, this.y + 7, Math.max(3, 113 * (item.amountMinor / maximum)), 6, 3, color);
+      this.page.text(money(this.report, item.amountMinor), PAGE_WIDTH - MARGIN - 8, this.y + 2, { size: 8.5, bold: true, color, align: "right" });
+      this.y += 34;
     });
-    this.y += 14;
+    this.y += 18;
   }
 
   private budgets() {
-    this.section("Budget performance", "Actual spending against each monthly limit");
+    this.section("Budget performance", "Actual spending against each monthly limit", this.report.budgets.length ? 56 : 30);
     if (!this.report.budgets.length) {
       this.page.text("No budgets were set for this month.", MARGIN + 10, this.y + 4, { size: 8.5, color: COLOR.muted });
       this.y += 34;
       return;
     }
     this.report.budgets.forEach((budget, index) => {
-      this.ensure(45, "Budget performance (continued)");
+      this.ensure(56, "Budget performance (continued)");
       const over = budget.remainingMinor < 0;
       const color = over ? COLOR.coral : budget.usedPercentage >= 80 ? COLOR.gold : COLOR.green;
-      if (index % 2 === 0) this.page.rect(MARGIN, this.y - 4, CONTENT_WIDTH, 42, "#ebe9dc");
-      this.page.text(budget.categoryLabel, MARGIN + 9, this.y + 2, { size: 8.5, bold: true, maxWidth: 150 });
-      this.page.text(`${money(this.report, budget.spentMinor)} of ${money(this.report, budget.amountMinor)}`, MARGIN + 171, this.y + 2, { size: 7.5, color: COLOR.muted });
-      this.page.text(`${budget.usedPercentage}%`, PAGE_WIDTH - MARGIN - 8, this.y + 2, { size: 8.5, bold: true, color, align: "right" });
-      this.page.roundRect(MARGIN + 9, this.y + 20, CONTENT_WIDTH - 18, 7, 3.5, COLOR.line);
-      this.page.roundRect(MARGIN + 9, this.y + 20, Math.max(4, (CONTENT_WIDTH - 18) * Math.min(1, budget.usedPercentage / 100)), 7, 3.5, color);
-      this.page.text(`${over ? "Over by" : "Remaining"} ${money(this.report, Math.abs(budget.remainingMinor))}`, PAGE_WIDTH - MARGIN - 8, this.y + 30, { size: 6.5, color, align: "right" });
-      this.y += 42;
+      const status = over ? "OVER LIMIT" : budget.usedPercentage >= 80 ? "NEAR LIMIT" : "ON TRACK";
+      if (index % 2 === 0) this.page.rect(MARGIN, this.y - 4, CONTENT_WIDTH, 49, "#ebe9dc");
+      this.page.text(budget.categoryLabel, MARGIN + 9, this.y + 3, { size: 8.5, bold: true, maxWidth: 150 });
+      this.page.text(`${money(this.report, budget.spentMinor)} of ${money(this.report, budget.amountMinor)}`, MARGIN + 171, this.y + 3, { size: 7.5, color: COLOR.muted });
+      this.page.text(`${budget.usedPercentage}% | ${status}`, PAGE_WIDTH - MARGIN - 8, this.y + 3, { size: 7.8, bold: true, color, align: "right" });
+      this.page.roundRect(MARGIN + 9, this.y + 23, CONTENT_WIDTH - 18, 7, 3.5, COLOR.line);
+      this.page.roundRect(MARGIN + 9, this.y + 23, Math.max(4, (CONTENT_WIDTH - 18) * Math.min(1, budget.usedPercentage / 100)), 7, 3.5, color);
+      this.page.text(`${over ? "Over by" : "Remaining"} ${money(this.report, Math.abs(budget.remainingMinor))}`, PAGE_WIDTH - MARGIN - 8, this.y + 35, { size: 6.5, color, align: "right" });
+      this.y += 52;
     });
-    this.y += 14;
+    this.y += 18;
   }
 
   private accounts() {
-    this.section("Account activity", "Latest manually tracked balance and monthly movement");
+    this.section("Account activity", "Latest manually tracked balance and monthly movement", this.report.accounts.length ? 70 : 30);
     if (!this.report.accounts.length) {
       this.page.text("No tracked payment accounts.", MARGIN + 10, this.y + 4, { size: 8.5, color: COLOR.muted });
       this.y += 34;
       return;
     }
     this.report.accounts.forEach((account, index) => {
-      this.ensure(48, "Account activity (continued)");
-      if (index % 2 === 0) this.page.rect(MARGIN, this.y - 4, CONTENT_WIDTH, 44, "#ebe9dc");
-      this.page.text(account.label, MARGIN + 9, this.y + 2, { size: 9, bold: true, maxWidth: 170 });
-      this.page.text(`Balance ${money(this.report, account.balanceMinor)}`, MARGIN + 190, this.y + 2, { size: 8.5, bold: true, color: COLOR.sage });
-      this.page.text(`as of ${account.balanceAsOf}`, PAGE_WIDTH - MARGIN - 8, this.y + 3, { size: 7, color: COLOR.muted, align: "right" });
-      this.page.text(`Income ${money(this.report, account.incomeMinor)}  |  Spending ${money(this.report, account.expenseMinor)}  |  Transfers in ${money(this.report, account.transfersInMinor)}  |  out ${money(this.report, account.transfersOutMinor)}`, MARGIN + 9, this.y + 22, { size: 7, color: COLOR.muted, maxWidth: CONTENT_WIDTH - 18 });
-      this.y += 44;
+      this.ensure(70, "Account activity (continued)");
+      if (index % 2 === 0) this.page.rect(MARGIN, this.y - 4, CONTENT_WIDTH, 62, "#ebe9dc");
+      this.page.text(account.label, MARGIN + 9, this.y + 3, { size: 9, bold: true, maxWidth: 220 });
+      this.page.text(`as of ${account.balanceAsOf}`, MARGIN + 9, this.y + 18, { size: 6.5, color: COLOR.muted });
+      this.page.text(`Balance ${money(this.report, account.balanceMinor)}`, PAGE_WIDTH - MARGIN - 8, this.y + 3, { size: 8.5, bold: true, color: account.balanceMinor >= 0 ? COLOR.sage : COLOR.coral, align: "right" });
+      const movements = [
+        { label: "INCOME", value: account.incomeMinor, color: COLOR.green },
+        { label: "SPENDING", value: account.expenseMinor, color: COLOR.coral },
+        { label: "TRANSFERS IN", value: account.transfersInMinor, color: COLOR.sage },
+        { label: "TRANSFERS OUT", value: account.transfersOutMinor, color: COLOR.muted },
+      ];
+      const columnWidth = (CONTENT_WIDTH - 18) / movements.length;
+      movements.forEach((movement, movementIndex) => {
+        const x = MARGIN + 9 + movementIndex * columnWidth;
+        this.page.text(movement.label, x, this.y + 34, { size: 5.8, bold: true, color: COLOR.muted });
+        this.page.text(money(this.report, movement.value), x, this.y + 46, { size: 7.4, bold: true, color: movement.color, maxWidth: columnWidth - 9 });
+      });
+      this.y += 66;
     });
-    this.y += 14;
+    this.y += 18;
   }
 
   private simpleTable<T>(title: string, description: string, items: readonly T[], empty: string, row: (page: PdfPage, item: T, y: number, index: number) => void, rowHeight = 30) {
-    this.section(title, description);
+    this.section(title, description, items.length ? rowHeight + 4 : 30);
     if (!items.length) {
       this.page.text(empty, MARGIN + 10, this.y + 4, { size: 8.5, color: COLOR.muted });
       this.y += 34;
@@ -399,36 +515,94 @@ class FlowRenderer {
     this.y += 14;
   }
 
+  private commitmentHeader() {
+    const splitX = MARGIN + CONTENT_WIDTH / 2;
+    this.page.rect(MARGIN, this.y, CONTENT_WIDTH, 22, COLOR.ink);
+    this.page.text("DUES & RECEIVABLES", MARGIN + 9, this.y + 7, { size: 6.3, bold: true, color: COLOR.white });
+    this.page.text("ACTIVE RECURRING PLANS", splitX + 10, this.y + 7, { size: 6.3, bold: true, color: COLOR.white });
+    this.page.line(splitX, this.y, splitX, this.y + 22, COLOR.sageLight, 0.65);
+    this.y += 22;
+  }
+
+  private commitments() {
+    const rowCount = Math.max(this.report.dues.length, this.report.recurring.length);
+    this.section("Commitments & schedules", "Dues, receivables, and active recurring plans", rowCount ? 68 : 30);
+    if (!rowCount) {
+      this.page.text("No dues or active recurring items.", MARGIN + 10, this.y + 4, { size: 8.5, color: COLOR.muted });
+      this.y += 34;
+      return;
+    }
+    this.commitmentHeader();
+    const splitX = MARGIN + CONTENT_WIDTH / 2;
+    const columnWidth = CONTENT_WIDTH / 2;
+    for (let index = 0; index < rowCount; index += 1) {
+      if (this.ensure(43, "Commitments & schedules (continued)", "Continued")) this.commitmentHeader();
+      if (index % 2 === 0) this.page.rect(MARGIN, this.y, CONTENT_WIDTH, 42, "#ebe9dc");
+      this.page.line(splitX, this.y, splitX, this.y + 42, COLOR.line, 0.55);
+      const due = this.report.dues[index];
+      if (due) {
+        this.page.text(due.title, MARGIN + 9, this.y + 5, { size: 7.8, bold: true, maxWidth: columnWidth - 92 });
+        this.page.text(money(this.report, due.amountMinor), splitX - 9, this.y + 5, { size: 7.6, bold: true, align: "right", maxWidth: 78 });
+        this.page.text(`Due ${due.dueOn} | ${due.status}`, MARGIN + 9, this.y + 20, { size: 6.3, color: COLOR.muted, maxWidth: columnWidth - 18 });
+        this.page.text(`Paid ${money(this.report, due.paidMinor)}`, MARGIN + 9, this.y + 31, { size: 6.1, color: due.paidMinor >= due.amountMinor ? COLOR.green : COLOR.muted, maxWidth: columnWidth - 18 });
+      } else {
+        this.page.text("No additional dues", MARGIN + 9, this.y + 15, { size: 7, color: COLOR.muted });
+      }
+      const recurring = this.report.recurring[index];
+      if (recurring) {
+        const x = splitX + 10;
+        this.page.text(recurring.note || recurring.categoryLabel, x, this.y + 5, { size: 7.8, bold: true, maxWidth: columnWidth - 101 });
+        this.page.text(money(this.report, recurring.amountMinor), PAGE_WIDTH - MARGIN - 8, this.y + 5, { size: 7.6, bold: true, align: "right", maxWidth: 84 });
+        this.page.text(`${recurring.kind.toUpperCase()} | ${recurring.scheduleLabel}`, x, this.y + 20, { size: 6.3, bold: true, color: recurring.kind === "income" ? COLOR.green : COLOR.coral, maxWidth: columnWidth - 18 });
+        this.page.text(`Next ${recurring.nextDueOn} | ${recurring.categoryLabel}`, x, this.y + 31, { size: 6.1, color: COLOR.muted, maxWidth: columnWidth - 18 });
+      } else {
+        this.page.text("No additional recurring plans", splitX + 10, this.y + 15, { size: 7, color: COLOR.muted });
+      }
+      this.y += 42;
+    }
+    this.y += 10;
+  }
+
   addFinancialDetails() {
     this.newPage("Financial details", "Monthly report");
+    this.detailSnapshot();
     this.amountRows("Expense categories", "Complete category-wise spending", this.report.categories, COLOR.coral);
     this.amountRows("Earning sources", "Complete category-wise income", this.report.incomeCategories, COLOR.green);
     this.amountRows("Expense subcategories", "More detail inside each spending category", this.report.subcategories, COLOR.sage);
     this.budgets();
     this.accounts();
     this.simpleTable("Transfers", "Excluded from income and spending totals", this.report.transfers, "No transfers were recorded.", (page, transfer, y, index) => {
-      if (index % 2 === 0) page.rect(MARGIN, y - 4, CONTENT_WIDTH, 27, "#ebe9dc");
+      if (index % 2 === 0) page.rect(MARGIN, y - 4, CONTENT_WIDTH, 40, "#ebe9dc");
       const from = this.report.accounts.find((account) => account.id === transfer.fromAccountId)?.label ?? "Unknown";
       const to = this.report.accounts.find((account) => account.id === transfer.toAccountId)?.label ?? "Unknown";
-      page.text(transfer.occurredOn, MARGIN + 9, y + 2, { size: 7.5, color: COLOR.muted });
-      page.text(`${from} -> ${to}`, MARGIN + 83, y + 2, { size: 8, bold: true, maxWidth: 210 });
-      page.text(transfer.note, MARGIN + 300, y + 2, { size: 7, color: COLOR.muted, maxWidth: 100 });
-      page.text(money(this.report, transfer.amountMinor), PAGE_WIDTH - MARGIN - 8, y + 1, { size: 8.5, bold: true, color: COLOR.sage, align: "right" });
+      page.text(transfer.occurredOn, MARGIN + 9, y + 5, { size: 7.5, color: COLOR.muted });
+      page.text(`${from} -> ${to}`, MARGIN + 96, y + 4, { size: 8, bold: true, maxWidth: 280 });
+      page.text(transfer.note || "No transfer note", MARGIN + 96, y + 20, { size: 6.8, color: COLOR.muted, maxWidth: 280 });
+      page.text(money(this.report, transfer.amountMinor), PAGE_WIDTH - MARGIN - 8, y + 4, { size: 8.5, bold: true, color: COLOR.sage, align: "right" });
+    }, 44);
+    this.commitments();
+  }
+
+  private ledgerSnapshot() {
+    this.page.text("REPORT TOTALS", MARGIN, this.y, { size: 6.5, bold: true, color: COLOR.sage });
+    this.y += 15;
+    const metrics = [
+      { label: "INCOME", value: money(this.report, this.report.summary.incomeMinor, true), note: changeLabel(this.report.summary.incomeChangePercentage), color: COLOR.green },
+      { label: "SPENDING", value: money(this.report, this.report.summary.expenseMinor, true), note: changeLabel(this.report.summary.expenseChangePercentage), color: COLOR.coral },
+      { label: "NET CASH FLOW", value: money(this.report, this.report.summary.netMinor, true), note: `${this.report.summary.savingsRate}% savings rate`, color: this.report.summary.netMinor >= 0 ? COLOR.green : COLOR.coral },
+      { label: "LEDGER ENTRIES", value: String(this.report.summary.transactionCount), note: `${new Set(this.report.transactions.map((item) => item.occurredOn)).size} active days`, color: COLOR.sage },
+    ];
+    const gap = 10;
+    const cardWidth = (CONTENT_WIDTH - gap * 3) / metrics.length;
+    metrics.forEach((metric, index) => {
+      const x = MARGIN + index * (cardWidth + gap);
+      this.page.roundRect(x, this.y, cardWidth, 48, 8, COLOR.paperStrong, COLOR.line);
+      this.page.rect(x, this.y, 3, 48, metric.color);
+      this.page.text(metric.label, x + 12, this.y + 9, { size: 6, bold: true, color: COLOR.muted, maxWidth: cardWidth - 20 });
+      this.page.text(metric.value, x + 12, this.y + 23, { size: 10, bold: true, color: metric.color, maxWidth: cardWidth - 20 });
+      this.page.text(metric.note, x + 12, this.y + 38, { size: 5.9, color: COLOR.muted, maxWidth: cardWidth - 20 });
     });
-    this.simpleTable("Dues", "Payments, receivables, lending, and borrowing", this.report.dues, "No dues were due or completed.", (page, due, y, index) => {
-      if (index % 2 === 0) page.rect(MARGIN, y - 4, CONTENT_WIDTH, 29, "#ebe9dc");
-      page.text(due.dueOn, MARGIN + 9, y + 2, { size: 7.5, color: COLOR.muted });
-      page.text(due.title, MARGIN + 83, y + 2, { size: 8, bold: true, maxWidth: 190 });
-      page.text(`${due.kind} | ${due.status} | paid ${money(this.report, due.paidMinor)}`, MARGIN + 280, y + 2, { size: 7, color: COLOR.muted, maxWidth: 140 });
-      page.text(money(this.report, due.amountMinor), PAGE_WIDTH - MARGIN - 8, y + 1, { size: 8.5, bold: true, align: "right" });
-    });
-    this.simpleTable("Recurring items", "Active scheduled income and expense plans", this.report.recurring, "No active recurring items.", (page, recurring, y, index) => {
-      if (index % 2 === 0) page.rect(MARGIN, y - 4, CONTENT_WIDTH, 29, "#ebe9dc");
-      page.text(recurring.scheduleLabel, MARGIN + 9, y + 2, { size: 7.5, color: COLOR.muted, maxWidth: 70 });
-      page.text(recurring.note || recurring.categoryLabel, MARGIN + 83, y + 2, { size: 8, bold: true, maxWidth: 260 });
-      page.text(recurring.kind.toUpperCase(), MARGIN + 357, y + 2, { size: 7, bold: true, color: recurring.kind === "income" ? COLOR.green : COLOR.coral });
-      page.text(money(this.report, recurring.amountMinor), PAGE_WIDTH - MARGIN - 8, y + 1, { size: 8.5, bold: true, align: "right" });
-    });
+    this.y += 62;
   }
 
   private ledgerHeader() {
@@ -448,19 +622,20 @@ class FlowRenderer {
   addLedger() {
     this.newPage("Complete transaction ledger", "Monthly report");
     this.page.text(`${this.report.summary.transactionCount} entries recorded in ${this.report.monthLabel}`, MARGIN, 77, { size: 7.5, color: COLOR.muted });
-    this.y = 102;
+    this.y = 94;
+    this.ledgerSnapshot();
     this.ledgerHeader();
     if (!this.report.transactions.length) {
       this.page.text("No transactions were logged.", MARGIN + 8, this.y + 14, { size: 9, color: COLOR.muted });
       return;
     }
     this.report.transactions.forEach((transaction, index) => {
-      if (this.y + 37 > 792) {
+      if (this.y + 39 > 792) {
         this.newPage("Complete transaction ledger", "Continued");
         this.y = 92;
         this.ledgerHeader();
       }
-      const rowHeight = 36;
+      const rowHeight = 38;
       if (index % 2 === 0) this.page.rect(MARGIN, this.y, CONTENT_WIDTH, rowHeight, "#ebe9dc");
       const color = transaction.kind === "income" ? COLOR.green : COLOR.coral;
       this.page.text(transaction.occurredOn.slice(5), MARGIN + 8, this.y + 9, { size: 7.3, color: COLOR.muted });
@@ -470,7 +645,9 @@ class FlowRenderer {
       const detail = transaction.note || "No note";
       const detailLines = wrap(detail, 138, 6.8, 2);
       detailLines.forEach((line, lineIndex) => this.page.text(line, MARGIN + 239, this.y + 6 + lineIndex * 10, { size: 6.8, color: lineIndex ? COLOR.muted : COLOR.ink, maxWidth: 138 }));
-      this.page.text(transaction.paymentMode, MARGIN + 386, this.y + 9, { size: 7, color: COLOR.muted, maxWidth: 57 });
+      this.page.text(transaction.paymentMode, MARGIN + 386, this.y + 6, { size: 7, color: COLOR.muted, maxWidth: 57 });
+      const account = this.report.accounts.find((item) => item.id === transaction.paymentAccountId);
+      if (account) this.page.text(account.label, MARGIN + 386, this.y + 20, { size: 6.2, color: COLOR.sage, maxWidth: 57 });
       this.page.text(money(this.report, transaction.amountMinor), PAGE_WIDTH - MARGIN - 8, this.y + 8, { size: 7.5, bold: true, color, align: "right", maxWidth: 82 });
       this.y += rowHeight;
     });

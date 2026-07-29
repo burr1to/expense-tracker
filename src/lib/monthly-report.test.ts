@@ -68,6 +68,14 @@ describe("monthly report model", () => {
     const content = pdf.toString("latin1");
     expect(content.startsWith("%PDF-1.4")).toBe(true);
     expect(content).toContain("MONTHLY FINANCIAL REPORT");
+    expect(content).toContain("Month in focus");
+    expect(content).toContain("AVERAGE DAILY SPEND");
+    expect(content).toContain("Detail snapshot");
+    expect(content).toContain("REPORT TOTALS");
+    expect(content.match(/\/BaseFont \/Helvetica(?:-Bold)?/g)).toEqual([
+      "/BaseFont /Helvetica",
+      "/BaseFont /Helvetica-Bold",
+    ]);
     expect(content).toMatch(/\/Count [2-9]/);
     expect(content.endsWith("%%EOF\n")).toBe(true);
   });
