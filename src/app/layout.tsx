@@ -27,9 +27,11 @@ const theme = createTheme({
         comboboxProps: { shadow: "md", withinPortal: true, floatingStrategy: "fixed" },
       },
     },
-    Popover: { defaultProps: { floatingStrategy: "fixed" } },
     NumberInput: { defaultProps: { size: "xs", radius: "xs", hideControls: true } },
     PasswordInput: { defaultProps: { size: "xs", radius: "xs" } },
+    Modal: { defaultProps: { transitionProps: { transition: "pop", duration: 240, timingFunction: "cubic-bezier(.16,1,.3,1)" } } },
+    Drawer: { defaultProps: { transitionProps: { transition: "slide-up", duration: 280, timingFunction: "cubic-bezier(.16,1,.3,1)" } } },
+    Popover: { defaultProps: { floatingStrategy: "fixed", transitionProps: { transition: "fade-down", duration: 160, timingFunction: "cubic-bezier(.2,.7,.2,1)" } } },
   },
 });
 

@@ -7,6 +7,7 @@ import { KATHMANDU_BOUNDS, KATHMANDU_CENTER, KATHMANDU_MAP_MAX_ZOOM, addKathmand
 import { savedPlaceIconOptions } from "../lib/saved-places";
 import type { SavedPlace, SavedPlaceDraft, SavedPlaceIconName, TransactionLocationDraft } from "../types";
 import { SavedPlaceIcon } from "./SavedPlaceIcon";
+import { AnimatedOverlay } from "./AnimatedOverlay";
 
 interface LocationPickerProps {
   open: boolean;
@@ -159,8 +160,6 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
     };
   }, [open, query]);
 
-  if (!open) return null;
-
   const choosePlace = (place: LocationSearchResult | TransactionLocationDraft) => moveMarker({
     label: place.label,
     address: place.address,
@@ -222,7 +221,7 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
     onClose();
   };
 
-  return <div className="modal-backdrop location-picker-backdrop" role="presentation">
+  return <AnimatedOverlay open={open} className="location-picker-backdrop">
     <section className="location-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="location-picker-title">
       <header>
         <div><span className="eyebrow">Kathmandu only</span><h2 id="location-picker-title">{mode === "saved-place" ? "Save a place" : "Choose transaction location"}</h2><p>{mode === "saved-place" ? "Choose the exact spot, then give it a name and icon." : "Search an area, use your device, or click the exact spot on the map."}</p></div>
@@ -258,5 +257,5 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
         <div className="dialog-actions"><button type="button" className="secondary-button" disabled={saving} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={saving || !candidate || !candidate.label.trim() || (mode === "saved-place" && !savedPlaceName.trim())} onClick={() => void confirm()}><MapPin size={17} />{saving ? "Saving…" : mode === "saved-place" ? "Save place" : "Use this location"}</button></div>
       </footer>
     </section>
-  </div>;
+  </AnimatedOverlay>;
 }

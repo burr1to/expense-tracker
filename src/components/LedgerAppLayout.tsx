@@ -1,7 +1,7 @@
 "use client";
 
 import { PasswordInput } from "@mantine/core";
-import { Eye, EyeSlash, LockKey } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, CheckCircle, Eye, EyeSlash, LockKey, Trash, X } from "@phosphor-icons/react";
 import { parseISO } from "date-fns";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -19,6 +19,15 @@ import { ButtonSpinner } from "./ButtonSpinner";
 import { ReminderBell } from "./ReminderBell";
 import { TransactionForm } from "./TransactionForm";
 import { OnboardingGuide, type OnboardingStepId } from "./OnboardingGuide";
+
+const UNDO_NOTICE_MS = 8_000;
+
+interface TransactionNotice {
+  id: string;
+  action: "created" | "deleted";
+  label: string;
+  expiresAt: number;
+}
 
 export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const { user, isDemo, loading: authLoading, signOut } = useAuth();
@@ -38,6 +47,9 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const [locked, setLocked] = useState(false);
   const [amountsHidden, setAmountsHidden] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [transactionNotice, setTransactionNotice] = useState<TransactionNotice | null>(null);
+  const [undoPending, setUndoPending] = useState(false);
+  const [undoError, setUndoError] = useState<string | null>(null);
   const reportNotice = user && !isDemo ? monthlyReportNotice() : null;
 
   useEffect(() => { setAmountsHidden(ledger.profile.hideAmounts); }, [ledger.profile.hideAmounts]);
@@ -48,6 +60,11 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     const timeout = window.setTimeout(() => setRecentlyAddedTransactionId(null), 900);
     return () => window.clearTimeout(timeout);
   }, [recentlyAddedTransactionId]);
+  useEffect(() => {
+    if (!transactionNotice) return;
+    const timeout = window.setTimeout(() => setTransactionNotice(null), Math.max(0, transactionNotice.expiresAt - Date.now()));
+    return () => window.clearTimeout(timeout);
+  }, [transactionNotice]);
   useEffect(() => {
     if (!ledger.profile.hasPin || !ledger.profile.autoLockMinutes || locked || (!user && !isDemo)) return;
     let timer = window.setTimeout(() => setLocked(true), ledger.profile.autoLockMinutes * 60_000);
@@ -114,15 +131,37 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   };
   const saveTransaction = async (draft: TransactionDraft, id?: string) => {
     const savedId = await ledger.saveTransaction(draft, id);
-    if (!id && savedId) setRecentlyAddedTransactionId(savedId);
+    if (!id && savedId) {
+      setRecentlyAddedTransactionId(savedId);
+      setUndoError(null);
+      setTransactionNotice({ id: savedId, action: "created", label: draft.note.trim() || (draft.kind === "income" ? "Income" : "Expense"), expiresAt: Date.now() + UNDO_NOTICE_MS });
+    }
     if (!id && view === "home") {
       setMonth(parseISO(draft.occurredOn));
       setHomeFocus((current) => ({ date: draft.occurredOn, revision: (current?.revision ?? 0) + 1 }));
     }
   };
   const removeTransaction = async (transaction: LedgerTransaction) => {
-    if (window.confirm(`Delete “${transaction.note || "this entry"}”? This cannot be undone.`)) {
+    const label = transaction.note || (transaction.kind === "income" ? "Income" : "Expense");
+    if (window.confirm(`Delete “${label}”? You can undo this for a few seconds.`)) {
       await ledger.deleteTransaction(transaction.id);
+      setUndoError(null);
+      setTransactionNotice({ id: transaction.id, action: "deleted", label, expiresAt: Date.now() + UNDO_NOTICE_MS });
+    }
+  };
+  const undoTransaction = async () => {
+    if (!transactionNotice || undoPending) return;
+    setUndoPending(true);
+    setUndoError(null);
+    try {
+      if (transactionNotice.action === "created") await ledger.deleteTransaction(transactionNotice.id);
+      else await ledger.restoreTransaction(transactionNotice.id);
+      setTransactionNotice(null);
+    } catch (caught) {
+      setUndoError(caught instanceof Error ? caught.message : "Could not undo that change.");
+      setTransactionNotice((current) => current ? { ...current, expiresAt: Date.now() + UNDO_NOTICE_MS } : null);
+    } finally {
+      setUndoPending(false);
     }
   };
   const logOut = async () => {
@@ -173,7 +212,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
             onAction={runOnboardingAction}
           />
         )}
-        {content}
+        <div key={pathname} className="route-transition">{content}</div>
       </AppShell>
       <ReminderBell
         items={ledger.dueItems}
@@ -200,6 +239,23 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         onClose={() => setFormOpen(false)}
         onSave={saveTransaction}
       />
+      {transactionNotice && (
+        <aside className={`transaction-undo-notice ${undoError ? "has-error" : ""}`} role="status" aria-live="polite">
+          <span className="transaction-undo-icon" aria-hidden="true">
+            {transactionNotice.action === "created" ? <CheckCircle size={22} weight="fill" /> : <Trash size={21} />}
+          </span>
+          <span className="transaction-undo-copy">
+            <strong>{transactionNotice.action === "created" ? "Transaction added" : "Transaction deleted"}</strong>
+            <small>{undoError ?? `“${transactionNotice.label}” ${transactionNotice.action === "created" ? "is now in your ledger." : "was removed."}`}</small>
+          </span>
+          <button type="button" className="transaction-undo-action" disabled={undoPending} onClick={() => void undoTransaction()}>
+            {undoPending ? <ButtonSpinner /> : <ArrowCounterClockwise size={17} />}
+            Undo
+          </button>
+          <button type="button" className="transaction-undo-close" disabled={undoPending} onClick={() => setTransactionNotice(null)} aria-label="Dismiss Undo message"><X size={16} /></button>
+          <i key={transactionNotice.expiresAt} className="transaction-undo-progress" aria-hidden="true" />
+        </aside>
+      )}
       {locked && ledger.profile.hasPin && (
         <PrivacyLock onUnlock={async (pin) => {
           await ledger.verifyPin(pin);
@@ -217,10 +273,24 @@ function AppLoader({ className, message }: { className: "boot-screen" | "page-lo
         <BrandIcon size={42} />
         <span><strong>SaveYoRupee</strong><small>Your money, clearly.</small></span>
       </div>
-      <div className="loader-ledger" aria-hidden="true">
-        <div><i /><span /><b /></div>
-        <div><i /><span /><b /></div>
-        <div><i /><span /><b /></div>
+      <div className="loader-bill-stage" aria-hidden="true">
+        <span className="loader-bill-shadow" />
+        <div className="loader-bill">
+          <svg className="loader-bill-art" viewBox="0 0 240 132" focusable="false">
+            <rect x="7" y="12" width="226" height="108" rx="8" fill="#78a583" stroke="#3f6653" strokeWidth="3" />
+            <rect x="15" y="20" width="210" height="92" rx="5" fill="none" stroke="#d8eedb" strokeWidth="1.5" opacity=".8" />
+            <path d="M19 35c31-13 59-14 101-14s70 1 101 14v15c-31-8-63-10-101-10S50 42 19 50V35Z" fill="#b9d9bd" opacity=".28" />
+            <path d="M19 97c31 8 63 10 101 10s70-2 101-10v15c-31 13-59 14-101 14s-70-1-101-14V97Z" fill="#315a46" opacity=".2" />
+            <circle cx="120" cy="66" r="30" fill="#5f8d6c" stroke="#d8eedb" strokeWidth="1.5" />
+            <circle cx="120" cy="66" r="24" fill="none" stroke="#d8eedb" strokeWidth="1" opacity=".7" />
+            <path d="M120 45v42M108 54c2-5 20-6 23 1 3 8-22 7-23 16-1 8 20 10 25 1" fill="none" stroke="#f2f7e9" strokeLinecap="round" strokeWidth="3" />
+            <text x="28" y="45" fill="#f2f7e9" fontSize="18" fontWeight="800">$</text>
+            <text x="212" y="101" fill="#f2f7e9" fontSize="18" fontWeight="800" textAnchor="end">$</text>
+            <text x="120" y="36" fill="#eff8e9" fontSize="8" fontWeight="800" letterSpacing="2" textAnchor="middle">ONE DOLLAR</text>
+            <text x="120" y="103" fill="#eff8e9" fontSize="7" fontWeight="700" letterSpacing="1.5" textAnchor="middle">SAVEYO RUPEE</text>
+            <path d="M30 73h32M178 73h32" fill="none" stroke="#d8eedb" strokeLinecap="round" strokeWidth="1.5" opacity=".72" />
+          </svg>
+        </div>
       </div>
       <div className="loader-status"><i aria-hidden="true" /><span>{message}</span></div>
     </div>

@@ -53,15 +53,16 @@ async function buildBackup(userId: string) {
     db.savedPlace.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     db.paymentAccount.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     db.accountReconciliation.findMany({ where: { userId }, orderBy: { approvedAt: "asc" } }),
-    db.transaction.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
+    db.transaction.findMany({ where: { userId, deletedAt: null }, orderBy: { createdAt: "asc" } }),
     db.accountTransfer.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     db.budget.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     db.recurringEntry.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     db.savingsGoal.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, include: { contributions: { orderBy: { createdAt: "asc" } } } }),
     db.dueItem.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, include: { payments: { orderBy: { createdAt: "asc" } } } }),
-    db.receiptAttachment.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
-    db.receiptScan.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
+    db.receiptAttachment.findMany({ where: { userId, OR: [{ dueItemId: { not: null } }, { transaction: { deletedAt: null } }] }, orderBy: { createdAt: "asc" } }),
+    db.receiptScan.findMany({ where: { userId, transactions: { some: { deletedAt: null } } }, orderBy: { createdAt: "asc" } }),
   ]);
+  const includedTransactionIds = new Set(transactions.map((item) => item.id));
 
   const records: BackupRecord[] = [
     { entity: "metadata", backupId: "backup", payload: { app: "SaveYoRupee", exportedAt: new Date().toISOString() } },
@@ -80,7 +81,7 @@ async function buildBackup(userId: string) {
     ]),
     ...dues.flatMap((due): BackupRecord[] => [
       { entity: "due_item", backupId: due.id, payload: { kind: due.kind, title: due.title, person: due.person, amountMinor: due.amountMinor, category: due.category, occurredOn: dateOnly(due.occurredOn), dueOn: dateOnly(due.dueOn), remindOn: dateOnly(due.remindOn), snoozedUntil: dateOnly(due.snoozedUntil), note: due.note, status: due.status, completedOn: dateOnly(due.completedOn), createdAt: iso(due.createdAt), updatedAt: iso(due.updatedAt) } },
-      ...due.payments.map((item): BackupRecord => ({ entity: "due_payment", backupId: item.id, payload: { dueItemId: item.dueItemId, amountMinor: item.amountMinor, occurredOn: dateOnly(item.occurredOn), note: item.note, transactionId: item.transactionId, createdAt: iso(item.createdAt) } })),
+      ...due.payments.map((item): BackupRecord => ({ entity: "due_payment", backupId: item.id, payload: { dueItemId: item.dueItemId, amountMinor: item.amountMinor, occurredOn: dateOnly(item.occurredOn), note: item.note, transactionId: item.transactionId && includedTransactionIds.has(item.transactionId) ? item.transactionId : null, createdAt: iso(item.createdAt) } })),
     ]),
   ];
 

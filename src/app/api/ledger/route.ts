@@ -83,6 +83,8 @@ const requestSchema = z.object({ action: z.string(), id: z.string().optional(), 
 
 const asDate = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const dateOnly = (value: Date | null) => value ? value.toISOString().slice(0, 10) : null;
+const TRANSACTION_UNDO_WINDOW_MS = 30_000;
+const DELETED_TRANSACTION_RETENTION_MS = 24 * 60 * 60 * 1000;
 const receiptData = async (receipt: z.infer<typeof receiptSchema>, id: string) => {
   await verifyStoredReceipt(receipt.storagePath, id, receipt.mimeType, receipt.size);
   return { name: receipt.name, mimeType: receipt.mimeType, size: receipt.size, storagePath: receipt.storagePath, data: null };
@@ -96,7 +98,8 @@ async function userId() {
 
 function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
   const transactions: LedgerTransaction[] = data.transactions.map((item) => {
-    const { receiptScan, ...transaction } = item;
+    const { deletedAt, receiptScan, ...transaction } = item;
+    void deletedAt;
     return { ...transaction, receipt: transaction.receipt ?? receiptScan, kind: item.kind as LedgerTransaction["kind"], paymentMode: item.paymentMode as LedgerTransaction["paymentMode"], locationSource: item.locationSource as LedgerTransaction["locationSource"], occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString(), paymentAccount: null };
   });
   const transfers: AccountTransfer[] = data.transfers.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString() }));
@@ -142,7 +145,7 @@ async function loadLedger(id: string) {
   const db = getPrisma();
   const [user, transactions, budgets, recurring, goals, categories, paymentAccounts, reconciliations, savedPlaces, transfers, dueItems] = await Promise.all([
     db.user.findUniqueOrThrow({ where: { id }, select: { id: true, name: true, currency: true, hideAmounts: true, autoLockMinutes: true, pinHash: true } }),
-    db.transaction.findMany({ where: { userId: id }, orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }], include: { receipt: { select: receiptSelect }, receiptScan: { select: receiptSelect }, paymentAccount: true } }),
+    db.transaction.findMany({ where: { userId: id, deletedAt: null }, orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }], include: { receipt: { select: receiptSelect }, receiptScan: { select: receiptSelect }, paymentAccount: true } }),
     db.budget.findMany({ where: { userId: id }, orderBy: { monthKey: "desc" } }),
     db.recurringEntry.findMany({ where: { userId: id }, orderBy: { nextDueOn: "asc" } }),
     db.savingsGoal.findMany({ where: { userId: id }, orderBy: { createdAt: "asc" }, include: { contributions: { orderBy: { createdAt: "desc" } } } }),
@@ -156,9 +159,29 @@ async function loadLedger(id: string) {
   return { user, transactions, budgets, recurring, goals, categories, paymentAccounts, reconciliations, savedPlaces, transfers, dueItems };
 }
 
+async function purgeExpiredDeletedTransactions(id: string) {
+  const db = getPrisma();
+  const expired = await db.transaction.findMany({
+    where: { userId: id, deletedAt: { lt: new Date(Date.now() - DELETED_TRANSACTION_RETENTION_MS) } },
+    select: { id: true, receiptScanId: true, receipt: { select: { storagePath: true } } },
+  });
+  if (!expired.length) return;
+
+  await db.transaction.deleteMany({ where: { userId: id, id: { in: expired.map((item) => item.id) } } });
+  const paths = expired.flatMap((item) => item.receipt?.storagePath ? [item.receipt.storagePath] : []);
+  for (const receiptScanId of new Set(expired.flatMap((item) => item.receiptScanId ? [item.receiptScanId] : []))) {
+    if (await db.transaction.count({ where: { receiptScanId } })) continue;
+    const scan = await db.receiptScan.findFirst({ where: { id: receiptScanId, userId: id }, select: { storagePath: true } });
+    await db.receiptScan.deleteMany({ where: { id: receiptScanId, userId: id } });
+    if (scan?.storagePath) paths.push(scan.storagePath);
+  }
+  await removeStoredReceipts(paths);
+}
+
 export async function GET() {
   const id = await userId();
   if (!id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  await purgeExpiredDeletedTransactions(id).catch((error) => console.warn("Could not purge expired deleted transactions.", error));
   return NextResponse.json(serialize(await loadLedger(id)));
 }
 
@@ -195,7 +218,7 @@ export async function POST(request: Request) {
         const { receipt, removeReceipt, location, ...entry } = value;
         await assertAccountDatesAreOpen([{ paymentAccountId: entry.paymentAccountId, occurredOn: entry.occurredOn }]);
         if (recordId) {
-          const existing = await db.transaction.findFirstOrThrow({ where: { id: recordId, userId: id }, select: { paymentAccountId: true, occurredOn: true, createdAt: true } });
+          const existing = await db.transaction.findFirstOrThrow({ where: { id: recordId, userId: id, deletedAt: null }, select: { paymentAccountId: true, occurredOn: true, createdAt: true } });
           await assertAccountDatesAreOpen([{ paymentAccountId: existing.paymentAccountId, occurredOn: dateOnly(existing.occurredOn)!, createdAt: existing.createdAt.toISOString() }]);
         }
         if (entry.paymentAccountId) await db.paymentAccount.findFirstOrThrow({ where: { id: entry.paymentAccountId, userId: id } });
@@ -220,7 +243,7 @@ export async function POST(request: Request) {
           let transactionId = recordId;
           let detachedScanPath: string | null = null;
           if (recordId) {
-            const existing = await transaction.transaction.findFirstOrThrow({ where: { id: recordId, userId: id }, select: { id: true, receiptScanId: true } });
+            const existing = await transaction.transaction.findFirstOrThrow({ where: { id: recordId, userId: id, deletedAt: null }, select: { id: true, receiptScanId: true } });
             await transaction.transaction.update({ where: { id: existing.id }, data: { ...data, ...((removeReceipt || receipt) && existing.receiptScanId ? { receiptScanId: null } : {}) } });
             if ((removeReceipt || receipt) && existing.receiptScanId) {
               const remaining = await transaction.transaction.count({ where: { receiptScanId: existing.receiptScanId } });
@@ -308,21 +331,17 @@ export async function POST(request: Request) {
       }
       case "deleteTransaction": {
         if (!recordId) throw new Error("Missing transaction id.");
-        const existing = await db.transaction.findFirst({ where: { id: recordId, userId: id }, select: { paymentAccountId: true, occurredOn: true, createdAt: true, receiptScanId: true, receipt: { select: { storagePath: true } } } });
-        if (existing) await assertAccountDatesAreOpen([{ paymentAccountId: existing.paymentAccountId, occurredOn: dateOnly(existing.occurredOn)!, createdAt: existing.createdAt.toISOString() }]);
-        let scanPath: string | null = null;
-        if (existing?.receiptScanId) {
-          const receiptScanId = existing.receiptScanId;
-          scanPath = await db.$transaction(async (transaction) => {
-            await transaction.transaction.deleteMany({ where: { id: recordId, userId: id } });
-            const remaining = await transaction.transaction.count({ where: { receiptScanId } });
-            if (remaining) return null;
-            const scan = await transaction.receiptScan.findFirst({ where: { id: receiptScanId, userId: id }, select: { storagePath: true } });
-            await transaction.receiptScan.deleteMany({ where: { id: receiptScanId, userId: id } });
-            return scan?.storagePath ?? null;
-          });
-        } else await db.transaction.deleteMany({ where: { id: recordId, userId: id } });
-        await removeStoredReceipts([existing?.receipt?.storagePath, scanPath]);
+        const existing = await db.transaction.findFirstOrThrow({ where: { id: recordId, userId: id, deletedAt: null }, select: { paymentAccountId: true, occurredOn: true, createdAt: true } });
+        await assertAccountDatesAreOpen([{ paymentAccountId: existing.paymentAccountId, occurredOn: dateOnly(existing.occurredOn)!, createdAt: existing.createdAt.toISOString() }]);
+        await db.transaction.update({ where: { id: recordId }, data: { deletedAt: new Date() } });
+        break;
+      }
+      case "restoreTransaction": {
+        if (!recordId) throw new Error("Missing transaction id.");
+        const existing = await db.transaction.findFirstOrThrow({ where: { id: recordId, userId: id, deletedAt: { not: null } }, select: { paymentAccountId: true, occurredOn: true, createdAt: true, deletedAt: true } });
+        if (!existing.deletedAt || Date.now() - existing.deletedAt.getTime() > TRANSACTION_UNDO_WINDOW_MS) throw new Error("The Undo window for this transaction has expired.");
+        await assertAccountDatesAreOpen([{ paymentAccountId: existing.paymentAccountId, occurredOn: dateOnly(existing.occurredOn)!, createdAt: existing.createdAt.toISOString() }]);
+        await db.transaction.update({ where: { id: recordId }, data: { deletedAt: null } });
         break;
       }
       case "saveSavedPlace": {
@@ -430,7 +449,10 @@ export async function POST(request: Request) {
       case "deleteCustomCategory": {
         if (!recordId) throw new Error("Missing category id.");
         const category = await db.customCategory.findFirstOrThrow({ where: { id: recordId, userId: id } });
-        const [transactions, budgets] = await Promise.all([db.transaction.count({ where: { userId: id, category: category.id } }), db.budget.count({ where: { userId: id, category: category.id } })]);
+        const [transactions, budgets] = await Promise.all([
+          db.transaction.count({ where: { userId: id, category: category.id, OR: [{ deletedAt: null }, { deletedAt: { gte: new Date(Date.now() - TRANSACTION_UNDO_WINDOW_MS) } }] } }),
+          db.budget.count({ where: { userId: id, category: category.id } }),
+        ]);
         if (transactions || budgets) return NextResponse.json({ error: "This category is in use. Reassign its entries before deleting it." }, { status: 409 });
         await db.customCategory.delete({ where: { id: category.id } });
         break;
@@ -464,7 +486,7 @@ export async function POST(request: Request) {
           if (duplicate) throw new Error("This account already has an approved reconciliation for that month.");
           const [activityTransactions, activityTransfers] = await Promise.all([
             transaction.transaction.findMany({
-              where: { userId: id, paymentAccountId: account.id, occurredOn: { lte: asDate(value.checkedOn) } },
+              where: { userId: id, paymentAccountId: account.id, deletedAt: null, occurredOn: { lte: asDate(value.checkedOn) } },
               select: { paymentAccountId: true, kind: true, amountMinor: true, occurredOn: true, createdAt: true },
             }),
             transaction.accountTransfer.findMany({

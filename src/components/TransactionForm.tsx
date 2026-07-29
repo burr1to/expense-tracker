@@ -18,6 +18,7 @@ import { LedgerDatePickerInput as DatePickerInput } from "./LedgerDatePickerInpu
 import { SubcategoryIcon } from "./SubcategoryIcon";
 import { ReceiptPreview } from "./ReceiptPreview";
 import { LocationPicker } from "./LocationPicker";
+import { AnimatedOverlay } from "./AnimatedOverlay";
 
 const schema = z.object({
   kind: z.enum(["income", "expense"]),
@@ -104,9 +105,21 @@ export function TransactionForm({ open, currency, transaction, template, initial
   const categoryColor = allCategoriesFor(kind, customCategories).find((item) => item.id === category)?.color ?? "#557f69";
   const discardAndClose = () => { if (receiptUploading) return; if (receipt) void discardReceipt(receipt); onClose(); };
 
-  useEffect(() => { reset(defaults); setLocation(defaultLocation); setLocationPickerOpen(false); setSubmitError(null); setReceipt(undefined); setRemoveReceipt(false); setReceiptError(null); setReceiptUploading(false); setSuggestionQuery(""); setAppliedSuggestionId(template?.id ?? null); }, [defaults, defaultLocation, open, reset, template?.id]);
-
-  if (!open) return null;
+  useEffect(() => {
+    if (!open) {
+      setLocationPickerOpen(false);
+      return;
+    }
+    reset(defaults);
+    setLocation(defaultLocation);
+    setSubmitError(null);
+    setReceipt(undefined);
+    setRemoveReceipt(false);
+    setReceiptError(null);
+    setReceiptUploading(false);
+    setSuggestionQuery("");
+    setAppliedSuggestionId(template?.id ?? null);
+  }, [defaults, defaultLocation, open, reset, template?.id]);
 
   const chooseKind = (nextKind: TransactionKind) => {
     setValue("kind", nextKind, { shouldValidate: true });
@@ -147,7 +160,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
   });
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && discardAndClose()}>
+    <AnimatedOverlay open={open} dismissOnBackdrop onClose={discardAndClose}>
       <section className="transaction-sheet" role="dialog" aria-modal="true" aria-labelledby="transaction-title">
         <div className="sheet-handle" />
         <header className="sheet-header">
@@ -227,6 +240,6 @@ export function TransactionForm({ open, currency, transaction, template, initial
         </form>
       </section>
       <LocationPicker open={locationPickerOpen} value={location} recentLocations={recentLocations} savedPlaces={savedPlaces} onClose={() => setLocationPickerOpen(false)} onSelect={(next) => { setLocation(next); setValue("area", next.label, { shouldValidate: true }); }} />
-    </div>
+    </AnimatedOverlay>
   );
 }

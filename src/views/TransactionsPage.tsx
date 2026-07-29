@@ -4,6 +4,7 @@ import { DatePicker } from "@mantine/dates";
 import { format, isSameMonth, parseISO, startOfMonth } from "date-fns";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState } from "../components/EmptyState";
+import { AnimatedOverlay } from "../components/AnimatedOverlay";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { LedgerDatePickerInput as DatePickerInput } from "../components/LedgerDatePickerInput";
 import { MonthPicker } from "../components/MonthPicker";
@@ -28,7 +29,7 @@ interface TransactionsPageProps {
 export function TransactionsPage({ month, currency, transactions, customCategories, paymentAccounts, onMonthChange, onAdd, onDuplicate, onEdit, onDelete, onImport, onSaveReceiptSplit }: TransactionsPageProps) {
   const [query, setQuery] = useState(""); const [kind, setKind] = useState<TransactionKind | "all">("all");
   const [category, setCategory] = useState("all"); const [from, setFrom] = useState(""); const [to, setTo] = useState(""); const [min, setMin] = useState(""); const [max, setMax] = useState(""); const [paymentMode, setPaymentMode] = useState<PaymentMode | "all">("all");
-  const [preview, setPreview] = useState<TransactionDraft[] | null>(null); const [importErrors, setImportErrors] = useState<string[]>([]); const [importing, setImporting] = useState(false); const fileRef = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<TransactionDraft[] | null>(null); const [importDialogOpen, setImportDialogOpen] = useState(false); const [importErrors, setImportErrors] = useState<string[]>([]); const [importing, setImporting] = useState(false); const fileRef = useRef<HTMLInputElement>(null);
   const templateHref = `data:text/csv;charset=utf-8,${encodeURIComponent(`\uFEFF${TRANSACTION_CSV_TEMPLATE}`)}`;
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [scope, setScope] = useState<TransactionHistoryScope>("history");
@@ -51,12 +52,14 @@ export function TransactionsPage({ month, currency, transactions, customCategori
     if (isFullBackupCsv(csv)) {
       setPreview([]);
       setImportErrors(["This is a full-backup CSV. Restore it from Profile → Backup so accounts, plans, places, dues, and receipts stay connected."]);
+      setImportDialogOpen(true);
       return;
     }
     const result = parseTransactionCsv(csv, customCategories, paymentAccounts);
-    setPreview(result.rows); setImportErrors(result.errors);
+    setPreview(result.rows); setImportErrors(result.errors); setImportDialogOpen(true);
   };
-  const importRows = async () => { if (!preview?.length) return; setImporting(true); try { await onImport(preview); setPreview(null); setImportErrors([]); } finally { setImporting(false); } };
+  const closeImportDialog = () => { if (!importing) setImportDialogOpen(false); };
+  const importRows = async () => { if (!preview?.length) return; setImporting(true); try { await onImport(preview); setImportDialogOpen(false); setImportErrors([]); } finally { setImporting(false); } };
   const remove = async (transaction: LedgerTransaction) => { if (deletingId) return; setDeletingId(transaction.id); try { await onDelete(transaction); } finally { setDeletingId(null); } };
   const clearFilters = () => { setCategory("all"); setFrom(""); setTo(""); setMin(""); setMax(""); setPaymentMode("all"); };
   const hasActiveFilters = category !== "all" || Boolean(from || to || min || max) || paymentMode !== "all";
@@ -88,6 +91,8 @@ export function TransactionsPage({ month, currency, transactions, customCategori
       <Select label="Payment mode" value={paymentMode} onChange={(value) => value && setPaymentMode(value as PaymentMode | "all")} data={[{ value: "all", label: "All payment modes" }, { value: "cash", label: "Cash" }, { value: "cheque", label: "Cheque" }, { value: "online", label: "Online payment" }]} allowDeselect={false} />
     </section>
     <section className="ledger-list"><div className="ledger-list-heading"><span>{sorted.length} {sorted.length === 1 ? "entry" : "entries"}{scope === "day" ? ` on ${format(selectedDay, "MMMM d, yyyy")}` : ""}</span><span>Newest first</span></div>{visibleTransactions.map((transaction) => <TransactionRow key={transaction.id} transaction={transaction} currency={currency} customCategories={customCategories} onDuplicate={onDuplicate} onEdit={onEdit} onDelete={(item) => void remove(item)} deletePending={deletingId === transaction.id} />)}{!sorted.length && <EmptyState title={scope === "history" ? "No matching transactions" : `No ${kind === "all" ? "" : `${kind} `}entries on ${format(selectedDay, "MMMM d")}`} message={scope === "history" ? "Try changing your search or filters, or add a transaction." : "Try another day or filter, or add a new transaction."} action={<button className="primary-button small" onClick={() => onAdd(activeOccurredOn)}><Plus size={17} />Add transaction</button>} />}{visibleTransactions.length < sorted.length && <nav className="transaction-history-pagination" aria-label="More transactions"><span aria-live="polite">Showing {visibleTransactions.length} of {sorted.length}</span><button className="secondary-button small" onClick={() => setVisibleCount((count) => count + 50)}>Load 50 more</button></nav>}</section>
-    {preview && <div className="modal-backdrop"><section className="import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-title" aria-busy={importing}><header><div><span className="eyebrow">CSV import</span><h2 id="import-title">Review before importing</h2></div><button className="icon-button" disabled={importing} onClick={() => setPreview(null)} aria-label="Close"><X size={20} /></button></header>{importErrors.length > 0 && <div className="import-errors"><strong>{importErrors.length} rows need attention</strong>{importErrors.slice(0, 5).map((error) => <span key={error}>{error}</span>)}</div>}<div className="import-preview">{preview.slice(0, 8).map((row, index) => <div key={`${row.occurredOn}-${index}`}><span>{row.occurredOn}</span><strong>{row.note || getCategory(row.category, customCategories).label}</strong><span>{row.kind}</span><span>{row.amount} {currency}</span></div>)}</div><p>{preview.length} valid rows ready. Invalid rows will not be imported.</p><div className="dialog-actions"><button className="secondary-button" disabled={importing} onClick={() => setPreview(null)}>Cancel</button><button className="primary-button" disabled={!preview.length || importing} onClick={() => void importRows()}>{importing ? <><ButtonSpinner />Importing…</> : <><DownloadSimple size={17} />Import {preview.length} rows</>}</button></div></section></div>}
+    <AnimatedOverlay open={importDialogOpen} dismissOnBackdrop onClose={closeImportDialog} onExited={() => { if (!importDialogOpen) { setPreview(null); setImportErrors([]); } }}>
+      {preview && <section className="import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-title" aria-busy={importing}><header><div><span className="eyebrow">CSV import</span><h2 id="import-title">Review before importing</h2></div><button className="icon-button" disabled={importing} onClick={closeImportDialog} aria-label="Close"><X size={20} /></button></header>{importErrors.length > 0 && <div className="import-errors"><strong>{importErrors.length} rows need attention</strong>{importErrors.slice(0, 5).map((error) => <span key={error}>{error}</span>)}</div>}<div className="import-preview">{preview.slice(0, 8).map((row, index) => <div key={`${row.occurredOn}-${index}`}><span>{row.occurredOn}</span><strong>{row.note || getCategory(row.category, customCategories).label}</strong><span>{row.kind}</span><span>{row.amount} {currency}</span></div>)}</div><p>{preview.length} valid rows ready. Invalid rows will not be imported.</p><div className="dialog-actions"><button className="secondary-button" disabled={importing} onClick={closeImportDialog}>Cancel</button><button className="primary-button" disabled={!preview.length || importing} onClick={() => void importRows()}>{importing ? <><ButtonSpinner />Importing…</> : <><DownloadSimple size={17} />Import {preview.length} rows</>}</button></div></section>}
+    </AnimatedOverlay>
   </div>;
 }

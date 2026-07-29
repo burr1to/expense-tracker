@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => {
   };
   const db = {
     user: { findUniqueOrThrow: vi.fn() },
-    transaction: { findMany: vi.fn() },
+    transaction: { findMany: vi.fn(), findFirstOrThrow: vi.fn(), update: vi.fn() },
     budget: { findMany: vi.fn() },
     recurringEntry: { findMany: vi.fn() },
     savingsGoal: { findMany: vi.fn() },
@@ -89,6 +89,7 @@ describe("saveReceiptSplit ledger action", () => {
     mocks.db.paymentAccount.findMany.mockResolvedValue([]);
     mocks.db.paymentAccount.count.mockResolvedValue(0);
     mocks.db.accountReconciliation.findMany.mockResolvedValue([]);
+    mocks.db.accountReconciliation.findFirst.mockResolvedValue(null);
     mocks.db.savedPlace.findMany.mockResolvedValue([]);
     mocks.db.accountTransfer.findMany.mockResolvedValue([]);
     mocks.db.dueItem.findMany.mockResolvedValue([]);
@@ -147,5 +148,78 @@ describe("saveReceiptSplit ledger action", () => {
       userId: "user-1",
       storagePath: receipt.storagePath,
     } });
+  });
+});
+
+function transactionAction(action: "deleteTransaction" | "restoreTransaction", id = "transaction-1") {
+  return new Request("http://localhost/api/ledger", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, id }),
+  });
+}
+
+describe("transaction Undo ledger actions", () => {
+  const storedTransaction = {
+    paymentAccountId: null,
+    occurredOn: new Date("2026-07-26T00:00:00.000Z"),
+    createdAt: new Date("2026-07-26T08:00:00.000Z"),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.db.user.findUniqueOrThrow.mockResolvedValue({
+      id: "user-1",
+      name: "Test User",
+      currency: "NPR",
+      hideAmounts: false,
+      autoLockMinutes: 0,
+      pinHash: null,
+    });
+    mocks.db.transaction.findMany.mockResolvedValue([]);
+    mocks.db.budget.findMany.mockResolvedValue([]);
+    mocks.db.recurringEntry.findMany.mockResolvedValue([]);
+    mocks.db.savingsGoal.findMany.mockResolvedValue([]);
+    mocks.db.customCategory.findMany.mockResolvedValue([]);
+    mocks.db.paymentAccount.findMany.mockResolvedValue([]);
+    mocks.db.accountReconciliation.findMany.mockResolvedValue([]);
+    mocks.db.accountReconciliation.findFirst.mockResolvedValue(null);
+    mocks.db.savedPlace.findMany.mockResolvedValue([]);
+    mocks.db.accountTransfer.findMany.mockResolvedValue([]);
+    mocks.db.dueItem.findMany.mockResolvedValue([]);
+  });
+
+  it("soft-deletes an owned transaction so its data remains recoverable", async () => {
+    mocks.db.transaction.findFirstOrThrow.mockResolvedValueOnce(storedTransaction);
+
+    const response = await POST(transactionAction("deleteTransaction"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.db.transaction.update).toHaveBeenCalledWith({
+      where: { id: "transaction-1" },
+      data: { deletedAt: expect.any(Date) },
+    });
+  });
+
+  it("restores a recently deleted owned transaction", async () => {
+    mocks.db.transaction.findFirstOrThrow.mockResolvedValueOnce({ ...storedTransaction, deletedAt: new Date() });
+
+    const response = await POST(transactionAction("restoreTransaction"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.db.transaction.update).toHaveBeenCalledWith({
+      where: { id: "transaction-1" },
+      data: { deletedAt: null },
+    });
+  });
+
+  it("rejects Undo after the server recovery window expires", async () => {
+    mocks.db.transaction.findFirstOrThrow.mockResolvedValueOnce({ ...storedTransaction, deletedAt: new Date(Date.now() - 31_000) });
+
+    const response = await POST(transactionAction("restoreTransaction"));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "The Undo window for this transaction has expired." });
+    expect(mocks.db.transaction.update).not.toHaveBeenCalled();
   });
 });

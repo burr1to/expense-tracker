@@ -40,12 +40,12 @@ export async function GET(request: Request) {
   const db = getPrisma();
   const [user, monthTransactions, previousTransactions, budgets, categories, accounts, allAccountTransactions, transfers, dues, recurring] = await Promise.all([
     db.user.findUniqueOrThrow({ where: { id: session.user.id }, select: { name: true, currency: true } }),
-    db.transaction.findMany({ where: { userId: session.user.id, occurredOn: { gte: asDate(start), lt: asDate(endExclusive) } }, orderBy: [{ occurredOn: "asc" }, { createdAt: "asc" }] }),
-    db.transaction.findMany({ where: { userId: session.user.id, occurredOn: { gte: asDate(previousBounds.start), lt: asDate(previousBounds.endExclusive) } }, orderBy: [{ occurredOn: "asc" }, { createdAt: "asc" }] }),
+    db.transaction.findMany({ where: { userId: session.user.id, deletedAt: null, occurredOn: { gte: asDate(start), lt: asDate(endExclusive) } }, orderBy: [{ occurredOn: "asc" }, { createdAt: "asc" }] }),
+    db.transaction.findMany({ where: { userId: session.user.id, deletedAt: null, occurredOn: { gte: asDate(previousBounds.start), lt: asDate(previousBounds.endExclusive) } }, orderBy: [{ occurredOn: "asc" }, { createdAt: "asc" }] }),
     db.budget.findMany({ where: { userId: session.user.id, monthKey } }),
     db.customCategory.findMany({ where: { userId: session.user.id } }),
     db.paymentAccount.findMany({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" } }),
-    db.transaction.findMany({ where: { userId: session.user.id, paymentAccountId: { not: null } }, orderBy: [{ occurredOn: "asc" }, { createdAt: "asc" }] }),
+    db.transaction.findMany({ where: { userId: session.user.id, deletedAt: null, paymentAccountId: { not: null } }, orderBy: [{ occurredOn: "asc" }, { createdAt: "asc" }] }),
     db.accountTransfer.findMany({ where: { userId: session.user.id }, orderBy: [{ occurredOn: "asc" }, { createdAt: "asc" }] }),
     db.dueItem.findMany({ where: { userId: session.user.id }, include: { payments: true } }),
     db.recurringEntry.findMany({ where: { userId: session.user.id, active: true }, orderBy: { nextDueOn: "asc" } }),

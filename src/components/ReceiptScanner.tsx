@@ -9,6 +9,7 @@ import { discardReceipt, prepareReceiptPhoto, uploadReceipt } from "../lib/recei
 import { analysisToDrafts, draftTotalMinor, type ReceiptAnalysis } from "../lib/receipt-analysis";
 import type { CurrencyCode, CustomCategory, PaymentAccount, PaymentMode, ReceiptUpload, TransactionDraft } from "../types";
 import { ButtonSpinner } from "./ButtonSpinner";
+import { AnimatedOverlay } from "./AnimatedOverlay";
 import { LedgerDatePickerInput as DatePickerInput } from "./LedgerDatePickerInput";
 import { paymentAccountLabel } from "../lib/payment-accounts";
 
@@ -170,7 +171,7 @@ export function ReceiptScanner({ currency, fallbackOccurredOn, customCategories,
 
   return <>
     <button className="secondary-button receipt-scan-trigger" onClick={() => setOpen(true)}><Camera size={18} />Scan receipt <span>AI</span></button>
-    {open && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && void close()}>
+    <AnimatedOverlay open={open} dismissOnBackdrop onClose={() => void close()}>
       <section className="receipt-scan-dialog" role="dialog" aria-modal="true" aria-labelledby="receipt-scan-title" aria-busy={stage === "uploading" || stage === "analyzing" || stage === "saving"}>
         <header>
           <div><span className="eyebrow">Experimental AI</span><h2 id="receipt-scan-title">{stage === "reviewing" || stage === "saving" ? "Review receipt splits" : "Scan a receipt"}</h2></div>
@@ -233,6 +234,6 @@ export function ReceiptScanner({ currency, fallbackOccurredOn, customCategories,
           </div>
         </div>}
       </section>
-    </div>}
+    </AnimatedOverlay>
   </>;
 }
