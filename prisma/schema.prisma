@@ -36,6 +36,7 @@ model User {
   receipts          ReceiptAttachment[]
   receiptScans      ReceiptScan[]
   savedPlaces       SavedPlace[]
+  recovery          AccountRecovery?
 }
 
 model Session {
@@ -80,6 +81,21 @@ model Verification {
   updatedAt  DateTime @updatedAt
 
   @@index([identifier])
+}
+
+model AccountRecovery {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  questionOneKey   String
+  questionOneHash  String
+  questionTwoKey   String
+  questionTwoHash  String
+  recoveryCodeHash String
+  failedAttempts   Int      @default(0)
+  lockedUntil      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Transaction {
