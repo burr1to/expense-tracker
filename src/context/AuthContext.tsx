@@ -2,7 +2,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { authClient } from "../lib/auth-client";
+import { authClient, signOutClient } from "../lib/auth-client";
 import type { RecoverySetup, RecoveryVerification } from "../lib/recovery";
 
 interface AppUser { id: string; name: string; email: string; emailVerified: boolean; image?: string | null }
@@ -131,8 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    const result = await authClient.signOut();
-    if (result.error) throw new Error(result.error.message ?? "Could not sign out.");
+    await signOutClient();
     setUser(null);
   }, []);
 

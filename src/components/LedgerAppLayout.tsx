@@ -4,7 +4,7 @@ import { PasswordInput } from "@mantine/core";
 import { ArrowCounterClockwise, CheckCircle, Eye, EyeSlash, LockKey, Trash, X } from "@phosphor-icons/react";
 import { parseISO } from "date-fns";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useLedger } from "../context/LedgerContext";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
@@ -171,6 +171,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
       await signOut();
     } catch (caught) {
       window.alert(caught instanceof Error ? caught.message : "Could not sign out.");
+    } finally {
       setSigningOut(false);
     }
   };
@@ -266,7 +267,13 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   );
 }
 
+const NOTE_STRIPS = 24;
+const NOTE_STRIP_WIDTH = 240 / NOTE_STRIPS;
+const NOTE_HEIGHT = 102;
+
 function AppLoader({ className, message }: { className: "boot-screen" | "page-loading"; message: string }) {
+  const uid = useId().replace(/:/g, "");
+  const id = (name: string) => `${name}-${uid}`;
   return <div className={className} role="status" aria-live="polite">
     <div className="app-loader-card">
       <div className="loader-brand">
@@ -276,19 +283,105 @@ function AppLoader({ className, message }: { className: "boot-screen" | "page-lo
       <div className="loader-bill-stage" aria-hidden="true">
         <span className="loader-bill-shadow" />
         <div className="loader-bill">
-          <svg className="loader-bill-art" viewBox="0 0 240 132" focusable="false">
-            <rect x="7" y="12" width="226" height="108" rx="8" fill="#78a583" stroke="#3f6653" strokeWidth="3" />
-            <rect x="15" y="20" width="210" height="92" rx="5" fill="none" stroke="#d8eedb" strokeWidth="1.5" opacity=".8" />
-            <path d="M19 35c31-13 59-14 101-14s70 1 101 14v15c-31-8-63-10-101-10S50 42 19 50V35Z" fill="#b9d9bd" opacity=".28" />
-            <path d="M19 97c31 8 63 10 101 10s70-2 101-10v15c-31 13-59 14-101 14s-70-1-101-14V97Z" fill="#315a46" opacity=".2" />
-            <circle cx="120" cy="66" r="30" fill="#5f8d6c" stroke="#d8eedb" strokeWidth="1.5" />
-            <circle cx="120" cy="66" r="24" fill="none" stroke="#d8eedb" strokeWidth="1" opacity=".7" />
-            <path d="M120 45v42M108 54c2-5 20-6 23 1 3 8-22 7-23 16-1 8 20 10 25 1" fill="none" stroke="#f2f7e9" strokeLinecap="round" strokeWidth="3" />
-            <text x="28" y="45" fill="#f2f7e9" fontSize="18" fontWeight="800">$</text>
-            <text x="212" y="101" fill="#f2f7e9" fontSize="18" fontWeight="800" textAnchor="end">$</text>
-            <text x="120" y="36" fill="#eff8e9" fontSize="8" fontWeight="800" letterSpacing="2" textAnchor="middle">ONE DOLLAR</text>
-            <text x="120" y="103" fill="#eff8e9" fontSize="7" fontWeight="700" letterSpacing="1.5" textAnchor="middle">SAVEYO RUPEE</text>
-            <path d="M30 73h32M178 73h32" fill="none" stroke="#d8eedb" strokeLinecap="round" strokeWidth="1.5" opacity=".72" />
+          <svg className="loader-bill-art" viewBox={`0 0 240 ${NOTE_HEIGHT}`} focusable="false">
+            <defs>
+              <linearGradient id={id("paper")} x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stopColor="#dfebc7" />
+                <stop offset=".45" stopColor="#bad0a2" />
+                <stop offset="1" stopColor="#94b17f" />
+              </linearGradient>
+              <clipPath id={id("shape")}>
+                <rect x="4" y="4" width="232" height="94" rx="3" />
+              </clipPath>
+              <clipPath id={id("oval")}>
+                <ellipse cx="120" cy="54" rx="24" ry="24" />
+              </clipPath>
+              {Array.from({ length: NOTE_STRIPS }, (_, i) => (
+                <clipPath key={i} id={id(`strip${i}`)}>
+                  <rect x={i * NOTE_STRIP_WIDTH - 0.06} y="-14" width={NOTE_STRIP_WIDTH + 0.12} height="130" />
+                </clipPath>
+              ))}
+              <g id={id("note")}>
+                <rect x="4" y="4" width="232" height="94" rx="3" fill={`url(#${id("paper")})`} stroke="#3f6b4d99" strokeWidth=".9" />
+                <g clipPath={`url(#${id("shape")})`}>
+                  {/* engraved guilloche wash */}
+                  <g fill="none" stroke="#3f6b4d" strokeWidth=".45" opacity=".17">
+                    <path d="M4 22c40-14 80 14 120 0s80-14 116 0" />
+                    <path d="M4 44c40-14 80 14 120 0s80-14 116 0" />
+                    <path d="M4 66c40-14 80 14 120 0s80-14 116 0" />
+                    <path d="M4 86c40-14 80 14 120 0s80-14 116 0" />
+                  </g>
+                  {/* lathework rosettes behind the seals */}
+                  <g fill="none" stroke="#3f6b4d" strokeWidth=".4" opacity=".22">
+                    <circle cx="54" cy="54" r="18" /><circle cx="54" cy="54" r="14" /><circle cx="54" cy="54" r="10" />
+                    <circle cx="186" cy="54" r="18" /><circle cx="186" cy="54" r="14" /><circle cx="186" cy="54" r="10" />
+                  </g>
+                  {/* portrait vignette */}
+                  <ellipse cx="120" cy="54" rx="24" ry="24" fill="#dbe8c9" stroke="#2b4a35" strokeWidth=".8" />
+                  <ellipse cx="120" cy="54" rx="21" ry="21" fill="none" stroke="#2b4a35" strokeWidth=".4" opacity=".5" />
+                  <g clipPath={`url(#${id("oval")})`} fill="#2b4a35">
+                    {/* engraved bust, three-quarter facing left */}
+                    <path d="M97 78c2-11.5 9.5-16 23-16s21 4.5 23 16Z" />
+                    <rect x="115.2" y="53" width="9.6" height="10" />
+                    <ellipse cx="121" cy="46" rx="8.2" ry="9.4" />
+                    <path d="M113.2 43.6c-1.8.7-2.9 2-2.6 3.1.3 1.1 1.6 1.5 2.9 1.2Z" />
+                    <path d="M112.7 39.6c1.3-4.7 5.1-7.1 9.1-7.1 4.6 0 7.8 2.6 8.6 6.7.4 2-.2 3.4-.9 3.4-1.4-3.6-4-5.4-8-5.4-3.4 0-6 1.2-7.6 3.6-.7.9-1.5.4-1.2-1.2Z" />
+                    <circle cx="130.2" cy="51.4" r="2.7" />
+                    <path d="M113.6 63c3.6 3.2 10.8 3.2 14.4 0" fill="none" stroke="#dbe8c9" strokeWidth=".9" />
+                  </g>
+                  {/* federal reserve seal */}
+                  <g fill="none" stroke="#2f4a3a" opacity=".8">
+                    <circle cx="54" cy="54" r="12.5" strokeWidth=".9" />
+                    <circle cx="54" cy="54" r="10" strokeWidth=".45" strokeDasharray="1.5 1.4" />
+                  </g>
+                  <text x="54" y="58" fill="#2f4a3a" fontSize="10" fontWeight="800" textAnchor="middle" opacity=".8">F</text>
+                  {/* treasury seal — balance scales */}
+                  <g fill="none" stroke="#3f7a52" opacity=".9">
+                    <circle cx="186" cy="54" r="12.5" strokeWidth=".9" />
+                    <circle cx="186" cy="54" r="10" strokeWidth=".45" strokeDasharray="1.5 1.4" />
+                    <path d="M186 47v11" strokeWidth=".8" strokeLinecap="round" />
+                    <path d="M180.4 49.5h11.2" strokeWidth=".8" strokeLinecap="round" />
+                    <path d="M178.2 49.5a2.2 2.2 0 0 0 4.4 0M189.4 49.5a2.2 2.2 0 0 0 4.4 0" strokeWidth=".65" />
+                    <path d="M181.5 58.6h9" strokeWidth=".8" strokeLinecap="round" />
+                  </g>
+                  {/* corner scrollwork */}
+                  <g fill="none" stroke="#33573f" strokeWidth=".5" opacity=".4">
+                    <path d="M12 12h14M12 12v10M228 12h-14M228 12v10M12 90h14M12 90v-10M228 90h-14M228 90v-10" />
+                  </g>
+                </g>
+                <rect x="9" y="9" width="222" height="84" rx="1.5" fill="none" stroke="#33573f" strokeWidth=".7" opacity=".65" />
+                <rect x="11.5" y="11.5" width="217" height="79" rx="1" fill="none" stroke="#33573f" strokeWidth=".4" strokeDasharray="2 1.6" opacity=".45" />
+                <text x="120" y="19" fill="#245239" fontSize="4.6" fontWeight="700" letterSpacing="1.1" textAnchor="middle">FEDERAL RESERVE NOTE</text>
+                <text x="120" y="28" fill="#1e3d2b" fontSize="6.6" fontWeight="800" letterSpacing=".7" textAnchor="middle">THE UNITED STATES OF AMERICA</text>
+                <text x="20" y="30" fill="#1e3d2b" fontSize="12" fontWeight="800">1</text>
+                <text x="220" y="30" fill="#1e3d2b" fontSize="12" fontWeight="800" textAnchor="end">1</text>
+                <text x="20" y="88" fill="#1e3d2b" fontSize="12" fontWeight="800">1</text>
+                <text x="220" y="88" fill="#1e3d2b" fontSize="12" fontWeight="800" textAnchor="end">1</text>
+                <text x="214" y="40" fill="#3f7a52" fontSize="4.6" fontWeight="700" letterSpacing=".7" textAnchor="end">F 74210099 B</text>
+                <text x="26" y="80" fill="#3f7a52" fontSize="4.2" fontWeight="700" letterSpacing="1">SAVEYO RUPEE</text>
+                <text x="214" y="80" fill="#3f7a52" fontSize="4.2" fontWeight="700" letterSpacing="1" textAnchor="end">SERIES 2026</text>
+                <text x="120" y="82" fill="#245239" fontSize="4" fontWeight="700" letterSpacing=".9" textAnchor="middle">IN GOD WE TRUST</text>
+                <text x="120" y="90" fill="#1e3d2b" fontSize="8" fontWeight="800" letterSpacing="1.5" textAnchor="middle">ONE DOLLAR</text>
+              </g>
+            </defs>
+            {Array.from({ length: NOTE_STRIPS }, (_, i) => (
+              <g
+                key={i}
+                className="loader-note-strip"
+                style={{
+                  "--i": i,
+                  // the left edge is the "pole": barely moves, while the free edge flaps hardest
+                  "--a": (0.16 + 0.84 * (i / (NOTE_STRIPS - 1)) ** 1.35).toFixed(3),
+                  transformOrigin: `${(i + 0.5) * NOTE_STRIP_WIDTH}px ${NOTE_HEIGHT / 2}px`,
+                } as React.CSSProperties}
+              >
+                <g clipPath={`url(#${id(`strip${i}`)})`}>
+                  <use href={`#${id("note")}`} />
+                  <rect className="loader-note-shade" x="0" y="0" width="240" height={NOTE_HEIGHT} clipPath={`url(#${id("shape")})`} />
+                  <rect className="loader-note-glow" x="0" y="0" width="240" height={NOTE_HEIGHT} clipPath={`url(#${id("shape")})`} />
+                </g>
+              </g>
+            ))}
           </svg>
         </div>
       </div>

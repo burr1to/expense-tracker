@@ -437,17 +437,23 @@ h1, h2, strong { letter-spacing: -0.025em; }
 .loader-brand small { color: var(--muted); font-size: 10px; }
 .loader-logo { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--blue); color: white; box-shadow: 0 8px 20px rgba(85,127,105,.24); position: relative; }
 .loader-logo::after { content: ""; position: absolute; inset: -5px; border: 1px solid rgba(85,127,105,.24); border-radius: 16px; animation: loader-breathe 1.7s ease-in-out infinite; }
-.loader-bill-stage { position: relative; display: grid; place-items: center; min-height: 156px; margin: 16px -6px 17px; perspective: 700px; }
-.loader-bill { position: relative; z-index: 1; width: min(100%, 236px); transform-origin: 50% 60%; filter: drop-shadow(0 13px 9px rgba(36,51,43,.19)); animation: loader-bill-wave 1.65s ease-in-out infinite; will-change: transform; }
+.loader-bill-stage { position: relative; display: grid; place-items: center; min-height: 156px; margin: 16px -6px 17px; perspective: 760px; }
+.loader-bill { position: relative; z-index: 1; width: min(100%, 236px); transform-origin: 12% 50%; animation: loader-bill-sway 3.4s cubic-bezier(.37,0,.63,1) infinite; will-change: transform; }
 .loader-bill-art { display: block; width: 100%; height: auto; overflow: visible; }
-.loader-bill-shadow { position: absolute; bottom: 16px; width: min(68%, 158px); height: 14px; border-radius: 50%; background: rgba(36,51,43,.2); filter: blur(7px); animation: loader-bill-shadow 1.65s ease-in-out infinite; }
+.loader-note-strip { animation: loader-note-wave 2.1s cubic-bezier(.37,0,.63,1) infinite; animation-delay: calc(var(--i) * -.055s); will-change: transform; }
+.loader-note-shade { fill: #16233b; opacity: 0; animation: loader-note-shade 2.1s cubic-bezier(.37,0,.63,1) infinite; animation-delay: calc(var(--i) * -.055s - .52s); }
+.loader-note-glow { fill: #ffffff; opacity: 0; animation: loader-note-glow 2.1s cubic-bezier(.37,0,.63,1) infinite; animation-delay: calc(var(--i) * -.055s + .52s); }
+.loader-bill-shadow { position: absolute; bottom: 16px; width: min(68%, 158px); height: 14px; border-radius: 50%; background: rgba(36,51,43,.2); filter: blur(7px); animation: loader-bill-shadow 3.4s cubic-bezier(.37,0,.63,1) infinite; }
 .loader-status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; font-weight: 650; }
 .loader-status i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 0 rgba(85,127,105,.4); animation: loader-pulse 1.2s ease-out infinite; }
 .page-error { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 13px; color: var(--muted); }
 @keyframes loader-breathe { 50% { transform: scale(1.05); opacity: .35; } }
 @keyframes loader-pulse { 70% { box-shadow: 0 0 0 7px rgba(85,127,105,0); } 100% { box-shadow: 0 0 0 0 rgba(85,127,105,0); } }
-@keyframes loader-bill-wave { 0%, 100% { transform: perspective(700px) rotate(-6deg) rotateY(-7deg) translateY(3px); } 25% { transform: perspective(700px) rotate(4deg) rotateY(10deg) translateY(-3px); } 50% { transform: perspective(700px) rotate(7deg) rotateY(-5deg) translateY(0); } 75% { transform: perspective(700px) rotate(-3deg) rotateY(8deg) translateY(-4px); } }
-@keyframes loader-bill-shadow { 0%, 100% { transform: scaleX(.82); opacity: .55; } 50% { transform: scaleX(1.08); opacity: .26; } }
+@keyframes loader-bill-sway { 0%, 100% { transform: perspective(760px) rotateY(-11deg) rotate(-2.4deg) translateY(2px); } 50% { transform: perspective(760px) rotateY(11deg) rotate(2.4deg) translateY(-2px); } }
+@keyframes loader-note-wave { 0%, 100% { transform: translateY(calc(var(--a) * -5.4px)) skewY(calc(var(--a) * 3.6deg)); } 50% { transform: translateY(calc(var(--a) * 5.4px)) skewY(calc(var(--a) * -3.6deg)); } }
+@keyframes loader-note-shade { 0%, 100% { opacity: 0; } 50% { opacity: calc(var(--a) * .17); } }
+@keyframes loader-note-glow { 0%, 100% { opacity: 0; } 50% { opacity: calc(var(--a) * .2); } }
+@keyframes loader-bill-shadow { 0%, 100% { transform: scaleX(.84); opacity: .5; } 50% { transform: scaleX(1.06); opacity: .27; } }
 
 @media (min-width: 641px) {
   .app-loader-card { width: 320px; padding: 24px; border-radius: 20px; }
