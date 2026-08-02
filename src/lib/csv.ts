@@ -45,16 +45,17 @@ export function parseTransactionCsv(csv: string, customCategories: readonly Cust
     const amount = get("amount").replace(/[^0-9.-]/g, "");
     const date = get("date");
     const paymentMode = (get("payment mode").toLowerCase() || "cash") as PaymentMode;
-    const paymentAccountId = get("payment account id");
+    const paymentAccountImportId = get("payment account id");
+    const paymentAccount = paymentAccounts.find((account) => account.importId === paymentAccountImportId || account.id === paymentAccountImportId);
     const rowErrors: string[] = [];
     if (kind !== "income" && kind !== "expense") rowErrors.push("type must be income or expense");
     if (!category) rowErrors.push("category is unknown");
     if (!(Number(amount) > 0)) rowErrors.push("amount must be positive");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) rowErrors.push("date must be YYYY-MM-DD");
     if (!["cash", "cheque", "online"].includes(paymentMode)) rowErrors.push("payment mode must be cash, cheque, or online");
-    if (paymentMode === "online" && !paymentAccounts.some((account) => account.id === paymentAccountId)) rowErrors.push("online payment account id is missing or unknown");
+    if (paymentMode === "online" && !paymentAccount) rowErrors.push("online payment account id is missing or unknown");
     if (rowErrors.length) errors.push(`Row ${rowIndex + 2}: ${rowErrors.join("; ")}.`);
-    else rows.push({ kind: kind as "income" | "expense", category: category!, amount, occurredOn: date, note: get("note").slice(0, 80), subcategory: get("subcategory").slice(0, 80), area: get("area").slice(0, 120), paymentMode, paymentAccountId: paymentMode === "online" ? paymentAccountId : "" });
+    else rows.push({ kind: kind as "income" | "expense", category: category!, amount, occurredOn: date, note: get("note").slice(0, 80), subcategory: get("subcategory").slice(0, 80), area: get("area").slice(0, 120), paymentMode, paymentAccountId: paymentMode === "online" ? paymentAccount!.id : "" });
   });
   return { rows, errors };
 }

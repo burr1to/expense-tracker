@@ -137,7 +137,7 @@ function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
 }
 
 function serializeAccount(item: Awaited<ReturnType<typeof loadLedger>>["paymentAccounts"][number], transactions: readonly LedgerTransaction[], transfers: readonly AccountTransfer[]): PaymentAccount {
-  const account: PaymentAccount = { id: item.id, userId: item.userId, type: item.type as PaymentAccount["type"], provider: item.provider, label: item.label, balanceMinor: item.balanceMinor, balanceAsOf: dateOnly(item.balanceAsOf)!, balanceRecordedAt: item.balanceRecordedAt.toISOString(), currentBalanceMinor: 0, createdAt: item.createdAt.toISOString() };
+  const account: PaymentAccount = { id: item.id, importId: item.importId, userId: item.userId, type: item.type as PaymentAccount["type"], provider: item.provider, label: item.label, balanceMinor: item.balanceMinor, balanceAsOf: dateOnly(item.balanceAsOf)!, balanceRecordedAt: item.balanceRecordedAt.toISOString(), currentBalanceMinor: 0, createdAt: item.createdAt.toISOString() };
   return withCurrentAccountBalance(account, transactions, transfers);
 }
 
@@ -500,6 +500,7 @@ export async function POST(request: Request) {
           ]);
           const anchor: PaymentAccount = {
             id: account.id,
+            importId: account.importId,
             userId: account.userId,
             type: account.type as PaymentAccount["type"],
             provider: account.provider,

@@ -4,6 +4,7 @@ import type { AccountTransfer, LedgerTransaction, PaymentAccount } from "../type
 
 const account = (overrides: Partial<PaymentAccount> = {}): PaymentAccount => ({
   id: "wallet",
+  importId: "11111111-1111-4111-8111-111111111111",
   userId: "user",
   type: "esewa",
   provider: "esewa",

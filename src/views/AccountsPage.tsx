@@ -1,4 +1,4 @@
-import { ArrowsLeftRight, Bank, CalendarBlank, CheckCircle, LockKey, Plus, Receipt, Scales, ShieldCheck, Trash, TrendDown, TrendUp } from "@phosphor-icons/react";
+import { ArrowsLeftRight, Bank, CalendarBlank, Check, CheckCircle, Copy, LockKey, Plus, Receipt, Scales, ShieldCheck, Trash, TrendDown, TrendUp } from "@phosphor-icons/react";
 import { NumberInput, Select, TextInput } from "@mantine/core";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -41,6 +41,7 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
   const [accountBalanceAsOf, setAccountBalanceAsOf] = useState(toDateInput());
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountAction, setAccountAction] = useState<string | null>(null);
+  const [copiedImportId, setCopiedImportId] = useState<string | null>(null);
   const [editingBalanceId, setEditingBalanceId] = useState<string | null>(null);
   const [editingBalance, setEditingBalance] = useState("");
   const [editingBalanceAsOf, setEditingBalanceAsOf] = useState(toDateInput());
@@ -66,6 +67,16 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
   }, [paymentAccounts, selectedAccountId]);
 
   const selectedAccount = paymentAccounts.find((account) => account.id === selectedAccountId) ?? null;
+
+  const copyImportId = async (importId: string) => {
+    try {
+      await navigator.clipboard.writeText(importId);
+      setCopiedImportId(importId);
+      window.setTimeout(() => setCopiedImportId((current) => current === importId ? null : current), 2_000);
+    } catch {
+      setAccountError("Could not copy the CSV import ID. Select and copy it manually.");
+    }
+  };
   const accountTransactions = useMemo(
     () => transactions.filter((transaction) => transaction.paymentAccountId === selectedAccountId),
     [selectedAccountId, transactions],
@@ -215,7 +226,7 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
         </form> : <div className="account-pin-required"><span><LockKey size={21} weight="duotone" /></span><div><strong>PIN required to add an account</strong><p>Set up a 4–6 digit ledger PIN in Profile first. It protects the balances shown on your dashboard.</p></div><Link className="primary-button" href="/profile#security-heading">Go to PIN setup</Link></div>}
         <div className="payment-account-list">{paymentAccounts.map((account) => {
           const hasAuditHistory = reconciliations.some((item) => item.paymentAccountId === account.id);
-          return <div key={account.id} className="payment-account-item" aria-busy={accountAction === account.id}><div className="payment-account-summary"><span><strong>{paymentAccountLabel(account)}</strong><small>{formatMoney(account.currentBalanceMinor, profile.currency)} · checked {account.balanceAsOf}</small></span><div className="payment-account-actions">{hasAuditHistory ? <small className="account-audit-managed"><ShieldCheck size={14} />Reconciled</small> : <button type="button" className="text-button" disabled={Boolean(accountAction)} onClick={() => beginBalanceEdit(account)}>Correct opening balance</button>}<button type="button" className="icon-button danger" disabled={Boolean(accountAction) || hasAuditHistory} title={hasAuditHistory ? "Reconciled accounts retain their audit history and cannot be removed." : undefined} onClick={() => void removePaymentAccount(account.id)} aria-label={`Remove ${paymentAccountLabel(account)}`}>{accountAction === account.id ? <ButtonSpinner /> : <Trash size={16} />}</button></div></div>{editingBalanceId === account.id && !hasAuditHistory && <form className="account-balance-form" onSubmit={saveBalance}><NumberInput label="Opening balance" value={editingBalance} onChange={(value) => setEditingBalance(String(value))} decimalScale={2} thousandSeparator="," required disabled={Boolean(accountAction)} /><TextInput label="Balance as of" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={editingBalanceAsOf} onChange={(event) => setEditingBalanceAsOf(event.currentTarget.value)} required disabled={Boolean(accountAction)} /><div className="inline-actions"><button type="button" className="secondary-button" onClick={() => setEditingBalanceId(null)} disabled={Boolean(accountAction)}>Cancel</button><button className="primary-button" disabled={Boolean(accountAction)}>{accountAction === account.id ? <><ButtonSpinner />Saving…</> : "Save opening balance"}</button></div></form>}</div>;
+          return <div key={account.id} className="payment-account-item" aria-busy={accountAction === account.id}><div className="payment-account-summary"><span><strong>{paymentAccountLabel(account)}</strong><small>{formatMoney(account.currentBalanceMinor, profile.currency)} · checked {account.balanceAsOf}</small><span className="account-import-id"><span>CSV import ID</span><code>{account.importId}</code><button type="button" onClick={() => void copyImportId(account.importId)} aria-label={`Copy CSV import ID for ${paymentAccountLabel(account)}`}>{copiedImportId === account.importId ? <Check size={13} /> : <Copy size={13} />}{copiedImportId === account.importId ? "Copied" : "Copy"}</button></span></span><div className="payment-account-actions">{hasAuditHistory ? <small className="account-audit-managed"><ShieldCheck size={14} />Reconciled</small> : <button type="button" className="text-button" disabled={Boolean(accountAction)} onClick={() => beginBalanceEdit(account)}>Correct opening balance</button>}<button type="button" className="icon-button danger" disabled={Boolean(accountAction) || hasAuditHistory} title={hasAuditHistory ? "Reconciled accounts retain their audit history and cannot be removed." : undefined} onClick={() => void removePaymentAccount(account.id)} aria-label={`Remove ${paymentAccountLabel(account)}`}>{accountAction === account.id ? <ButtonSpinner /> : <Trash size={16} />}</button></div></div>{editingBalanceId === account.id && !hasAuditHistory && <form className="account-balance-form" onSubmit={saveBalance}><NumberInput label="Opening balance" value={editingBalance} onChange={(value) => setEditingBalance(String(value))} decimalScale={2} thousandSeparator="," required disabled={Boolean(accountAction)} /><TextInput label="Balance as of" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={editingBalanceAsOf} onChange={(event) => setEditingBalanceAsOf(event.currentTarget.value)} required disabled={Boolean(accountAction)} /><div className="inline-actions"><button type="button" className="secondary-button" onClick={() => setEditingBalanceId(null)} disabled={Boolean(accountAction)}>Cancel</button><button className="primary-button" disabled={Boolean(accountAction)}>{accountAction === account.id ? <><ButtonSpinner />Saving…</> : "Save opening balance"}</button></div></form>}</div>;
         })}{!paymentAccounts.length && <p>No tracked accounts yet.</p>}</div>
       </section>
 

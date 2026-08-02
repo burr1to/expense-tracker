@@ -664,6 +664,10 @@ h1, h2, strong { letter-spacing: -0.025em; }
 .payment-account-summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .payment-account-actions { display: flex; align-items: center; gap: 5px; }
 .payment-account-actions .text-button { font-size: 10px; }
+.account-import-id { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--muted); font-size: 9px; }
+.account-import-id code { max-width: min(260px, 42vw); overflow: hidden; color: var(--ink); font-family: "IBM Plex Mono", monospace; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; user-select: all; }
+.account-import-id button { display: inline-flex; align-items: center; gap: 3px; border: 0; padding: 2px 4px; background: transparent; color: var(--blue); font: inherit; font-weight: 750; cursor: pointer; }
+.account-import-id button:hover { color: var(--blue-dark); }
 .account-balance-form { display: grid; gap: 12px; margin-top: 12px; padding: 12px; border-radius: 10px; background: color-mix(in srgb, var(--blue) 6%, transparent); }
 .account-balance-form .inline-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .transfer-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }

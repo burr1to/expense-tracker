@@ -93,6 +93,7 @@ export interface CategoryDefinition {
 
 export interface PaymentAccount {
   id: string;
+  importId: string;
   userId: string;
   type: PaymentAccountType;
   provider: string;

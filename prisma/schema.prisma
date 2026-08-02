@@ -153,6 +153,7 @@ model SavedPlace {
 
 model PaymentAccount {
   id                String            @id @default(cuid())
+  importId          String            @default(dbgenerated("gen_random_uuid()::text"))
   userId            String
   type              String
   provider          String
@@ -169,6 +170,7 @@ model PaymentAccount {
   incomingTransfers AccountTransfer[] @relation("TransferTo")
 
   @@index([userId])
+  @@unique([userId, importId])
 }
 
 model AccountReconciliation {

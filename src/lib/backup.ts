@@ -40,6 +40,7 @@ export const backupEntitySchemas = {
     lastUsedAt: dateTime,
   }),
   payment_account: z.object({
+    importId: z.string().uuid().optional(),
     type: z.enum(["mobile_banking", "esewa", "khalti", "connect_ips"]),
     provider: z.string().trim().min(1).max(100),
     label: z.string().trim().max(60),

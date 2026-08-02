@@ -65,7 +65,7 @@ describe("transaction suggestions", () => {
       id: "online",
       paymentMode: "online",
       paymentAccountId: "account-1",
-      paymentAccount: { id: "account-1", userId: "user-1", type: "esewa", provider: "esewa", label: "Personal", balanceMinor: 0, balanceAsOf: "2026-01-01", balanceRecordedAt: "2026-01-01T00:00:00.000Z", currentBalanceMinor: 0, createdAt: "2026-01-01T00:00:00.000Z" },
+      paymentAccount: { id: "account-1", importId: "11111111-1111-4111-8111-111111111111", userId: "user-1", type: "esewa", provider: "esewa", label: "Personal", balanceMinor: 0, balanceAsOf: "2026-01-01", balanceRecordedAt: "2026-01-01T00:00:00.000Z", currentBalanceMinor: 0, createdAt: "2026-01-01T00:00:00.000Z" },
     });
 
     expect(getTransactionSuggestions([cash, online], "expense")).toHaveLength(2);
