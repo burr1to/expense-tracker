@@ -65,7 +65,7 @@ function BudgetsSection({ month, currency, transactions, budgets, recurringEntri
         const definition = getCategory(item.budget.category, customCategories);
         return <div className={`budget-alert ${item.tone}`} key={item.budget.id}><WarningCircle size={17} weight="fill" /><span><strong>{definition.label}: {item.alertTitle}</strong><small>{item.alertDetail}</small></span></div>;
       })}</div>}
-      {preview && previewDefinition && <div className="budget-row pending-preview" role="status"><div className="transaction-icon" style={{ "--category-color": previewDefinition.color } as CSSProperties}><CategoryIcon category={preview.category} /></div><div><div><strong>{previewDefinition.label}</strong><span>{formatMoney(0, currency)} of {formatMoney(previewMinor(preview.amount), currency)}</span></div><div className="bar-track"><span style={{ width: "0%", backgroundColor: previewDefinition.color }} /></div><small className="pending-label"><ButtonSpinner />Adding budget…</small></div><span /></div>}
+      {preview && previewDefinition && <div className="budget-row pending-preview" role="status"><div className="transaction-icon" style={{ "--category-color": previewDefinition.color } as CSSProperties}><CategoryIcon category={preview.category} icon={previewDefinition.icon} /></div><div><div><strong>{previewDefinition.label}</strong><span>{formatMoney(0, currency)} of {formatMoney(previewMinor(preview.amount), currency)}</span></div><div className="bar-track"><span style={{ width: "0%", backgroundColor: previewDefinition.color }} /></div><small className="pending-label"><ButtonSpinner />Adding budget…</small></div><span /></div>}
       {pacing.map((item) => {
         const budget = item.budget;
         const definition = getCategory(budget.category, customCategories);
@@ -73,7 +73,7 @@ function BudgetsSection({ month, currency, transactions, budgets, recurringEntri
         const spentWidth = Math.min(100, item.spentPercentage);
         const upcomingWidth = Math.max(0, Math.min(100 - spentWidth, item.projectedPercentage - item.spentPercentage));
         return <div className={`budget-row pacing-${item.tone}`} key={budget.id} aria-busy={deleting}>
-          <div className="transaction-icon" style={{ "--category-color": definition.color } as CSSProperties}><CategoryIcon category={budget.category} /></div>
+          <div className="transaction-icon" style={{ "--category-color": definition.color } as CSSProperties}><CategoryIcon category={budget.category} icon={definition.icon} /></div>
           <div className="budget-pacing-copy">
             <div><strong>{definition.label}</strong><span>{formatMoney(item.spentMinor, currency)} of {formatMoney(budget.amountMinor, currency)}</span></div>
             <div className="budget-progress" aria-label={`${item.spentPercentage}% spent${item.upcomingMinor ? `, ${item.projectedPercentage}% projected with upcoming expenses` : ""}`}>
@@ -183,8 +183,9 @@ function RecurringSection({ currency, recurringEntries, customCategories, onSave
         const ready = entry.nextDueOn <= today;
         const confirming = pendingEntry?.id === entry.id && pendingEntry.action === "confirm";
         const deleting = pendingEntry?.id === entry.id && pendingEntry.action === "delete";
+        const definition = getCategory(entry.category, customCategories);
         return <article key={entry.id} aria-busy={confirming || deleting}>
-          <div className="transaction-icon"><CategoryIcon category={entry.category} /></div>
+          <div className="transaction-icon"><CategoryIcon category={entry.category} icon={definition.icon} /></div>
           <div>
             <strong>{entry.note || getCategory(entry.category, customCategories).label}</strong>
             <span>{formatMoney(entry.amountMinor, currency)} · {recurrenceLabel(entry)}</span>

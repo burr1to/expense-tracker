@@ -5,13 +5,13 @@ import { format, parseISO } from "date-fns";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
-import { allCategoriesFor, getCategory, subcategoriesFor } from "../lib/categories";
+import { allCategoriesFor, getCategory, subcategoriesFor, subcategoryOptionsFor } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
 import { toDateInput } from "../lib/dates";
 import { discardReceipt, uploadReceipt } from "../lib/receipts";
 import { paymentAccountLabel } from "../lib/payment-accounts";
 import { getTransactionSuggestions, transactionSuggestionTitle, type TransactionSuggestion } from "../lib/transaction-suggestions";
-import type { CurrencyCode, CustomCategory, LedgerTransaction, PaymentAccount, PaymentMode, ReceiptUpload, SavedPlace, TransactionDraft, TransactionKind, TransactionLocationDraft } from "../types";
+import type { CurrencyCode, CustomCategory, CustomSubcategory, LedgerTransaction, PaymentAccount, PaymentMode, ReceiptUpload, SavedPlace, TransactionDraft, TransactionKind, TransactionLocationDraft } from "../types";
 import { CategoryIcon } from "./CategoryIcon";
 import { ButtonSpinner } from "./ButtonSpinner";
 import { LedgerDatePickerInput as DatePickerInput } from "./LedgerDatePickerInput";
@@ -43,6 +43,7 @@ interface TransactionFormProps {
   initialLocation?: TransactionLocationDraft | null;
   transactions: LedgerTransaction[];
   customCategories: CustomCategory[];
+  customSubcategories: CustomSubcategory[];
   paymentAccounts: PaymentAccount[];
   savedPlaces: SavedPlace[];
   onClose: () => void;
@@ -61,7 +62,7 @@ function locationFromTransaction(transaction?: LedgerTransaction | null): Transa
   } : null;
 }
 
-export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, initialLocation, transactions, customCategories, paymentAccounts, savedPlaces, onClose, onSave }: TransactionFormProps) {
+export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, initialLocation, transactions, customCategories, customSubcategories, paymentAccounts, savedPlaces, onClose, onSave }: TransactionFormProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ReceiptUpload | undefined>();
   const [removeReceipt, setRemoveReceipt] = useState(false);
@@ -102,6 +103,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
   const paymentMode = watch("paymentMode");
   const suggestions = useMemo(() => getTransactionSuggestions(transactions, kind, suggestionQuery), [kind, suggestionQuery, transactions]);
   const subcategory = subcategoriesFor(category);
+  const subcategoryOptions = subcategoryOptionsFor(category, customSubcategories);
   const categoryColor = allCategoriesFor(kind, customCategories).find((item) => item.id === category)?.color ?? "#557f69";
   const discardAndClose = () => { if (receiptUploading) return; if (receipt) void discardReceipt(receipt); onClose(); };
 
@@ -185,7 +187,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
                 const definition = getCategory(previous.category, customCategories);
                 const payment = previous.paymentMode === "online" ? previous.paymentAccount ? paymentAccountLabel(previous.paymentAccount) : "Online" : previous.paymentMode === "cheque" ? "Cheque" : "Cash";
                 return <button key={previous.id} type="button" className={appliedSuggestionId === previous.id ? "repeat-suggestion selected" : "repeat-suggestion"} aria-pressed={appliedSuggestionId === previous.id} onClick={() => applySuggestion(suggestion)}>
-                  <span className="repeat-suggestion-icon" style={{ "--category-color": definition.color } as CSSProperties}><CategoryIcon category={previous.category} size={18} /></span>
+                  <span className="repeat-suggestion-icon" style={{ "--category-color": definition.color } as CSSProperties}><CategoryIcon category={previous.category} icon={definition.icon} size={18} /></span>
                   <span className="repeat-suggestion-copy"><strong>{transactionSuggestionTitle(previous) || definition.label}</strong><small>{definition.label} · {payment}</small></span>
                   <span className="repeat-suggestion-value"><strong>{formatMoney(previous.amountMinor, currency)}</strong><small>{suggestion.useCount > 1 ? `Used ${suggestion.useCount}×` : format(parseISO(previous.occurredOn), "MMM d")}</small></span>
                 </button>;
@@ -205,7 +207,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
             <div className="category-grid">
               {allCategoriesFor(kind, customCategories).map((item) => (
                 <button key={item.id} type="button" className={category === item.id ? "category-choice selected" : "category-choice"} onClick={() => { setValue("category", item.id, { shouldValidate: true }); setValue("subcategory", ""); setValue("area", ""); setLocation(null); }}>
-                  <span style={{ "--category-color": item.color } as CSSProperties}><CategoryIcon category={item.id} /></span>
+                  <span style={{ "--category-color": item.color } as CSSProperties}><CategoryIcon category={item.id} icon={item.icon} /></span>
                   {item.label}
                   {category === item.id && <Check size={15} weight="bold" />}
                 </button>
@@ -213,7 +215,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
             </div>
           </fieldset>
 
-          {subcategory.options.length ? <fieldset className="subcategory-fieldset"><legend>{subcategory.label} <span>Optional</span></legend><Controller control={control} name="subcategory" render={({ field }) => <div className="subcategory-grid">{subcategory.options.map((value) => <button key={value} type="button" className={field.value === value ? "subcategory-choice selected" : "subcategory-choice"} aria-pressed={field.value === value} onClick={() => field.onChange(field.value === value ? "" : value)}><span style={{ "--category-color": categoryColor } as CSSProperties}><SubcategoryIcon subcategory={value} /></span>{value}{field.value === value && <Check size={14} weight="bold" />}</button>)}</div>} /></fieldset> : <TextInput label={subcategory.label} description="Optional" placeholder="Add more detail" {...register("subcategory")} />}
+          {subcategoryOptions.length ? <fieldset className="subcategory-fieldset"><legend>{subcategory.label} <span>Optional</span></legend><Controller control={control} name="subcategory" render={({ field }) => <div className="subcategory-grid">{subcategoryOptions.map((option) => <button key={option.name} type="button" className={field.value === option.name ? "subcategory-choice selected" : "subcategory-choice"} aria-pressed={field.value === option.name} onClick={() => field.onChange(field.value === option.name ? "" : option.name)}><span style={{ "--category-color": categoryColor } as CSSProperties}><SubcategoryIcon subcategory={option.name} icon={option.icon} /></span>{option.name}{field.value === option.name && <Check size={14} weight="bold" />}</button>)}</div>} /></fieldset> : <TextInput label={subcategory.label} description="Optional" placeholder="Add more detail" {...register("subcategory")} />}
           <div className="transaction-location-field">
             <Controller control={control} name="area" render={({ field }) => <TextInput label={subcategory.areaLabel ?? "Where did this happen?"} description="Optional · Kathmandu only for exact pins" placeholder={subcategory.areaPlaceholder ?? "Type an area or choose an exact location"} value={field.value} onChange={(event) => { field.onChange(event); if (location && event.currentTarget.value !== location.label) setLocation(null); }} />} />
             <button type="button" className={location ? "location-select-button selected" : "location-select-button"} onClick={() => setLocationPickerOpen(true)}><MapPin size={18} weight={location ? "fill" : "regular"} /><span><strong>{location ? "Exact location selected" : "Choose on Kathmandu map"}</strong><small>{location ? `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}` : "Use current location, search, or drop a pin"}</small></span></button>

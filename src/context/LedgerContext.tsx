@@ -4,24 +4,27 @@
 import { addDays, format } from "date-fns";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { majorToMinor } from "../lib/currency";
-import type { AccountReconciliation, AccountTransfer, Budget, CustomCategory, DueDraft, DueItem, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, ReceiptUpload, RecurringDraft, RecurringEntry, SavedPlace, SavedPlaceDraft, SavingsGoal, TransactionDraft, TransactionKind } from "../types";
+import type { AccountReconciliation, AccountTransfer, Budget, CategoryIconName, CustomCategory, CustomSubcategory, DueDraft, DueItem, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, ReceiptUpload, RecurringDraft, RecurringEntry, SavedPlace, SavedPlaceDraft, SavingsGoal, TransactionDraft, TransactionKind } from "../types";
+import type { CsvCategoryDraft, CsvSubcategoryDraft } from "../lib/csv";
 import { useAuth } from "./AuthContext";
 
 interface BudgetDraft { category: string; amount: string; monthKey: string }
 interface GoalDraft { name: string; target: string; saved: string; targetDate: string }
-interface CategoryDraft { name: string; kind: TransactionKind | "both"; color: string }
+interface CategoryDraft { name: string; kind: TransactionKind | "both"; color: string; icon: CategoryIconName }
+interface SubcategoryDraft { categoryId: string; name: string; icon: CategoryIconName }
 interface PaymentAccountDraft { type: PaymentAccountType; provider: string; label: string; balance: string; balanceAsOf: string }
 interface AccountTransferDraft { fromAccountId: string; toAccountId: string; amount: string; occurredOn: string; note: string }
-interface LedgerData { profile: Profile; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; goals: SavingsGoal[]; customCategories: CustomCategory[]; paymentAccounts: PaymentAccount[]; reconciliations: AccountReconciliation[]; savedPlaces: SavedPlace[]; transfers: AccountTransfer[]; dueItems: DueItem[] }
+interface LedgerData { profile: Profile; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; goals: SavingsGoal[]; customCategories: CustomCategory[]; customSubcategories: CustomSubcategory[]; paymentAccounts: PaymentAccount[]; reconciliations: AccountReconciliation[]; savedPlaces: SavedPlace[]; transfers: AccountTransfer[]; dueItems: DueItem[] }
 export interface BackupRestoreResult { restoredAt: string; exportedAt: string; counts: Record<string, number> }
 interface LedgerContextValue extends LedgerData {
   loading: boolean; error: string | null;
-  saveTransaction: (draft: TransactionDraft, id?: string) => Promise<string | undefined>; importTransactions: (drafts: TransactionDraft[]) => Promise<number>; saveReceiptSplit: (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => Promise<number>; deleteTransaction: (id: string) => Promise<void>; restoreTransaction: (id: string) => Promise<void>;
+  saveTransaction: (draft: TransactionDraft, id?: string) => Promise<string | undefined>; importTransactions: (drafts: TransactionDraft[], newCategories?: CsvCategoryDraft[], newSubcategories?: CsvSubcategoryDraft[]) => Promise<number>; saveReceiptSplit: (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => Promise<number>; deleteTransaction: (id: string) => Promise<void>; restoreTransaction: (id: string) => Promise<void>;
   saveSavedPlace: (draft: SavedPlaceDraft, id?: string) => Promise<void>; deleteSavedPlace: (id: string) => Promise<void>;
   saveBudget: (draft: BudgetDraft, id?: string) => Promise<void>; deleteBudget: (id: string) => Promise<void>;
   saveRecurring: (draft: RecurringDraft, id?: string) => Promise<void>; deleteRecurring: (id: string) => Promise<void>; confirmRecurring: (id: string) => Promise<void>;
   saveGoal: (draft: GoalDraft, id?: string) => Promise<void>; contributeToGoal: (id: string, amount: string) => Promise<void>; deleteGoal: (id: string) => Promise<void>;
-  saveCustomCategory: (draft: CategoryDraft) => Promise<void>; deleteCustomCategory: (id: string) => Promise<void>;
+  saveCustomCategory: (draft: CategoryDraft) => Promise<void>; updateCustomCategoryIcon: (id: string, icon: CategoryIconName) => Promise<void>; deleteCustomCategory: (id: string) => Promise<void>;
+  saveCustomSubcategory: (draft: SubcategoryDraft) => Promise<void>; deleteCustomSubcategory: (id: string) => Promise<void>;
   savePaymentAccount: (draft: PaymentAccountDraft) => Promise<void>; updatePaymentAccountBalance: (id: string, balance: string, balanceAsOf: string) => Promise<void>; deletePaymentAccount: (id: string) => Promise<void>;
   approveAccountReconciliation: (paymentAccountId: string, monthKey: string, checkedOn: string, actualBalance: string, adjustmentNote: string) => Promise<void>;
   saveTransfer: (draft: AccountTransferDraft) => Promise<void>; deleteTransfer: (id: string) => Promise<void>;
@@ -35,7 +38,7 @@ interface LedgerContextValue extends LedgerData {
 }
 
 const emptyProfile: Profile = { id: "", displayName: "Personal ledger", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, hasPin: false };
-const emptyData: LedgerData = { profile: emptyProfile, transactions: [], budgets: [], recurringEntries: [], goals: [], customCategories: [], paymentAccounts: [], reconciliations: [], savedPlaces: [], transfers: [], dueItems: [] };
+const emptyData: LedgerData = { profile: emptyProfile, transactions: [], budgets: [], recurringEntries: [], goals: [], customCategories: [], customSubcategories: [], paymentAccounts: [], reconciliations: [], savedPlaces: [], transfers: [], dueItems: [] };
 const LedgerContext = createContext<LedgerContextValue | null>(null);
 const splitTags = (value: string) => [...new Set(value.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean))].slice(0, 8);
 
@@ -77,7 +80,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     });
     return savedId;
   }, [data.transactions, mutate]);
-  const importTransactions = useCallback(async (drafts: TransactionDraft[]) => { await mutate("importTransactions", drafts.map(transactionPayload)); return drafts.length; }, [mutate]);
+  const importTransactions = useCallback(async (drafts: TransactionDraft[], newCategories: CsvCategoryDraft[] = [], newSubcategories: CsvSubcategoryDraft[] = []) => { await mutate("importTransactions", { transactions: drafts.map(transactionPayload), newCategories, newSubcategories }); return drafts.length; }, [mutate]);
   const saveReceiptSplit = useCallback(async (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => {
     await mutate("saveReceiptSplit", { transactions: drafts.map(transactionPayload), receipt, totalMinor });
     return drafts.length;
@@ -106,7 +109,10 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const contributeToGoal = useCallback(async (id: string, amount: string) => mutate("contributeToGoal", { amountMinor: majorToMinor(amount) }, id), [mutate]);
   const deleteGoal = useCallback(async (id: string) => mutate("deleteGoal", undefined, id), [mutate]);
   const saveCustomCategory = useCallback(async (draft: CategoryDraft) => mutate("saveCustomCategory", draft), [mutate]);
+  const updateCustomCategoryIcon = useCallback(async (id: string, icon: CategoryIconName) => mutate("updateCustomCategoryIcon", { icon }, id), [mutate]);
   const deleteCustomCategory = useCallback(async (id: string) => mutate("deleteCustomCategory", undefined, id), [mutate]);
+  const saveCustomSubcategory = useCallback(async (draft: SubcategoryDraft) => mutate("saveCustomSubcategory", draft), [mutate]);
+  const deleteCustomSubcategory = useCallback(async (id: string) => mutate("deleteCustomSubcategory", undefined, id), [mutate]);
   const savePaymentAccount = useCallback(async (draft: PaymentAccountDraft) => mutate("savePaymentAccount", { type: draft.type, provider: draft.provider, label: draft.label, balanceMinor: majorToMinor(draft.balance), balanceAsOf: draft.balanceAsOf }), [mutate]);
   const updatePaymentAccountBalance = useCallback(async (id: string, balance: string, balanceAsOf: string) => mutate("updatePaymentAccountBalance", { balanceMinor: majorToMinor(balance), balanceAsOf }, id), [mutate]);
   const approveAccountReconciliation = useCallback(async (paymentAccountId: string, monthKey: string, checkedOn: string, actualBalance: string, adjustmentNote: string) => mutate("approveAccountReconciliation", { paymentAccountId, monthKey, checkedOn, actualBalanceMinor: majorToMinor(actualBalance), adjustmentNote: adjustmentNote.trim() }), [mutate]);
@@ -138,7 +144,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const updateProfile = useCallback(async (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes">>) => mutate("updateProfile", { ...data.profile, ...changes }), [data.profile, mutate]);
   const resetDemo = useCallback(() => undefined, []);
 
-  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, saveTransaction, importTransactions, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, deleteCustomCategory, savePaymentAccount, updatePaymentAccountBalance, approveAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, resetDemo }), [data, loading, error, saveTransaction, importTransactions, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, deleteCustomCategory, savePaymentAccount, updatePaymentAccountBalance, approveAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, resetDemo]);
+  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, saveTransaction, importTransactions, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, approveAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, resetDemo }), [data, loading, error, saveTransaction, importTransactions, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, approveAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, resetDemo]);
   return <LedgerContext.Provider value={value}>{children}</LedgerContext.Provider>;
 }
 

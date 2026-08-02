@@ -486,6 +486,13 @@ h1, h2, strong { letter-spacing: -0.025em; }
 .import-dialog header { display: flex; justify-content: space-between; }
 .import-dialog h2 { margin: 0; }
 .import-errors { display: grid; gap: 5px; background: #fff0ee; color: #9b342e; padding: 13px; border-radius: 9px; margin: 18px 0; font-size: 12px; }
+.import-new-categories { display: grid; gap: 13px; margin: 18px 0; padding: 15px; border-radius: 12px; background: color-mix(in srgb, var(--blue) 7%, var(--paper)); }
+.import-new-categories > div:first-child { display: grid; gap: 3px; }
+.import-new-categories > div:first-child span { color: var(--muted); font-size: 11px; }
+.import-new-categories > div:not(:first-child) { display: grid; grid-template-columns: minmax(100px, .4fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.import-new-categories > div:not(:first-child) > span { display: grid; gap: 2px; }
+.import-new-categories small { color: var(--muted); text-transform: capitalize; }
+.import-new-categories .category-icon-picker > div { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .import-preview { margin: 18px 0; border-top: 1px solid var(--line); }
 .import-preview > div { display: grid; grid-template-columns: 95px 1fr 80px 110px; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; }
@@ -650,14 +657,30 @@ h1, h2, strong { letter-spacing: -0.025em; }
 .insight-snapshot > div:last-child > div { display: grid; gap: 2px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .insight-snapshot > div:last-child > div:last-child { padding-bottom: 0; border-bottom: 0; }
 .insight-snapshot span { color: var(--muted); font-size: 11px; }
-.category-creator { display: grid; grid-template-columns: 1fr 120px; column-gap: 9px; row-gap: 14px; }
+.category-creator, .subcategory-creator { display: grid; grid-template-columns: 1fr 120px; column-gap: 9px; row-gap: 14px; }
 .color-picker { grid-column: 1 / -1; display: flex; gap: 7px; margin-top: 5px; }
 .color-picker button { width: 26px; height: 26px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; }
 .color-picker button.active { border-color: var(--paper-strong); outline: 2px solid var(--ink); }
-.category-creator .form-error, .category-creator .primary-button { grid-column: 1 / -1; }
+.category-creator .form-error, .category-creator .primary-button, .subcategory-creator > .form-error, .subcategory-creator > .primary-button { grid-column: 1 / -1; }
+.category-icon-picker { grid-column: 1 / -1; min-width: 0; margin: 0; padding: 0; border: 0; }
+.category-icon-picker legend { margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.category-icon-picker > div { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.category-icon-picker button { min-width: 0; display: flex; align-items: center; gap: 5px; border: 1px solid var(--line); border-radius: 8px; padding: 7px; background: rgba(255,255,255,.35); color: var(--muted); cursor: pointer; }
+.category-icon-picker button span { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.category-icon-picker button.active { border-color: var(--blue); background: color-mix(in srgb, var(--blue) 9%, transparent); color: var(--blue); }
+.category-icon-picker button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .custom-category-list { margin-top: 22px; border-top: 1px solid var(--line); }
-.custom-category-list > div { display: grid; grid-template-columns: 10px 1fr auto 36px; gap: 9px; align-items: center; min-height: 44px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.custom-category-list > div { display: grid; grid-template-columns: 34px minmax(0, 1fr) 135px 36px; gap: 9px; align-items: center; min-height: 54px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.custom-category-list > div > span:nth-child(2), .custom-subcategory-list > div > span:nth-child(2) { min-width: 0; display: grid; gap: 2px; }
 .custom-category-list small, .custom-category-list p { color: var(--muted); }
+.custom-taxonomy-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: color-mix(in srgb, var(--category-color, var(--blue)) 12%, transparent); color: var(--category-color, var(--blue)); }
+.category-icon-select { min-width: 0; }
+.category-icon-select input { font-size: 10px; }
+.subcategory-creator { grid-template-columns: 1fr; }
+.custom-subcategory-list { margin-top: 22px; border-top: 1px solid var(--line); }
+.custom-subcategory-list > div { min-height: 52px; display: grid; grid-template-columns: 34px minmax(0, 1fr) 36px; gap: 9px; align-items: center; border-bottom: 1px solid var(--line); }
+.custom-subcategory-list small, .custom-subcategory-list > p { color: var(--muted); font-size: 10px; }
+.taxonomy-panel { align-content: start; }
 .payment-account-list { margin-top: 18px; border-top: 1px solid var(--line); }
 .payment-account-list > div { min-height: 51px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
 .payment-account-list > div.payment-account-item { display: block; padding: 12px 0; }
@@ -1143,6 +1166,8 @@ body[data-hide-amounts="true"] :is(.amount, .map-amount, .summary-strip strong, 
   .settings-section-heading { margin-bottom: 10px; font-size: 15px; }
   .settings-page .settings-grid { margin: 0 -14px; border-right: 0; border-left: 0; border-radius: 0; }
   .settings-page .settings-panel { margin: 0; padding: 24px 20px; border-right: 0; border-left: 0; border-radius: 0; background: transparent; }
+  .custom-category-list > div { grid-template-columns: 34px minmax(0, 1fr) 36px; }
+  .custom-category-list .category-icon-select { grid-column: 2 / -1; grid-row: 2; margin: 0 0 8px; }
   .account-balance-card { margin: 0 -14px 16px; padding: 16px 20px; border-right: 0; border-left: 0; border-radius: 0; }
   .account-balance-heading h2 { font-size: 26px; }
   .account-balance-list { grid-template-columns: 1fr; }
@@ -1215,7 +1240,9 @@ body[data-hide-amounts="true"] :is(.amount, .map-amount, .summary-strip strong, 
   .insight-snapshot { display: none; }
   .category-creator { grid-template-columns: 1fr; }
   .category-creator > * { grid-column: 1 !important; }
+  .category-icon-picker > div { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .import-dialog { width: 100%; max-height: 92vh; border-radius: 18px 18px 0 0; padding: 20px; align-self: end; }
+  .import-new-categories > div:not(:first-child) { grid-template-columns: 1fr; }
   .import-preview > div { grid-template-columns: 75px 1fr 80px; }
   .import-preview > div span:last-child { grid-column: 2 / -1; }
   .maps-header { display: grid; }

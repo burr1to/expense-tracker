@@ -4,6 +4,7 @@ export type AppView = "home" | "plan" | "dues" | "reports" | "transactions" | "a
 export type TransactionCategory = string;
 export type PaymentMode = "cash" | "cheque" | "online";
 export type PaymentAccountType = "mobile_banking" | "esewa" | "khalti" | "connect_ips";
+export type CategoryIconName = "tag" | "money" | "work" | "gift" | "home" | "food" | "transport" | "utilities" | "shopping" | "health" | "entertainment" | "education" | "travel";
 export type RecurrenceUnit = "week" | "month" | "year";
 
 export interface Profile {
@@ -88,6 +89,7 @@ export interface CategoryDefinition {
   label: string;
   kind: TransactionKind | "both";
   color: string;
+  icon?: CategoryIconName;
   custom?: boolean;
 }
 
@@ -194,6 +196,16 @@ export interface CustomCategory extends CategoryDefinition {
   userId: string;
   name: string;
   custom: true;
+  icon: CategoryIconName;
+}
+
+export interface CustomSubcategory {
+  id: string;
+  userId: string;
+  categoryId: TransactionCategory;
+  name: string;
+  icon: CategoryIconName;
+  createdAt: string;
 }
 
 export interface Insight {

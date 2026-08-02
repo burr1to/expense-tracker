@@ -47,9 +47,10 @@ async function receiptBase64(receipt: { storagePath: string | null; data?: Uint8
 
 async function buildBackup(userId: string) {
   const db = getPrisma();
-  const [user, categories, savedPlaces, accounts, reconciliations, transactions, transfers, budgets, recurring, goals, dues, receipts, receiptScans] = await Promise.all([
+  const [user, categories, subcategories, savedPlaces, accounts, reconciliations, transactions, transfers, budgets, recurring, goals, dues, receipts, receiptScans] = await Promise.all([
     db.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true, currency: true, hideAmounts: true, autoLockMinutes: true } }),
     db.customCategory.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
+    db.customSubcategory.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     db.savedPlace.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     db.paymentAccount.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     db.accountReconciliation.findMany({ where: { userId }, orderBy: { approvedAt: "asc" } }),
@@ -67,7 +68,8 @@ async function buildBackup(userId: string) {
   const records: BackupRecord[] = [
     { entity: "metadata", backupId: "backup", payload: { app: "SaveYoRupee", exportedAt: new Date().toISOString() } },
     { entity: "profile", backupId: "profile", payload: { displayName: user.name, currency: user.currency, hideAmounts: user.hideAmounts, autoLockMinutes: user.autoLockMinutes } },
-    ...categories.map((item): BackupRecord => ({ entity: "custom_category", backupId: item.id, payload: { name: item.name, kind: item.kind, color: item.color, createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt) } })),
+    ...categories.map((item): BackupRecord => ({ entity: "custom_category", backupId: item.id, payload: { name: item.name, kind: item.kind, color: item.color, icon: item.icon, createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt) } })),
+    ...subcategories.map((item): BackupRecord => ({ entity: "custom_subcategory", backupId: item.id, payload: { categoryId: item.categoryId, name: item.name, icon: item.icon, createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt) } })),
     ...savedPlaces.map((item): BackupRecord => ({ entity: "saved_place", backupId: item.id, payload: { name: item.name, icon: item.icon, address: item.address, latitude: item.latitude, longitude: item.longitude, createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt), lastUsedAt: iso(item.lastUsedAt) } })),
     ...accounts.map((item): BackupRecord => ({ entity: "payment_account", backupId: item.id, payload: { importId: item.importId, type: item.type, provider: item.provider, label: item.label, balanceMinor: item.balanceMinor, balanceAsOf: dateOnly(item.balanceAsOf), balanceRecordedAt: iso(item.balanceRecordedAt), createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt) } })),
     ...reconciliations.map((item): BackupRecord => ({ entity: "account_reconciliation", backupId: item.id, payload: { paymentAccountId: item.paymentAccountId, monthKey: item.monthKey, checkedOn: dateOnly(item.checkedOn), startingBalanceMinor: item.startingBalanceMinor, startingBalanceAsOf: dateOnly(item.startingBalanceAsOf), incomeMinor: item.incomeMinor, expenseMinor: item.expenseMinor, transfersInMinor: item.transfersInMinor, transfersOutMinor: item.transfersOutMinor, expectedBalanceMinor: item.expectedBalanceMinor, actualBalanceMinor: item.actualBalanceMinor, adjustmentMinor: item.adjustmentMinor, adjustmentNote: item.adjustmentNote, approvedAt: iso(item.approvedAt), createdAt: iso(item.createdAt) } })),
@@ -153,6 +155,7 @@ async function restoreBackup(userId: string, csv: string) {
   const parsed = parseBackupCsv(csv);
   const profile = recordsOf(parsed.records, "profile")[0].payload;
   const categories = recordsOf(parsed.records, "custom_category");
+  const subcategories = recordsOf(parsed.records, "custom_subcategory");
   const places = recordsOf(parsed.records, "saved_place");
   const accounts = recordsOf(parsed.records, "payment_account");
   const reconciliations = recordsOf(parsed.records, "account_reconciliation");
@@ -182,6 +185,7 @@ async function restoreBackup(userId: string, csv: string) {
   }
 
   const categoryIds = new Map(categories.map((record) => [record.backupId, crypto.randomUUID()]));
+  const subcategoryIds = new Map(subcategories.map((record) => [record.backupId, crypto.randomUUID()]));
   const placeIds = new Map(places.map((record) => [record.backupId, crypto.randomUUID()]));
   const accountIds = new Map(accounts.map((record) => [record.backupId, crypto.randomUUID()]));
   const reconciliationIds = new Map(reconciliations.map((record) => [record.backupId, crypto.randomUUID()]));
@@ -211,10 +215,12 @@ async function restoreBackup(userId: string, csv: string) {
       await transaction.recurringEntry.deleteMany({ where: { userId } });
       await transaction.paymentAccount.deleteMany({ where: { userId } });
       await transaction.savedPlace.deleteMany({ where: { userId } });
+      await transaction.customSubcategory.deleteMany({ where: { userId } });
       await transaction.customCategory.deleteMany({ where: { userId } });
       await transaction.user.update({ where: { id: userId }, data: { name: profile.displayName, currency: profile.currency, hideAmounts: profile.hideAmounts, autoLockMinutes: profile.autoLockMinutes } });
 
-      if (categories.length) await transaction.customCategory.createMany({ data: categories.map(({ backupId, payload }) => ({ id: categoryIds.get(backupId)!, userId, name: payload.name, kind: payload.kind, color: payload.color, createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
+      if (categories.length) await transaction.customCategory.createMany({ data: categories.map(({ backupId, payload }) => ({ id: categoryIds.get(backupId)!, userId, name: payload.name, kind: payload.kind, color: payload.color, icon: payload.icon, createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
+      if (subcategories.length) await transaction.customSubcategory.createMany({ data: subcategories.map(({ backupId, payload }) => ({ id: subcategoryIds.get(backupId)!, userId, categoryId: categoryId(payload.categoryId), name: payload.name, icon: payload.icon, createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
       if (places.length) await transaction.savedPlace.createMany({ data: places.map(({ backupId, payload }) => ({ id: placeIds.get(backupId)!, userId, name: payload.name, icon: payload.icon, address: payload.address, latitude: payload.latitude, longitude: payload.longitude, createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt), lastUsedAt: asDateTime(payload.lastUsedAt) })) });
       if (accounts.length) await transaction.paymentAccount.createMany({ data: accounts.map(({ backupId, payload }) => ({ id: accountIds.get(backupId)!, importId: payload.importId ?? crypto.randomUUID(), userId, type: payload.type, provider: payload.provider, label: payload.label, balanceMinor: payload.balanceMinor, balanceAsOf: asDate(payload.balanceAsOf), balanceRecordedAt: asDateTime(payload.balanceRecordedAt), createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
       if (reconciliations.length) await transaction.accountReconciliation.createMany({ data: reconciliations.map(({ backupId, payload }) => ({ id: reconciliationIds.get(backupId)!, userId, paymentAccountId: accountIds.get(payload.paymentAccountId)!, monthKey: payload.monthKey, checkedOn: asDate(payload.checkedOn), startingBalanceMinor: payload.startingBalanceMinor, startingBalanceAsOf: asDate(payload.startingBalanceAsOf), incomeMinor: payload.incomeMinor, expenseMinor: payload.expenseMinor, transfersInMinor: payload.transfersInMinor, transfersOutMinor: payload.transfersOutMinor, expectedBalanceMinor: payload.expectedBalanceMinor, actualBalanceMinor: payload.actualBalanceMinor, adjustmentMinor: payload.adjustmentMinor, adjustmentNote: payload.adjustmentNote, approvedAt: asDateTime(payload.approvedAt), createdAt: asDateTime(payload.createdAt) })) });

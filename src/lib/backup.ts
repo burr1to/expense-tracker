@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { CATEGORIES } from "./categories";
+import { CATEGORY_ICON_NAMES } from "./category-icons";
 import { RECEIPT_MAX_BYTES, RECEIPT_TYPES } from "./receipts";
 
 export const BACKUP_VERSION = "1";
@@ -26,6 +28,14 @@ export const backupEntitySchemas = {
     name: z.string().trim().min(1).max(30),
     kind: z.enum(["income", "expense", "both"]),
     color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    icon: z.enum(CATEGORY_ICON_NAMES).default("tag"),
+    createdAt: dateTime,
+    updatedAt: dateTime,
+  }),
+  custom_subcategory: z.object({
+    categoryId: z.string().min(1).max(200),
+    name: z.string().trim().min(1).max(80),
+    icon: z.enum(CATEGORY_ICON_NAMES),
     createdAt: dateTime,
     updatedAt: dateTime,
   }),
@@ -302,6 +312,7 @@ export function parseBackupCsv(input: string): ParsedBackup {
   if (metadataRows.length !== 1 || profileRows.length !== 1) throw new Error("A backup must contain exactly one metadata row and one profile row.");
 
   const accountIds = relationIds(records, "payment_account");
+  const categoryIds = relationIds(records, "custom_category");
   const placeIds = relationIds(records, "saved_place");
   const transactionIds = relationIds(records, "transaction");
   const goalIds = relationIds(records, "savings_goal");
@@ -313,7 +324,10 @@ export function parseBackupCsv(input: string): ParsedBackup {
       const value = payload[field];
       if (typeof value === "string" && !ids.has(value)) throw new Error(`${record.entity} ${record.backupId} references a missing ${field}.`);
     };
-    if (record.entity === "transaction") {
+    if (record.entity === "custom_subcategory") {
+      const categoryId = payload.categoryId;
+      if (typeof categoryId === "string" && !CATEGORIES.some((category) => category.id === categoryId) && !categoryIds.has(categoryId)) throw new Error(`custom_subcategory ${record.backupId} references a missing categoryId.`);
+    } else if (record.entity === "transaction") {
       requireRelation("paymentAccountId", accountIds);
       requireRelation("savedPlaceId", placeIds);
       requireRelation("receiptScanId", receiptScanIds);

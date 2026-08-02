@@ -11,6 +11,8 @@ describe("full backup CSV", () => {
   it("round-trips relational records, quoted text, and receipt bytes", () => {
     const records: BackupRecord[] = [
       ...baseRecords,
+      { entity: "custom_category", backupId: "category-1", payload: { name: "Investments", kind: "both", color: "#557f69", icon: "money", createdAt: exportedAt, updatedAt: exportedAt } },
+      { entity: "custom_subcategory", backupId: "subcategory-1", payload: { categoryId: "category-1", name: "Mutual funds", icon: "money", createdAt: exportedAt, updatedAt: exportedAt } },
       { entity: "payment_account", backupId: "account-1", payload: { importId: "11111111-1111-4111-8111-111111111111", type: "esewa", provider: "esewa", label: "Daily wallet", balanceMinor: 125000, balanceAsOf: "2026-07-25", balanceRecordedAt: exportedAt, createdAt: exportedAt, updatedAt: exportedAt } },
       { entity: "account_reconciliation", backupId: "reconciliation-1", payload: { paymentAccountId: "account-1", monthKey: "2026-07", checkedOn: "2026-07-25", startingBalanceMinor: 120000, startingBalanceAsOf: "2026-06-30", incomeMinor: 10000, expenseMinor: 5000, transfersInMinor: 0, transfersOutMinor: 0, expectedBalanceMinor: 125000, actualBalanceMinor: 125000, adjustmentMinor: 0, adjustmentNote: "", approvedAt: exportedAt, createdAt: exportedAt } },
       { entity: "transaction", backupId: "transaction-1", payload: { kind: "expense", category: "food", amountMinor: 75000, occurredOn: "2026-07-25", note: "Lunch, \"team\"\nSecond line", subcategory: "Lunch", area: "Thamel", paymentMode: "online", paymentAccountId: "account-1", locationLabel: null, locationAddress: null, locationLatitude: null, locationLongitude: null, locationAccuracy: null, locationSource: null, savedPlaceId: null, receiptScanId: "scan-1", createdAt: exportedAt, updatedAt: exportedAt } },
@@ -23,7 +25,7 @@ describe("full backup CSV", () => {
 
     expect(isFullBackupCsv(csv)).toBe(true);
     expect(parsed.metadata.exportedAt).toBe(exportedAt);
-    expect(parsed.counts).toEqual({ payment_account: 1, account_reconciliation: 1, transaction: 1, receipt: 1, receipt_scan: 1 });
+    expect(parsed.counts).toEqual({ custom_category: 1, custom_subcategory: 1, payment_account: 1, account_reconciliation: 1, transaction: 1, receipt: 1, receipt_scan: 1 });
     expect(parsed.records.find((record) => record.entity === "transaction")?.payload).toMatchObject({ note: "Lunch, \"team\"\nSecond line", paymentAccountId: "account-1", receiptScanId: "scan-1" });
   });
 
@@ -34,6 +36,15 @@ describe("full backup CSV", () => {
     ]);
 
     expect(() => parseBackupCsv(csv)).toThrow("references a missing paymentAccountId");
+  });
+
+  it("gives custom categories from older backups a safe default icon", () => {
+    const csv = serializeBackupCsv([
+      ...baseRecords,
+      { entity: "custom_category", backupId: "category-1", payload: { name: "Investments", kind: "both", color: "#557f69", createdAt: exportedAt, updatedAt: exportedAt } },
+    ]);
+
+    expect(parseBackupCsv(csv).records.find((record) => record.entity === "custom_category")?.payload).toMatchObject({ icon: "tag" });
   });
 
   it("rejects transactions linked to a missing receipt scan", () => {

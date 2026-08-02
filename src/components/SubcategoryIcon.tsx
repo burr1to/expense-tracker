@@ -5,6 +5,8 @@ import {
   PaintBrushHousehold, PencilLine, Pill, Receipt, ShieldCheck, ShoppingCart, Sparkle, Storefront,
   Stethoscope, Taxi, TestTube, Ticket, Tooth, TShirt, Wallet, Wrench, type Icon,
 } from "@phosphor-icons/react";
+import type { CategoryIconName } from "../types";
+import { LedgerIcon } from "./LedgerIcon";
 
 const icons: Record<string, Icon> = {
   Salary: CurrencyDollar, Bonus: Sparkle, Allowance: Wallet, Reimbursement: Receipt,
@@ -21,7 +23,8 @@ const icons: Record<string, Icon> = {
   Transport: AirplaneTilt, Stay: Bed, Food: ForkKnife, Activities: MapPin, "Visa / fees": FileText,
 };
 
-export function SubcategoryIcon({ subcategory, size = 19 }: { subcategory: string; size?: number }) {
+export function SubcategoryIcon({ subcategory, icon, size = 19 }: { subcategory: string; icon?: CategoryIconName; size?: number }) {
+  if (icon) return <LedgerIcon icon={icon} size={size} />;
   const IconComponent = icons[subcategory] ?? Storefront;
   return <IconComponent size={size} weight="regular" aria-hidden="true" />;
 }

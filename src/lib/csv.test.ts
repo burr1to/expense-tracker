@@ -48,4 +48,30 @@ describe("parseTransactionCsv", () => {
     expect(result.errors).toEqual([]);
     expect(result.rows[0].paymentAccountId).toBe("internal-account-1");
   });
+
+  it("collects unknown category names for atomic creation during import", () => {
+    const result = parseTransactionCsv("date,type,category,amount,payment mode\n2026-08-01,expense,Investments,1250,cash\n2026-08-02,income,Investments,2000,cash");
+
+    expect(result.errors).toEqual([]);
+    expect(result.newCategories).toEqual([{ key: "csv:investments", name: "Investments", kind: "both", icon: "tag" }]);
+    expect(result.rows.map((row) => row.category)).toEqual(["csv:investments", "csv:investments"]);
+  });
+
+  it("collects unknown subcategories beneath known and newly imported categories", () => {
+    const result = parseTransactionCsv("date,type,category,subcategory,amount\n2026-08-01,expense,Food & Dining,Meal prep,1250\n2026-08-02,expense,Investments,Index funds,2000");
+
+    expect(result.errors).toEqual([]);
+    expect(result.newSubcategories).toEqual([
+      { key: "csvsub:food:meal prep", category: "food", name: "Meal prep", icon: "tag" },
+      { key: "csvsub:csv:investments:index funds", category: "csv:investments", name: "Index funds", icon: "tag" },
+    ]);
+  });
+
+  it("does not create a category from an otherwise invalid row", () => {
+    const result = parseTransactionCsv("date,type,category,amount\n2026-08-01,expense,Investments,-10");
+
+    expect(result.rows).toEqual([]);
+    expect(result.newCategories).toEqual([]);
+    expect(result.newSubcategories).toEqual([]);
+  });
 });

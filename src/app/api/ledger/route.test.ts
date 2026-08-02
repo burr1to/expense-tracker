@@ -3,9 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const receiptScanCreate = vi.fn();
   const transactionCreateMany = vi.fn();
+  const customCategoryUpsert = vi.fn();
+  const customSubcategoryFindFirst = vi.fn();
+  const customSubcategoryCreate = vi.fn();
   const transactionClient = {
     receiptScan: { create: receiptScanCreate },
     transaction: { createMany: transactionCreateMany },
+    customCategory: { upsert: customCategoryUpsert },
+    customSubcategory: { findFirst: customSubcategoryFindFirst, create: customSubcategoryCreate },
   };
   const db = {
     user: { findUniqueOrThrow: vi.fn() },
@@ -13,7 +18,8 @@ const mocks = vi.hoisted(() => {
     budget: { findMany: vi.fn() },
     recurringEntry: { findMany: vi.fn() },
     savingsGoal: { findMany: vi.fn() },
-    customCategory: { findMany: vi.fn() },
+    customCategory: { findMany: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn() },
+    customSubcategory: { findMany: vi.fn(), findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
     paymentAccount: { count: vi.fn(), findMany: vi.fn() },
     accountReconciliation: { findFirst: vi.fn(), findMany: vi.fn() },
     savedPlace: { findMany: vi.fn() },
@@ -26,6 +32,9 @@ const mocks = vi.hoisted(() => {
     db,
     receiptScanCreate,
     transactionCreateMany,
+    customCategoryUpsert,
+    customSubcategoryFindFirst,
+    customSubcategoryCreate,
     verifyStoredReceipt: vi.fn(),
   };
 });
@@ -86,6 +95,7 @@ describe("saveReceiptSplit ledger action", () => {
     mocks.db.recurringEntry.findMany.mockResolvedValue([]);
     mocks.db.savingsGoal.findMany.mockResolvedValue([]);
     mocks.db.customCategory.findMany.mockResolvedValue([]);
+    mocks.db.customSubcategory.findMany.mockResolvedValue([]);
     mocks.db.paymentAccount.findMany.mockResolvedValue([]);
     mocks.db.paymentAccount.count.mockResolvedValue(0);
     mocks.db.accountReconciliation.findMany.mockResolvedValue([]);
@@ -96,10 +106,15 @@ describe("saveReceiptSplit ledger action", () => {
     mocks.db.receiptScan.count.mockResolvedValue(0);
     mocks.receiptScanCreate.mockResolvedValue({ id: "scan-1" });
     mocks.transactionCreateMany.mockResolvedValue({ count: 2 });
+    mocks.customCategoryUpsert.mockResolvedValue({ id: "category-investments" });
+    mocks.customSubcategoryFindFirst.mockResolvedValue(null);
+    mocks.customSubcategoryCreate.mockResolvedValue({ id: "subcategory-index-funds" });
     mocks.verifyStoredReceipt.mockResolvedValue(undefined);
     mocks.db.$transaction.mockImplementation(async (callback) => callback({
       receiptScan: { create: mocks.receiptScanCreate },
       transaction: { createMany: mocks.transactionCreateMany },
+      customCategory: { upsert: mocks.customCategoryUpsert },
+      customSubcategory: { findFirst: mocks.customSubcategoryFindFirst, create: mocks.customSubcategoryCreate },
     }));
   });
 
@@ -117,6 +132,60 @@ describe("saveReceiptSplit ledger action", () => {
       expect.objectContaining({ userId: "user-1", receiptScanId: "scan-1", category: "food", amountMinor: 700 }),
       expect.objectContaining({ userId: "user-1", receiptScanId: "scan-1", category: "other", amountMinor: 300 }),
     ] });
+  });
+
+  it("creates unknown CSV categories and their transactions atomically", async () => {
+    const response = await POST(new Request("http://localhost/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "importTransactions",
+        payload: {
+          newCategories: [{ key: "csv:investments", name: "Investments", kind: "expense", icon: "money" }],
+          newSubcategories: [{ key: "csvsub:csv:investments:index funds", category: "csv:investments", name: "Index funds", icon: "money" }],
+          transactions: [{ kind: "expense", category: "csv:investments", amountMinor: 125000, occurredOn: "2026-08-01", note: "Fund", subcategory: "Index funds", area: null, paymentMode: "cash", paymentAccountId: null }],
+        },
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.customCategoryUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ name: "Investments", icon: "money" }),
+    }));
+    expect(mocks.customSubcategoryCreate).toHaveBeenCalledWith({ data: { userId: "user-1", categoryId: "category-investments", name: "Index funds", icon: "money" } });
+    expect(mocks.transactionCreateMany).toHaveBeenCalledWith({ data: [expect.objectContaining({ category: "category-investments", userId: "user-1" })] });
+  });
+
+  it("adds a custom subcategory to an owned category", async () => {
+    mocks.db.customCategory.findFirst.mockResolvedValueOnce({ id: "category-investments" });
+    mocks.db.customSubcategory.findFirst.mockResolvedValueOnce(null);
+    mocks.db.customSubcategory.create.mockResolvedValueOnce({ id: "subcategory-funds" });
+
+    const response = await POST(new Request("http://localhost/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "saveCustomSubcategory", payload: { categoryId: "category-investments", name: "Mutual funds", icon: "money" } }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.db.customSubcategory.create).toHaveBeenCalledWith({ data: {
+      userId: "user-1",
+      categoryId: "category-investments",
+      name: "Mutual funds",
+      icon: "money",
+    } });
+  });
+
+  it("rejects custom subcategories that duplicate a built-in option", async () => {
+    const response = await POST(new Request("http://localhost/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "saveCustomSubcategory", payload: { categoryId: "food", name: "Lunch", icon: "food" } }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "That subcategory already exists." });
+    expect(mocks.db.customSubcategory.create).not.toHaveBeenCalled();
   });
 
   it("rejects an incomplete split before storage verification or database writes", async () => {
@@ -181,6 +250,7 @@ describe("transaction Undo ledger actions", () => {
     mocks.db.recurringEntry.findMany.mockResolvedValue([]);
     mocks.db.savingsGoal.findMany.mockResolvedValue([]);
     mocks.db.customCategory.findMany.mockResolvedValue([]);
+    mocks.db.customSubcategory.findMany.mockResolvedValue([]);
     mocks.db.paymentAccount.findMany.mockResolvedValue([]);
     mocks.db.accountReconciliation.findMany.mockResolvedValue([]);
     mocks.db.accountReconciliation.findFirst.mockResolvedValue(null);

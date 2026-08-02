@@ -29,7 +29,7 @@ export function TransactionRow({ transaction, currency, onDuplicate, onEdit, onD
   return (
     <article className={`transaction-row${compact ? " compact" : ""}${entering ? " is-new" : ""}`} aria-busy={deletePending}>
       <div className="transaction-icon" style={{ "--category-color": category.color } as CSSProperties}>
-        <CategoryIcon category={transaction.category} size={21} />
+        <CategoryIcon category={transaction.category} icon={category.icon} size={21} />
       </div>
       <div className="transaction-copy">
         <strong className="transaction-title">{transaction.note || category.label}</strong>

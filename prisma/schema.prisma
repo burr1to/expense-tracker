@@ -31,6 +31,7 @@ model User {
   goals             SavingsGoal[]
   goalContributions SavingsGoalContribution[]
   categories        CustomCategory[]
+  subcategories     CustomSubcategory[]
   dueItems          DueItem[]
   duePayments       DuePayment[]
   receipts          ReceiptAttachment[]
@@ -285,11 +286,26 @@ model CustomCategory {
   name      String
   kind      String
   color     String
+  icon      String   @default("tag")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, name])
+}
+
+model CustomSubcategory {
+  id         String   @id @default(cuid())
+  userId     String
+  categoryId String
+  name       String
+  icon       String   @default("tag")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, categoryId, name])
+  @@index([userId, categoryId])
 }
 
 model DueItem {

@@ -19,6 +19,7 @@ export default function TransactionsRoute() {
     currency={ledger.profile.currency}
     transactions={ledger.transactions}
     customCategories={ledger.customCategories}
+    customSubcategories={ledger.customSubcategories}
     paymentAccounts={ledger.paymentAccounts}
     onMonthChange={setMonth}
     onAdd={openAddForDate}

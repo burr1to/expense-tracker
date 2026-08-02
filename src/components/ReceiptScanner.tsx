@@ -3,11 +3,11 @@
 import { NumberInput, Select, TextInput } from "@mantine/core";
 import { Camera, Plus, Sparkle, Trash, WarningCircle, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { allCategoriesFor, getCategory, subcategoriesFor } from "../lib/categories";
+import { allCategoriesFor, getCategory, subcategoryOptionsFor } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
 import { discardReceipt, prepareReceiptPhoto, uploadReceipt } from "../lib/receipts";
 import { analysisToDrafts, draftTotalMinor, type ReceiptAnalysis } from "../lib/receipt-analysis";
-import type { CurrencyCode, CustomCategory, PaymentAccount, PaymentMode, ReceiptUpload, TransactionDraft } from "../types";
+import type { CurrencyCode, CustomCategory, CustomSubcategory, PaymentAccount, PaymentMode, ReceiptUpload, TransactionDraft } from "../types";
 import { ButtonSpinner } from "./ButtonSpinner";
 import { AnimatedOverlay } from "./AnimatedOverlay";
 import { LedgerDatePickerInput as DatePickerInput } from "./LedgerDatePickerInput";
@@ -17,13 +17,14 @@ interface ReceiptScannerProps {
   currency: CurrencyCode;
   fallbackOccurredOn: string;
   customCategories: CustomCategory[];
+  customSubcategories: CustomSubcategory[];
   paymentAccounts: PaymentAccount[];
   onSave: (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => Promise<number>;
 }
 
 type Stage = "ready" | "uploading" | "analyzing" | "reviewing" | "saving";
 
-export function ReceiptScanner({ currency, fallbackOccurredOn, customCategories, paymentAccounts, onSave }: ReceiptScannerProps) {
+export function ReceiptScanner({ currency, fallbackOccurredOn, customCategories, customSubcategories, paymentAccounts, onSave }: ReceiptScannerProps) {
   const [open, setOpen] = useState(false);
   const [stage, setStage] = useState<Stage>("ready");
   const [receipt, setReceipt] = useState<ReceiptUpload | null>(null);
@@ -210,7 +211,7 @@ export function ReceiptScanner({ currency, fallbackOccurredOn, customCategories,
 
           <div className="receipt-split-list">
             {drafts.map((draft, index) => {
-              const subcategories = subcategoriesFor(draft.category).options;
+              const subcategories = subcategoryOptionsFor(draft.category, customSubcategories);
               return <article className="receipt-split-card" key={index}>
                 <div className="receipt-split-heading"><span>Split {index + 1}</span><button className="icon-button danger-text" disabled={drafts.length === 1 || stage === "saving"} onClick={() => setDrafts((current) => current.filter((_, draftIndex) => draftIndex !== index))} aria-label={`Remove split ${index + 1}`}><Trash size={17} /></button></div>
                 <TextInput label="Description" value={draft.note} maxLength={80} onChange={(event) => updateDraft(index, { note: event.currentTarget.value })} />
@@ -218,7 +219,7 @@ export function ReceiptScanner({ currency, fallbackOccurredOn, customCategories,
                   <NumberInput label={`Amount in ${currency}`} value={draft.amount} min={0} decimalScale={2} thousandSeparator="," onChange={(value) => updateDraft(index, { amount: String(value) })} />
                   <Select label="Category" value={draft.category} data={categories.map((category) => ({ value: category.id, label: category.label }))} allowDeselect={false} onChange={(value) => value && updateDraft(index, { category: value, subcategory: "" })} />
                 </div>
-                {subcategories.length > 0 && <Select label="Subcategory" value={draft.subcategory || null} placeholder="Optional" data={[...subcategories]} clearable onChange={(value) => updateDraft(index, { subcategory: value ?? "" })} />}
+                {subcategories.length > 0 && <Select label="Subcategory" value={draft.subcategory || null} placeholder="Optional" data={subcategories.map((item) => item.name)} clearable onChange={(value) => updateDraft(index, { subcategory: value ?? "" })} />}
                 <small>{getCategory(draft.category, customCategories).label} · AI confidence {Math.round((analysis.splits[index]?.confidence ?? analysis.confidence) * 100)}%</small>
               </article>;
             })}

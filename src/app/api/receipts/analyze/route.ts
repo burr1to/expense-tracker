@@ -80,20 +80,21 @@ export async function POST(request: Request) {
     await verifyStoredReceipt(input.receipt.storagePath, session.user.id, input.receipt.mimeType, input.receipt.size);
 
     const db = getPrisma();
-    const [user, customCategories] = await Promise.all([
+    const [user, customCategories, customSubcategories] = await Promise.all([
       db.user.findUniqueOrThrow({ where: { id: session.user.id }, select: { currency: true } }),
       db.customCategory.findMany({ where: { userId: session.user.id }, select: { id: true, name: true, kind: true } }),
+      db.customSubcategory.findMany({ where: { userId: session.user.id }, select: { categoryId: true, name: true } }),
     ]);
     const categories: ReceiptAnalysisCategory[] = [
       ...CATEGORIES.filter((category) => category.kind === "expense" || category.kind === "both").map((category) => ({
         id: category.id,
         label: category.label,
-        subcategories: [...(SUBCATEGORIES[category.id]?.options ?? [])],
+        subcategories: [...(SUBCATEGORIES[category.id]?.options ?? []), ...customSubcategories.filter((item) => item.categoryId === category.id).map((item) => item.name)],
       })),
       ...customCategories.filter((category) => category.kind === "expense" || category.kind === "both").map((category) => ({
         id: category.id,
         label: category.name,
-        subcategories: [],
+        subcategories: customSubcategories.filter((item) => item.categoryId === category.id).map((item) => item.name),
       })),
     ];
     const internalInput = {
