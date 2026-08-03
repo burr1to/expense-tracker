@@ -701,7 +701,7 @@ h1, h2, strong { letter-spacing: -0.025em; }
 .transfer-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .transfer-row small { color: var(--muted); font-size: 10px; }
 .transfer-row > div { display: flex; align-items: center; gap: 8px; }
-.payment-account-list > div > span { min-width: 0; display: grid; gap: 3px; }
+.payment-account-summary > span { min-width: 0; display: grid; gap: 3px; }
 .payment-account-list strong { overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
 .payment-account-list small, .payment-account-list > p { color: var(--muted); font-size: 10px; }
 .accounts-page { display: grid; gap: 30px; }

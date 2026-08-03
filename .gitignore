@@ -11,4 +11,5 @@ coverage/
 supabase/.temp/
 *.tsbuildinfo
 *.md 
+design-qa.md
 artifacts/
