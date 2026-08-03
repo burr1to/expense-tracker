@@ -1,19 +1,31 @@
-import { Bell, CalendarBlank, Check, ClockCountdown, DownloadSimple, FilePdf, HandCoins, X } from "@phosphor-icons/react";
+import { Bell, CalendarBlank, Check, ClockCountdown, DownloadSimple, FilePdf, HandCoins, Repeat, X } from "@phosphor-icons/react";
+import { format } from "date-fns";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { dueDateLabel, dueRemaining, groupActionableDues, urgentDueCount, type DueUrgency } from "../lib/dues";
 import { formatMoney } from "../lib/currency";
-import type { CurrencyCode, DueItem } from "../types";
+import type { CurrencyCode, DueItem, TransactionKind } from "../types";
 import { ButtonSpinner } from "./ButtonSpinner";
 
-type ReminderAction = "complete" | "snooze";
+type ReminderAction = "complete" | "snooze" | "confirmRecurring";
+
+export interface RecurringReminder {
+  id: string;
+  kind: TransactionKind;
+  title: string;
+  amountMinor: number;
+  dueOn: string;
+  scheduleLabel: string;
+}
 
 interface ReminderBellProps {
   items: DueItem[];
   currency: CurrencyCode;
+  recurringEntries: RecurringReminder[];
   monthlyReport?: { monthKey: string; monthLabel: string; href: string } | null;
   onOpenDue: (id?: string, action?: "repay") => void;
   onComplete: (id: string, addToLedger: boolean) => Promise<void>;
   onSnooze: (id: string) => Promise<void>;
+  onConfirmRecurring: (id: string) => Promise<void>;
 }
 
 const groupLabels: Record<DueUrgency, string> = {
@@ -26,7 +38,16 @@ function completionLabel(item: DueItem) {
   return item.kind === "payment" ? "Paid" : "Received";
 }
 
-export function ReminderBell({ items, currency, monthlyReport, onOpenDue, onComplete, onSnooze }: ReminderBellProps) {
+function groupRecurringReminders(items: readonly RecurringReminder[], today: string) {
+  const groups: Record<DueUrgency, RecurringReminder[]> = { overdue: [], today: [], later: [] };
+  for (const item of items.filter((entry) => entry.dueOn <= today).sort((a, b) => a.dueOn.localeCompare(b.dueOn))) {
+    const urgency: DueUrgency = item.dueOn < today ? "overdue" : "today";
+    groups[urgency].push(item);
+  }
+  return groups;
+}
+
+export function ReminderBell({ items, currency, recurringEntries, monthlyReport, onOpenDue, onComplete, onSnooze, onConfirmRecurring }: ReminderBellProps) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState<{ id: string; action: ReminderAction } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,9 +55,13 @@ export function ReminderBell({ items, currency, monthlyReport, onOpenDue, onComp
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const groups = useMemo(() => groupActionableDues(items), [items]);
+  const recurringGroups = useMemo(() => groupRecurringReminders(recurringEntries, format(new Date(), "yyyy-MM-dd")), [recurringEntries]);
   const reminders = useMemo(() => [...groups.overdue, ...groups.today, ...groups.later], [groups]);
+  const recurringReminderCount = recurringGroups.overdue.length + recurringGroups.today.length + recurringGroups.later.length;
   const urgentCount = useMemo(() => urgentDueCount(items), [items]);
-  const notificationCount = reminders.length + (monthlyReport ? 1 : 0);
+  const recurringUrgentCount = recurringGroups.overdue.length + recurringGroups.today.length;
+  const totalUrgentCount = urgentCount + recurringUrgentCount;
+  const notificationCount = reminders.length + recurringReminderCount + (monthlyReport ? 1 : 0);
 
   const closePanel = (restoreFocus = false) => {
     setOpen(false);
@@ -82,23 +107,35 @@ export function ReminderBell({ items, currency, monthlyReport, onOpenDue, onComp
     }
   };
 
+  const confirmRecurring = async (item: RecurringReminder) => {
+    setPending({ id: item.id, action: "confirmRecurring" });
+    setError(null);
+    try {
+      await onConfirmRecurring(item.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not confirm this recurring entry.");
+    } finally {
+      setPending(null);
+    }
+  };
+
   return <div className="reminder-bell" ref={rootRef}>
     <button
       ref={triggerRef}
       id="money-reminders-trigger"
       className="reminder-trigger"
       onClick={() => setOpen((value) => !value)}
-      aria-label={`${urgentCount} urgent, ${notificationCount} total notifications`}
+      aria-label={`${totalUrgentCount} urgent, ${notificationCount} total notifications`}
       aria-expanded={open}
       aria-controls="money-reminders-panel"
       aria-haspopup="dialog"
     >
       <Bell size={20} weight={notificationCount ? "fill" : "regular"} />
-      {urgentCount > 0
-        ? <span>{urgentCount > 9 ? "9+" : urgentCount}</span>
+      {totalUrgentCount > 0
+        ? <span>{totalUrgentCount > 9 ? "9+" : totalUrgentCount}</span>
         : notificationCount > 0 && <i aria-hidden="true" />}
     </button>
-    <span className="sr-only" aria-live="polite">{urgentCount} urgent money reminders</span>
+    <span className="sr-only" aria-live="polite">{totalUrgentCount} urgent money reminders</span>
 
     {open && <section
       id="money-reminders-panel"
@@ -128,10 +165,15 @@ export function ReminderBell({ items, currency, monthlyReport, onOpenDue, onComp
           </a>
         </section>}
 
-        {(["overdue", "today", "later"] as DueUrgency[]).map((urgency) => groups[urgency].length > 0 && <section className={`reminder-group ${urgency}`} key={urgency} aria-labelledby={`reminder-group-${urgency}`}>
-          <h3 id={`reminder-group-${urgency}`}>{groupLabels[urgency]} <span>{groups[urgency].length}</span></h3>
+        {(["overdue", "today", "later"] as DueUrgency[]).map((urgency) => {
+          const dueGroup = groups[urgency];
+          const recurringGroup = recurringGroups[urgency];
+          const groupCount = dueGroup.length + recurringGroup.length;
+          if (!groupCount) return null;
+          return <section className={`reminder-group ${urgency}`} key={urgency} aria-labelledby={`reminder-group-${urgency}`}>
+          <h3 id={`reminder-group-${urgency}`}>{groupLabels[urgency]} <span>{groupCount}</span></h3>
           <div className="reminder-list">
-            {groups[urgency].map((item) => {
+            {dueGroup.map((item) => {
               const completing = pending?.id === item.id && pending.action === "complete";
               const snoozing = pending?.id === item.id && pending.action === "snooze";
               const disabled = pending?.id === item.id;
@@ -159,8 +201,29 @@ export function ReminderBell({ items, currency, monthlyReport, onOpenDue, onComp
                 </div>
               </article>;
             })}
+            {recurringGroup.map((item) => {
+              const confirming = pending?.id === item.id && pending.action === "confirmRecurring";
+              return <article className="reminder-item" key={`recurring-${item.id}`} aria-busy={confirming}>
+                <div className="reminder-item-main">
+                  <span className={`reminder-kind recurring ${item.kind}`}>
+                    <Repeat size={18} weight="duotone" />
+                  </span>
+                  <span className="reminder-copy">
+                    <strong>{item.title}</strong>
+                    <small>{dueDateLabel(item.dueOn)} · {item.scheduleLabel}</small>
+                  </span>
+                  <b className="reminder-item-amount">{formatMoney(item.amountMinor, currency)}</b>
+                </div>
+                <div className="reminder-actions">
+                  <button className="reminder-action primary" disabled={confirming} onClick={() => void confirmRecurring(item)}>
+                    {confirming ? <ButtonSpinner /> : <Check size={14} />}{confirming ? "Confirming…" : "Confirm"}
+                  </button>
+                </div>
+              </article>;
+            })}
           </div>
-        </section>)}
+        </section>;
+        })}
 
         {!notificationCount && <div className="reminder-empty">
           <span><Check size={22} weight="bold" /></span>

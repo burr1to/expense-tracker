@@ -761,6 +761,7 @@ h1, h2, strong { letter-spacing: -0.025em; }
 .reminder-kind { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--blue); background: #e8f5ed; }
 .reminder-kind.lent, .reminder-kind.receivable { color: var(--green); background: #e9f6f0; }
 .reminder-kind.borrowed, .reminder-kind.payment { color: #a65046; background: #faece8; }
+.reminder-kind.recurring { color: #815e16; background: #fbf2dc; }
 .reminder-copy { min-width: 0; display: grid; gap: 3px; }
 .reminder-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .reminder-copy small { overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }

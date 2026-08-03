@@ -5,7 +5,7 @@ export type TransactionCategory = string;
 export type PaymentMode = "cash" | "cheque" | "online";
 export type PaymentAccountType = "mobile_banking" | "esewa" | "khalti" | "connect_ips";
 export type CategoryIconName = "tag" | "money" | "work" | "gift" | "home" | "food" | "transport" | "utilities" | "shopping" | "health" | "entertainment" | "education" | "travel";
-export type RecurrenceUnit = "week" | "month" | "year";
+export type RecurrenceUnit = "day" | "week" | "month" | "year";
 
 export interface Profile {
   id: string;

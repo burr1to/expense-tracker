@@ -155,6 +155,7 @@ function RecurringSection({ currency, recurringEntries, customCategories, onSave
   };
   const runEntryAction = async (id: string, action: "confirm" | "delete") => { if (pendingEntry) return; setPendingEntry({ id, action }); try { setError(null); await (action === "confirm" ? onConfirmRecurring(id) : onDeleteRecurring(id)); } catch (caught) { setError(caught instanceof Error ? caught.message : `Could not ${action} recurring entry.`); } finally { setPendingEntry(null); } };
   const scheduleOptions = [
+    { value: "day:1", label: "Daily" },
     { value: "week:1", label: "Weekly" },
     { value: "week:2", label: "Every 2 weeks" },
     { value: "month:1", label: "Monthly" },

@@ -55,11 +55,11 @@ const recurringSchema = z.object({
   amountMinor: z.number().int().positive(),
   note: z.string().max(240),
   tags: z.array(z.string().max(40)).max(8),
-  recurrenceUnit: z.enum(["week", "month", "year"]),
-  recurrenceInterval: z.number().int().min(1).max(52),
+  recurrenceUnit: z.enum(["day", "week", "month", "year"]),
+  recurrenceInterval: z.number().int().min(1).max(365),
   startOn: z.string().date(),
 }).superRefine((value, context) => {
-  const maximum = value.recurrenceUnit === "week" ? 52 : value.recurrenceUnit === "month" ? 12 : 5;
+  const maximum = value.recurrenceUnit === "day" ? 365 : value.recurrenceUnit === "week" ? 52 : value.recurrenceUnit === "month" ? 12 : 5;
   if (value.recurrenceInterval > maximum) context.addIssue({ code: "custom", path: ["recurrenceInterval"], message: `This schedule cannot repeat more than every ${maximum} ${value.recurrenceUnit}s.` });
 });
 const goalSchema = z.object({ name: z.string().trim().min(1).max(80), targetMinor: z.number().int().positive(), savedMinor: z.number().int().min(0), targetDate: z.string().date().nullable() });

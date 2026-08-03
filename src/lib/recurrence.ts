@@ -36,6 +36,7 @@ function targetMonth(year: number, month: number, offset: number) {
 
 export function nextRecurringOccurrence(schedule: RecurrenceSchedule, after: string) {
   const interval = Math.max(1, Math.trunc(schedule.recurrenceInterval));
+  if (schedule.recurrenceUnit === "day") return addDays(after, interval);
   if (schedule.recurrenceUnit === "week") return addDays(after, interval * 7);
 
   const anchor = parts(schedule.anchorDate);
@@ -87,7 +88,7 @@ export function recurringOccurrencesBetween(
 export function recurrenceLabel(schedule: Pick<RecurrenceSchedule, "recurrenceUnit" | "recurrenceInterval">) {
   const count = schedule.recurrenceInterval;
   const unit = schedule.recurrenceUnit;
-  if (count === 1) return unit === "week" ? "Weekly" : unit === "month" ? "Monthly" : "Yearly";
+  if (count === 1) return unit === "day" ? "Daily" : unit === "week" ? "Weekly" : unit === "month" ? "Monthly" : "Yearly";
   return `Every ${count} ${unit}s`;
 }
 

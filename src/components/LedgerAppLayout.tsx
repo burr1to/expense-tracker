@@ -8,8 +8,10 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useLedger } from "../context/LedgerContext";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
+import { getCategory } from "../lib/categories";
 import { toDateInput } from "../lib/dates";
 import { monthlyReportNotice } from "../lib/monthly-report";
+import { recurrenceLabel } from "../lib/recurrence";
 import { appRoutes, viewFromPathname } from "../lib/routes";
 import type { AppView, LedgerTransaction, SavedPlace, TransactionDraft, TransactionLocationDraft } from "../types";
 import { AuthPage } from "../views/AuthPage";
@@ -218,10 +220,12 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
       <ReminderBell
         items={ledger.dueItems}
         currency={ledger.profile.currency}
+        recurringEntries={ledger.recurringEntries.filter((entry) => entry.active).map((entry) => ({ id: entry.id, kind: entry.kind, title: entry.note || getCategory(entry.category, ledger.customCategories).label, amountMinor: entry.amountMinor, dueOn: entry.nextDueOn, scheduleLabel: recurrenceLabel(entry) }))}
         monthlyReport={reportNotice}
         onOpenDue={openDue}
         onComplete={ledger.completeDueItem}
         onSnooze={ledger.snoozeDueItem}
+        onConfirmRecurring={ledger.confirmRecurring}
       />
       <button className="privacy-toggle" onClick={() => setAmountsHidden((hidden) => !hidden)} aria-label={amountsHidden ? "Reveal amounts" : "Hide amounts"}>
         {amountsHidden ? <Eye size={19} /> : <EyeSlash size={19} />}

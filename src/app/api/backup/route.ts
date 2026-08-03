@@ -236,7 +236,7 @@ async function restoreBackup(userId: string, csv: string) {
         amountMinor: payload.amountMinor,
         note: payload.note,
         tags: payload.tags,
-        dayOfMonth: (payload.recurrenceUnit ?? "month") === "week" ? null : payload.dayOfMonth ?? Number((payload.anchorDate ?? payload.nextDueOn).slice(8, 10)),
+        dayOfMonth: ["day", "week"].includes(payload.recurrenceUnit ?? "month") ? null : payload.dayOfMonth ?? Number((payload.anchorDate ?? payload.nextDueOn).slice(8, 10)),
         recurrenceUnit: payload.recurrenceUnit ?? "month",
         recurrenceInterval: payload.recurrenceInterval ?? 1,
         anchorDate: asDate(payload.anchorDate ?? payload.nextDueOn),

@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { firstRecurringOccurrence, nextRecurringOccurrence, recurrenceLabel, recurringOccurrencesBetween } from "./recurrence";
 
 describe("recurring schedules", () => {
+  it("supports daily schedules", () => {
+    const schedule = { recurrenceUnit: "day" as const, recurrenceInterval: 1, anchorDate: "2026-07-27" };
+    expect(nextRecurringOccurrence(schedule, "2026-07-27")).toBe("2026-07-28");
+    expect(firstRecurringOccurrence(schedule, "2026-07-30")).toBe("2026-07-30");
+  });
+
   it("supports weekly and fortnightly schedules", () => {
     expect(nextRecurringOccurrence({ recurrenceUnit: "week", recurrenceInterval: 1, anchorDate: "2026-07-27" }, "2026-07-27")).toBe("2026-08-03");
     expect(nextRecurringOccurrence({ recurrenceUnit: "week", recurrenceInterval: 2, anchorDate: "2026-07-27" }, "2026-07-27")).toBe("2026-08-10");
@@ -40,6 +46,7 @@ describe("recurring schedules", () => {
   });
 
   it("uses concise human-readable labels", () => {
+    expect(recurrenceLabel({ recurrenceUnit: "day", recurrenceInterval: 1 })).toBe("Daily");
     expect(recurrenceLabel({ recurrenceUnit: "month", recurrenceInterval: 1 })).toBe("Monthly");
     expect(recurrenceLabel({ recurrenceUnit: "week", recurrenceInterval: 2 })).toBe("Every 2 weeks");
   });
