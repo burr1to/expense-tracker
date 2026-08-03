@@ -6,11 +6,17 @@ const mocks = vi.hoisted(() => {
   const customCategoryUpsert = vi.fn();
   const customSubcategoryFindFirst = vi.fn();
   const customSubcategoryCreate = vi.fn();
+  const resetAccountFindFirstOrThrow = vi.fn();
+  const resetAccountUpdate = vi.fn();
+  const resetReconciliationFindFirst = vi.fn();
+  const resetReconciliationDeleteMany = vi.fn();
   const transactionClient = {
     receiptScan: { create: receiptScanCreate },
     transaction: { createMany: transactionCreateMany },
     customCategory: { upsert: customCategoryUpsert },
     customSubcategory: { findFirst: customSubcategoryFindFirst, create: customSubcategoryCreate },
+    paymentAccount: { findFirstOrThrow: resetAccountFindFirstOrThrow, update: resetAccountUpdate },
+    accountReconciliation: { findFirst: resetReconciliationFindFirst, deleteMany: resetReconciliationDeleteMany },
   };
   const db = {
     user: { findUniqueOrThrow: vi.fn() },
@@ -35,6 +41,10 @@ const mocks = vi.hoisted(() => {
     customCategoryUpsert,
     customSubcategoryFindFirst,
     customSubcategoryCreate,
+    resetAccountFindFirstOrThrow,
+    resetAccountUpdate,
+    resetReconciliationFindFirst,
+    resetReconciliationDeleteMany,
     verifyStoredReceipt: vi.fn(),
   };
 });
@@ -109,12 +119,18 @@ describe("saveReceiptSplit ledger action", () => {
     mocks.customCategoryUpsert.mockResolvedValue({ id: "category-investments" });
     mocks.customSubcategoryFindFirst.mockResolvedValue(null);
     mocks.customSubcategoryCreate.mockResolvedValue({ id: "subcategory-index-funds" });
+    mocks.resetAccountFindFirstOrThrow.mockResolvedValue({ id: "account-1", createdAt: new Date("2026-07-01T08:00:00.000Z") });
+    mocks.resetAccountUpdate.mockResolvedValue({ id: "account-1" });
+    mocks.resetReconciliationFindFirst.mockResolvedValue({ startingBalanceMinor: 100000, startingBalanceAsOf: new Date("2026-07-01T00:00:00.000Z") });
+    mocks.resetReconciliationDeleteMany.mockResolvedValue({ count: 1 });
     mocks.verifyStoredReceipt.mockResolvedValue(undefined);
     mocks.db.$transaction.mockImplementation(async (callback) => callback({
       receiptScan: { create: mocks.receiptScanCreate },
       transaction: { createMany: mocks.transactionCreateMany },
       customCategory: { upsert: mocks.customCategoryUpsert },
       customSubcategory: { findFirst: mocks.customSubcategoryFindFirst, create: mocks.customSubcategoryCreate },
+      paymentAccount: { findFirstOrThrow: mocks.resetAccountFindFirstOrThrow, update: mocks.resetAccountUpdate },
+      accountReconciliation: { findFirst: mocks.resetReconciliationFindFirst, deleteMany: mocks.resetReconciliationDeleteMany },
     }));
   });
 
@@ -186,6 +202,51 @@ describe("saveReceiptSplit ledger action", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "That subcategory already exists." });
     expect(mocks.db.customSubcategory.create).not.toHaveBeenCalled();
+  });
+
+  it("resets only the selected account to its earliest reconciled opening snapshot", async () => {
+    mocks.db.user.findUniqueOrThrow.mockResolvedValue({
+      id: "user-1",
+      name: "Test User",
+      currency: "NPR",
+      hideAmounts: false,
+      autoLockMinutes: 0,
+      pinHash: null,
+    });
+
+    const response = await POST(new Request("http://localhost/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "resetAccountReconciliation", id: "account-1", payload: { confirmation: "RESET" } }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.resetAccountFindFirstOrThrow).toHaveBeenCalledWith({ where: { id: "account-1", userId: "user-1" }, select: { id: true, createdAt: true } });
+    expect(mocks.resetReconciliationFindFirst).toHaveBeenCalledWith({
+      where: { paymentAccountId: "account-1", userId: "user-1" },
+      orderBy: [{ checkedOn: "asc" }, { approvedAt: "asc" }],
+      select: { startingBalanceMinor: true, startingBalanceAsOf: true },
+    });
+    expect(mocks.resetAccountUpdate).toHaveBeenCalledWith({
+      where: { id: "account-1" },
+      data: {
+        balanceMinor: 100000,
+        balanceAsOf: new Date("2026-07-01T00:00:00.000Z"),
+        balanceRecordedAt: new Date("2026-07-01T08:00:00.000Z"),
+      },
+    });
+    expect(mocks.resetReconciliationDeleteMany).toHaveBeenCalledWith({ where: { paymentAccountId: "account-1", userId: "user-1" } });
+  });
+
+  it("does not reset reconciliation history without the exact confirmation", async () => {
+    const response = await POST(new Request("http://localhost/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "resetAccountReconciliation", id: "account-1", payload: { confirmation: "reset" } }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.db.$transaction).not.toHaveBeenCalled();
   });
 
   it("rejects an incomplete split before storage verification or database writes", async () => {

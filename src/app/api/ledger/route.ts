@@ -97,6 +97,7 @@ const accountReconciliationSchema = z.object({
   actualBalanceMinor: z.number().int(),
   adjustmentNote: z.string().trim().max(300),
 });
+const resetReconciliationSchema = z.object({ confirmation: z.literal("RESET") });
 const transferSchema = z.object({ fromAccountId: z.string().min(1), toAccountId: z.string().min(1), amountMinor: z.number().int().positive(), occurredOn: z.string().date(), note: z.string().trim().max(240) }).superRefine((value, context) => {
   if (value.fromAccountId === value.toAccountId) context.addIssue({ code: "custom", path: ["toAccountId"], message: "Choose two different accounts." });
 });
@@ -620,6 +621,25 @@ export async function POST(request: Request) {
             where: { id: account.id },
             data: { balanceMinor: value.actualBalanceMinor, balanceAsOf: asDate(value.checkedOn), balanceRecordedAt: approvedAt },
           });
+        }, { isolationLevel: "Serializable" });
+        break;
+      }
+      case "resetAccountReconciliation": {
+        if (!recordId) throw new Error("Missing payment account id.");
+        resetReconciliationSchema.parse(input.payload);
+        await db.$transaction(async (transaction) => {
+          const account = await transaction.paymentAccount.findFirstOrThrow({ where: { id: recordId, userId: id }, select: { id: true, createdAt: true } });
+          const earliest = await transaction.accountReconciliation.findFirst({
+            where: { paymentAccountId: account.id, userId: id },
+            orderBy: [{ checkedOn: "asc" }, { approvedAt: "asc" }],
+            select: { startingBalanceMinor: true, startingBalanceAsOf: true },
+          });
+          if (!earliest) throw new Error("This account has no reconciliation history to reset.");
+          await transaction.paymentAccount.update({
+            where: { id: account.id },
+            data: { balanceMinor: earliest.startingBalanceMinor, balanceAsOf: earliest.startingBalanceAsOf, balanceRecordedAt: account.createdAt },
+          });
+          await transaction.accountReconciliation.deleteMany({ where: { paymentAccountId: account.id, userId: id } });
         }, { isolationLevel: "Serializable" });
         break;
       }
