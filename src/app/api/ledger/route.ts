@@ -11,7 +11,7 @@ import { expectedAccountBalanceThrough, withCurrentAccountBalance } from "../../
 import { CATEGORIES, importedCategoryColor, SUBCATEGORIES } from "../../../lib/categories";
 import { CATEGORY_ICON_NAMES } from "../../../lib/category-icons";
 import { dateOnlyInTimeZone, firstRecurringOccurrence, nextRecurringOccurrence } from "../../../lib/recurrence";
-import type { AccountReconciliation, AccountTransfer, LedgerTransaction, PaymentAccount, RecurrenceUnit } from "../../../types";
+import type { AccountReconciliation, AccountTransfer, CategoryIconName, LedgerTransaction, PaymentAccount, RecurrenceUnit } from "../../../types";
 
 export const dynamic = "force-dynamic";
 
@@ -301,25 +301,41 @@ export async function POST(request: Request) {
         }
         const existingCategories = await db.customCategory.findMany({ where: { userId: id }, select: { id: true } });
         const allowedCategoryIds = new Set([...CATEGORIES.map((category) => category.id), ...existingCategories.map((category) => category.id)]);
+        for (const category of newCategories) {
+          if (CATEGORIES.some((existing) => existing.id.toLowerCase() === category.name.toLowerCase() || existing.label.toLowerCase() === category.name.toLowerCase())) throw new Error(`${category.name} is already a built-in category.`);
+        }
         await db.$transaction(async (transaction) => {
           const importedCategoryIds = new Map<string, string>();
-          for (const category of newCategories) {
-            if (CATEGORIES.some((existing) => existing.id.toLowerCase() === category.name.toLowerCase() || existing.label.toLowerCase() === category.name.toLowerCase())) throw new Error(`${category.name} is already a built-in category.`);
-            const saved = await transaction.customCategory.upsert({
-              where: { userId_name: { userId: id, name: category.name } },
-              update: {},
-              create: { userId: id, name: category.name, kind: category.kind, color: importedCategoryColor(category.name), icon: category.icon },
-              select: { id: true },
+          if (newCategories.length) {
+            await transaction.customCategory.createMany({
+              data: newCategories.map((category) => ({ userId: id, name: category.name, kind: category.kind, color: importedCategoryColor(category.name), icon: category.icon })),
+              skipDuplicates: true,
             });
-            importedCategoryIds.set(category.key, saved.id);
+            const savedCategories = await transaction.customCategory.findMany({ where: { userId: id, name: { in: newCategories.map((category) => category.name) } }, select: { id: true, name: true } });
+            const savedIdsByName = new Map(savedCategories.map((category) => [category.name, category.id]));
+            for (const category of newCategories) {
+              const categoryId = savedIdsByName.get(category.name);
+              if (!categoryId) throw new Error(`Could not create ${category.name}.`);
+              importedCategoryIds.set(category.key, categoryId);
+            }
           }
           const importedIds = new Set(importedCategoryIds.values());
+          const subcategoriesToSave = new Map<string, { userId: string; categoryId: string; name: string; icon: CategoryIconName }>();
           for (const subcategory of newSubcategories) {
             const categoryId = importedCategoryIds.get(subcategory.category) ?? subcategory.category;
             if (!allowedCategoryIds.has(categoryId) && !importedIds.has(categoryId)) throw new Error(`${subcategory.name} references an invalid category.`);
             if (SUBCATEGORIES[categoryId]?.options.some((name) => name.toLowerCase() === subcategory.name.toLowerCase())) continue;
-            const existing = await transaction.customSubcategory.findFirst({ where: { userId: id, categoryId, name: { equals: subcategory.name, mode: "insensitive" } }, select: { id: true } });
-            if (!existing) await transaction.customSubcategory.create({ data: { userId: id, categoryId, name: subcategory.name, icon: subcategory.icon } });
+            subcategoriesToSave.set(`${categoryId}:${subcategory.name.toLowerCase()}`, { userId: id, categoryId, name: subcategory.name, icon: subcategory.icon });
+          }
+          if (subcategoriesToSave.size) {
+            const candidates = [...subcategoriesToSave.values()];
+            const existingSubcategories = await transaction.customSubcategory.findMany({
+              where: { userId: id, categoryId: { in: [...new Set(candidates.map((subcategory) => subcategory.categoryId))] } },
+              select: { categoryId: true, name: true },
+            });
+            const existingKeys = new Set(existingSubcategories.map((subcategory) => `${subcategory.categoryId}:${subcategory.name.toLowerCase()}`));
+            const missingSubcategories = candidates.filter((subcategory) => !existingKeys.has(`${subcategory.categoryId}:${subcategory.name.toLowerCase()}`));
+            if (missingSubcategories.length) await transaction.customSubcategory.createMany({ data: missingSubcategories, skipDuplicates: true });
           }
           const mappedValues = values.map((value) => ({ ...value, category: importedCategoryIds.get(value.category) ?? value.category }));
           if (mappedValues.some((value) => !allowedCategoryIds.has(value.category) && !importedIds.has(value.category))) throw new Error("One or more transaction categories are invalid.");
@@ -335,7 +351,7 @@ export async function POST(request: Request) {
             locationSource: location?.source ?? null,
             savedPlaceId: null,
           })) });
-        });
+        }, { timeout: 15_000 });
         break;
       }
       case "saveReceiptSplit": {

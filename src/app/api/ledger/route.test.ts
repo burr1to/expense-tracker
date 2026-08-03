@@ -3,9 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const receiptScanCreate = vi.fn();
   const transactionCreateMany = vi.fn();
-  const customCategoryUpsert = vi.fn();
-  const customSubcategoryFindFirst = vi.fn();
-  const customSubcategoryCreate = vi.fn();
+  const customCategoryCreateMany = vi.fn();
+  const customCategoryFindMany = vi.fn();
+  const customSubcategoryFindMany = vi.fn();
+  const customSubcategoryCreateMany = vi.fn();
   const resetAccountFindFirstOrThrow = vi.fn();
   const resetAccountUpdate = vi.fn();
   const resetReconciliationFindFirst = vi.fn();
@@ -13,8 +14,8 @@ const mocks = vi.hoisted(() => {
   const transactionClient = {
     receiptScan: { create: receiptScanCreate },
     transaction: { createMany: transactionCreateMany },
-    customCategory: { upsert: customCategoryUpsert },
-    customSubcategory: { findFirst: customSubcategoryFindFirst, create: customSubcategoryCreate },
+    customCategory: { createMany: customCategoryCreateMany, findMany: customCategoryFindMany },
+    customSubcategory: { findMany: customSubcategoryFindMany, createMany: customSubcategoryCreateMany },
     paymentAccount: { findFirstOrThrow: resetAccountFindFirstOrThrow, update: resetAccountUpdate },
     accountReconciliation: { findFirst: resetReconciliationFindFirst, deleteMany: resetReconciliationDeleteMany },
   };
@@ -38,9 +39,10 @@ const mocks = vi.hoisted(() => {
     db,
     receiptScanCreate,
     transactionCreateMany,
-    customCategoryUpsert,
-    customSubcategoryFindFirst,
-    customSubcategoryCreate,
+    customCategoryCreateMany,
+    customCategoryFindMany,
+    customSubcategoryFindMany,
+    customSubcategoryCreateMany,
     resetAccountFindFirstOrThrow,
     resetAccountUpdate,
     resetReconciliationFindFirst,
@@ -116,9 +118,10 @@ describe("saveReceiptSplit ledger action", () => {
     mocks.db.receiptScan.count.mockResolvedValue(0);
     mocks.receiptScanCreate.mockResolvedValue({ id: "scan-1" });
     mocks.transactionCreateMany.mockResolvedValue({ count: 2 });
-    mocks.customCategoryUpsert.mockResolvedValue({ id: "category-investments" });
-    mocks.customSubcategoryFindFirst.mockResolvedValue(null);
-    mocks.customSubcategoryCreate.mockResolvedValue({ id: "subcategory-index-funds" });
+    mocks.customCategoryCreateMany.mockResolvedValue({ count: 1 });
+    mocks.customCategoryFindMany.mockResolvedValue([{ id: "category-investments", name: "Investments" }]);
+    mocks.customSubcategoryFindMany.mockResolvedValue([]);
+    mocks.customSubcategoryCreateMany.mockResolvedValue({ count: 1 });
     mocks.resetAccountFindFirstOrThrow.mockResolvedValue({ id: "account-1", createdAt: new Date("2026-07-01T08:00:00.000Z") });
     mocks.resetAccountUpdate.mockResolvedValue({ id: "account-1" });
     mocks.resetReconciliationFindFirst.mockResolvedValue({ startingBalanceMinor: 100000, startingBalanceAsOf: new Date("2026-07-01T00:00:00.000Z") });
@@ -127,8 +130,8 @@ describe("saveReceiptSplit ledger action", () => {
     mocks.db.$transaction.mockImplementation(async (callback) => callback({
       receiptScan: { create: mocks.receiptScanCreate },
       transaction: { createMany: mocks.transactionCreateMany },
-      customCategory: { upsert: mocks.customCategoryUpsert },
-      customSubcategory: { findFirst: mocks.customSubcategoryFindFirst, create: mocks.customSubcategoryCreate },
+      customCategory: { createMany: mocks.customCategoryCreateMany, findMany: mocks.customCategoryFindMany },
+      customSubcategory: { findMany: mocks.customSubcategoryFindMany, createMany: mocks.customSubcategoryCreateMany },
       paymentAccount: { findFirstOrThrow: mocks.resetAccountFindFirstOrThrow, update: mocks.resetAccountUpdate },
       accountReconciliation: { findFirst: mocks.resetReconciliationFindFirst, deleteMany: mocks.resetReconciliationDeleteMany },
     }));
@@ -165,11 +168,12 @@ describe("saveReceiptSplit ledger action", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(mocks.customCategoryUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({ name: "Investments", icon: "money" }),
-    }));
-    expect(mocks.customSubcategoryCreate).toHaveBeenCalledWith({ data: { userId: "user-1", categoryId: "category-investments", name: "Index funds", icon: "money" } });
+    expect(mocks.customCategoryCreateMany).toHaveBeenCalledWith({ data: [expect.objectContaining({ name: "Investments", icon: "money" })], skipDuplicates: true });
+    expect(mocks.customCategoryFindMany).toHaveBeenCalledTimes(1);
+    expect(mocks.customSubcategoryFindMany).toHaveBeenCalledTimes(1);
+    expect(mocks.customSubcategoryCreateMany).toHaveBeenCalledWith({ data: [{ userId: "user-1", categoryId: "category-investments", name: "Index funds", icon: "money" }], skipDuplicates: true });
     expect(mocks.transactionCreateMany).toHaveBeenCalledWith({ data: [expect.objectContaining({ category: "category-investments", userId: "user-1" })] });
+    expect(mocks.db.$transaction).toHaveBeenCalledWith(expect.any(Function), { timeout: 15_000 });
   });
 
   it("adds a custom subcategory to an owned category", async () => {
