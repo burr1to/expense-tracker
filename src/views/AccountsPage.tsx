@@ -310,7 +310,7 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
                 <div><span>New account expenses</span><strong className="negative">−{formatMoney(postReconciliationActivity.expenseMinor, profile.currency)}</strong></div>
                 <div><span>New transfers in</span><strong>+{formatMoney(postReconciliationActivity.transfersInMinor, profile.currency)}</strong></div>
                 <div><span>New transfers out</span><strong>−{formatMoney(postReconciliationActivity.transfersOutMinor, profile.currency)}</strong></div>
-                <div className="reconciliation-total"><span>Current tracked balance</span><strong>{formatMoney(selectedAccount.currentBalanceMinor, profile.currency)}</strong></div>
+                <div className="reconciliation-total"><span>Current tracked balance</span><strong>{formatMoney(selectedAccount?.currentBalanceMinor ?? 0, profile.currency)}</strong></div>
               </div>
             </div>}
             {existingReconciliation.adjustmentNote && <p className="reconciliation-note"><strong>Explanation:</strong> {existingReconciliation.adjustmentNote}</p>}
