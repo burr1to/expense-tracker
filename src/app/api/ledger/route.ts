@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import type { Prisma } from "../../../generated/prisma/client";
 import { getBetaSession } from "../../../lib/auth";
 import { getPrisma } from "../../../lib/prisma";
 import { hashPin, verifyPin } from "../../../lib/pin";
@@ -10,6 +11,7 @@ import { KATHMANDU_BOUNDS } from "../../../lib/kathmandu-locations";
 import { expectedAccountBalanceThrough, withCurrentAccountBalance } from "../../../lib/account-balances";
 import { CATEGORIES, importedCategoryColor, SUBCATEGORIES } from "../../../lib/categories";
 import { CATEGORY_ICON_NAMES } from "../../../lib/category-icons";
+import { IMPORT_BATCH_SIZE } from "../../../lib/import-job";
 import { dateOnlyInTimeZone, firstRecurringOccurrence, nextRecurringOccurrence } from "../../../lib/recurrence";
 import type { AccountReconciliation, AccountTransfer, CategoryIconName, LedgerTransaction, PaymentAccount, RecurrenceUnit } from "../../../types";
 
@@ -53,6 +55,7 @@ const recurringSchema = z.object({
   kind: z.enum(["income", "expense"]),
   category: z.string().min(1).max(80),
   amountMinor: z.number().int().positive(),
+  paymentAccountId: z.string().nullable().optional(),
   note: z.string().max(240),
   tags: z.array(z.string().max(40)).max(8),
   recurrenceUnit: z.enum(["day", "week", "month", "year"]),
@@ -88,6 +91,11 @@ const transactionImportSchema = z.union([
   z.array(transactionSchema).max(1000).transform((transactions) => ({ transactions, newCategories: [], newSubcategories: [] })),
   transactionImportPayloadSchema,
 ]);
+type ParsedTransactionImport = {
+  transactions: z.infer<typeof transactionSchema>[];
+  newCategories: z.infer<typeof importedCategorySchema>[];
+  newSubcategories: z.infer<typeof importedSubcategorySchema>[];
+};
 const paymentAccountSchema = z.object({ type: z.enum(["mobile_banking", "esewa", "khalti", "connect_ips"]), provider: z.string().trim().min(1).max(100), label: z.string().trim().max(60), balanceMinor: z.number().int(), balanceAsOf: z.string().date() });
 const accountBalanceSchema = z.object({ balanceMinor: z.number().int(), balanceAsOf: z.string().date() });
 const accountReconciliationSchema = z.object({
@@ -111,6 +119,10 @@ const asDate = (value: string) => new Date(`${value}T00:00:00.000Z`);
 const dateOnly = (value: Date | null) => value ? value.toISOString().slice(0, 10) : null;
 const TRANSACTION_UNDO_WINDOW_MS = 30_000;
 const DELETED_TRANSACTION_RETENTION_MS = 24 * 60 * 60 * 1000;
+
+function serializeImportJob(job: { id: string; status: string; totalRows: number; processedRows: number; error: string | null; createdAt: Date; completedAt: Date | null }) {
+  return { id: job.id, status: job.status, totalRows: job.totalRows, processedRows: job.processedRows, error: job.error, createdAt: job.createdAt.toISOString(), completedAt: job.completedAt?.toISOString() ?? null };
+}
 const receiptData = async (receipt: z.infer<typeof receiptSchema>, id: string) => {
   await verifyStoredReceipt(receipt.storagePath, id, receipt.mimeType, receipt.size);
   return { name: receipt.name, mimeType: receipt.mimeType, size: receipt.size, storagePath: receipt.storagePath, data: null };
@@ -124,8 +136,9 @@ async function userId() {
 
 function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
   const transactions: LedgerTransaction[] = data.transactions.map((item) => {
-    const { deletedAt, receiptScan, ...transaction } = item;
+    const { deletedAt, receiptScan, importJobId, ...transaction } = item;
     void deletedAt;
+    void importJobId;
     return { ...transaction, receipt: transaction.receipt ?? receiptScan, kind: item.kind as LedgerTransaction["kind"], paymentMode: item.paymentMode as LedgerTransaction["paymentMode"], locationSource: item.locationSource as LedgerTransaction["locationSource"], occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString(), paymentAccount: null };
   });
   const transfers: AccountTransfer[] = data.transfers.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString() }));
@@ -225,20 +238,145 @@ export async function POST(request: Request) {
     const assertAccountDatesAreOpen = async (entries: readonly { paymentAccountId: string | null; occurredOn: string; createdAt?: string }[]) => {
       const now = new Date();
       const unique = [...new Map(entries.filter((entry) => entry.paymentAccountId).map((entry) => [`${entry.paymentAccountId}:${entry.occurredOn}:${entry.createdAt ?? "new"}`, entry])).values()];
-      const locked = await Promise.all(unique.map((entry) => db.accountReconciliation.findFirst({
-        where: {
-          userId: id,
-          paymentAccountId: entry.paymentAccountId!,
-          OR: [
-            { checkedOn: { gt: asDate(entry.occurredOn) } },
-            { checkedOn: asDate(entry.occurredOn), approvedAt: { gte: entry.createdAt ? new Date(entry.createdAt) : now } },
-          ],
-        },
-        orderBy: { checkedOn: "desc" },
-        select: { checkedOn: true },
-      })));
-      const firstLocked = locked.find(Boolean);
+      const accountIds = [...new Set(unique.map((entry) => entry.paymentAccountId!))];
+      if (!accountIds.length) return;
+      const reconciliations = await db.accountReconciliation.findMany({ where: { userId: id, paymentAccountId: { in: accountIds } }, orderBy: { checkedOn: "desc" }, select: { paymentAccountId: true, checkedOn: true, approvedAt: true } });
+      const firstLocked = unique.map((entry) => reconciliations.find((reconciliation) => reconciliation.paymentAccountId === entry.paymentAccountId && (reconciliation.checkedOn > asDate(entry.occurredOn) || (reconciliation.checkedOn.getTime() === asDate(entry.occurredOn).getTime() && reconciliation.approvedAt >= (entry.createdAt ? new Date(entry.createdAt) : now))))).find(Boolean);
       if (firstLocked) throw new Error(`This activity belongs to an approved reconciliation through ${dateOnly(firstLocked!.checkedOn)}. Add a current transaction or reconcile a later period instead of changing audited history.`);
+    };
+    const validateImportRequest = async (payload: ParsedTransactionImport) => {
+      const values = payload.transactions;
+      await assertAccountDatesAreOpen(values.map((value) => ({ paymentAccountId: value.paymentAccountId, occurredOn: value.occurredOn })));
+      const accountIds = [...new Set(values.flatMap((value) => value.paymentAccountId ? [value.paymentAccountId] : []))];
+      if (accountIds.length) {
+        const ownedAccounts = await db.paymentAccount.count({ where: { userId: id, id: { in: accountIds } } });
+        if (ownedAccounts !== accountIds.length) throw new Error("One or more online payment accounts are invalid.");
+      }
+      const existingCategories = await db.customCategory.findMany({ where: { userId: id }, select: { id: true } });
+      const allowedCategoryIds = new Set([...CATEGORIES.map((category) => category.id), ...existingCategories.map((category) => category.id)]);
+      for (const category of payload.newCategories) {
+        if (CATEGORIES.some((existing) => existing.id.toLowerCase() === category.name.toLowerCase() || existing.label.toLowerCase() === category.name.toLowerCase())) throw new Error(`${category.name} is already a built-in category.`);
+      }
+      return allowedCategoryIds;
+    };
+    const writeImportBatch = async (payload: ParsedTransactionImport, importJobId: string | null = null) => {
+      const values = payload.transactions;
+      const allowedCategoryIds = await validateImportRequest(payload);
+      return db.$transaction(async (transaction) => {
+        const importedCategoryIds = new Map<string, string>();
+        const createdCategoryIds: string[] = [];
+        if (payload.newCategories.length) {
+          const categoryNames = payload.newCategories.map((category) => category.name);
+          const existingBefore = await transaction.customCategory.findMany({ where: { userId: id, name: { in: categoryNames } }, select: { id: true, name: true } });
+          const existingIds = new Set(existingBefore.map((category) => category.id));
+          await transaction.customCategory.createMany({
+            data: payload.newCategories.map((category) => ({ userId: id, name: category.name, kind: category.kind, color: importedCategoryColor(category.name), icon: category.icon })),
+            skipDuplicates: true,
+          });
+          const savedCategories = await transaction.customCategory.findMany({ where: { userId: id, name: { in: categoryNames } }, select: { id: true, name: true } });
+          const savedIdsByName = new Map(savedCategories.map((category) => [category.name, category.id]));
+          for (const category of payload.newCategories) {
+            const categoryId = savedIdsByName.get(category.name);
+            if (!categoryId) throw new Error(`Could not create ${category.name}.`);
+            importedCategoryIds.set(category.key, categoryId);
+          }
+          createdCategoryIds.push(...savedCategories.filter((category) => !existingIds.has(category.id)).map((category) => category.id));
+        }
+        const importedIds = new Set(importedCategoryIds.values());
+        const subcategoriesToSave = new Map<string, { userId: string; categoryId: string; name: string; icon: CategoryIconName }>();
+        for (const subcategory of payload.newSubcategories) {
+          const categoryId = importedCategoryIds.get(subcategory.category) ?? subcategory.category;
+          if (!allowedCategoryIds.has(categoryId) && !importedIds.has(categoryId)) throw new Error(`${subcategory.name} references an invalid category.`);
+          if (SUBCATEGORIES[categoryId]?.options.some((name) => name.toLowerCase() === subcategory.name.toLowerCase())) continue;
+          subcategoriesToSave.set(`${categoryId}:${subcategory.name.toLowerCase()}`, { userId: id, categoryId, name: subcategory.name, icon: subcategory.icon });
+        }
+        const createdSubcategoryIds: string[] = [];
+        if (subcategoriesToSave.size) {
+          const candidates = [...subcategoriesToSave.values()];
+          const existingSubcategories = await transaction.customSubcategory.findMany({
+            where: { userId: id, categoryId: { in: [...new Set(candidates.map((subcategory) => subcategory.categoryId))] } },
+            select: { id: true, categoryId: true, name: true },
+          });
+          const existingKeys = new Set(existingSubcategories.map((subcategory) => `${subcategory.categoryId}:${subcategory.name.toLowerCase()}`));
+          const missingSubcategories = candidates.filter((subcategory) => !existingKeys.has(`${subcategory.categoryId}:${subcategory.name.toLowerCase()}`));
+          if (missingSubcategories.length) await transaction.customSubcategory.createMany({ data: missingSubcategories, skipDuplicates: true });
+          const savedSubcategories = await transaction.customSubcategory.findMany({
+            where: { userId: id, categoryId: { in: [...new Set(candidates.map((subcategory) => subcategory.categoryId))] }, name: { in: candidates.map((subcategory) => subcategory.name) } },
+            select: { id: true, categoryId: true, name: true },
+          });
+          createdSubcategoryIds.push(...savedSubcategories.filter((subcategory) => !existingKeys.has(`${subcategory.categoryId}:${subcategory.name.toLowerCase()}`)).map((subcategory) => subcategory.id));
+        }
+        const mappedValues = values.map((value) => ({ ...value, category: importedCategoryIds.get(value.category) ?? value.category }));
+        if (mappedValues.some((value) => !allowedCategoryIds.has(value.category) && !importedIds.has(value.category))) throw new Error("One or more transaction categories are invalid.");
+        await transaction.transaction.createMany({ data: mappedValues.map(({ location, ...value }) => ({
+          ...value,
+          occurredOn: asDate(value.occurredOn),
+          userId: id,
+          importJobId,
+          locationLabel: location?.label ?? null,
+          locationAddress: location?.address ?? null,
+          locationLatitude: location?.latitude ?? null,
+          locationLongitude: location?.longitude ?? null,
+          locationAccuracy: location?.accuracy ?? null,
+          locationSource: location?.source ?? null,
+          savedPlaceId: null,
+        })) });
+        return { createdCategoryIds, createdSubcategoryIds };
+      }, { timeout: 15_000 });
+    };
+    const rollbackImportJob = async (jobId: string, message: string) => {
+      const failed = await db.$transaction(async (transaction) => {
+        const job = await transaction.importJob.findFirstOrThrow({ where: { id: jobId, userId: id } });
+        await transaction.transaction.deleteMany({ where: { userId: id, importJobId: jobId } });
+        if (job.createdSubcategoryIds.length) {
+          const createdSubcategories = await transaction.customSubcategory.findMany({ where: { userId: id, id: { in: job.createdSubcategoryIds } }, select: { id: true, categoryId: true, name: true } });
+          if (createdSubcategories.length) {
+            const usedSubcategories = await transaction.transaction.findMany({ where: { userId: id, OR: createdSubcategories.map((subcategory) => ({ category: subcategory.categoryId, subcategory: { equals: subcategory.name, mode: "insensitive" as const } })) }, select: { category: true, subcategory: true } });
+            const usedKeys = new Set(usedSubcategories.map((subcategory) => `${subcategory.category}:${subcategory.subcategory?.toLowerCase()}`));
+            const unusedIds = createdSubcategories.filter((subcategory) => !usedKeys.has(`${subcategory.categoryId}:${subcategory.name.toLowerCase()}`)).map((subcategory) => subcategory.id);
+            if (unusedIds.length) await transaction.customSubcategory.deleteMany({ where: { userId: id, id: { in: unusedIds } } });
+          }
+        }
+        if (job.createdCategoryIds.length) {
+          const usedCategories = await transaction.transaction.findMany({ where: { userId: id, category: { in: job.createdCategoryIds } }, select: { category: true } });
+          const usedBudgets = await transaction.budget.findMany({ where: { userId: id, category: { in: job.createdCategoryIds } }, select: { category: true } });
+          const usedIds = new Set([...usedCategories, ...usedBudgets].map((category) => category.category));
+          const unusedIds = job.createdCategoryIds.filter((categoryId) => !usedIds.has(categoryId));
+          if (unusedIds.length) await transaction.customCategory.deleteMany({ where: { userId: id, id: { in: unusedIds } } });
+        }
+        return transaction.importJob.update({ where: { id: jobId }, data: { status: "failed", error: message, lockExpiresAt: null, completedAt: new Date() } });
+      });
+      return serializeImportJob(failed);
+    };
+    const processImportJob = async (jobId: string) => {
+      const current = await db.importJob.findFirst({ where: { id: jobId, userId: id } });
+      if (!current) throw new Error("Import job not found.");
+      if (current.status === "completed" || current.status === "failed") return serializeImportJob(current);
+      const now = new Date();
+      const claimed = await db.importJob.updateMany({
+        where: { id: jobId, userId: id, OR: [{ status: "queued" }, { status: "processing", lockExpiresAt: { lte: now } }] },
+        data: { status: "processing", lockExpiresAt: new Date(now.getTime() + 30_000) },
+      });
+      const job = await db.importJob.findFirstOrThrow({ where: { id: jobId, userId: id } });
+      if (!claimed.count) return serializeImportJob(job);
+      try {
+        const payload = transactionImportPayloadSchema.parse(job.payload) as ParsedTransactionImport;
+        const batch = payload.transactions.slice(job.processedRows, job.processedRows + IMPORT_BATCH_SIZE);
+        const created = await writeImportBatch({ ...payload, transactions: batch }, job.id);
+        const processedRows = job.processedRows + batch.length;
+        const complete = processedRows >= job.totalRows;
+        const updated = await db.importJob.update({ where: { id: job.id }, data: {
+          status: complete ? "completed" : "queued",
+          processedRows,
+          createdCategoryIds: { set: [...job.createdCategoryIds, ...created.createdCategoryIds] },
+          createdSubcategoryIds: { set: [...job.createdSubcategoryIds, ...created.createdSubcategoryIds] },
+          lockExpiresAt: null,
+          completedAt: complete ? new Date() : null,
+        } });
+        return serializeImportJob(updated);
+      } catch (error) {
+        return rollbackImportJob(job.id, error instanceof Error ? error.message : "The import could not be completed.");
+      }
     };
     switch (input.action) {
       case "saveTransaction": {
@@ -291,67 +429,25 @@ export async function POST(request: Request) {
         await removeStoredReceipts(pathsToRemove);
         break;
       }
+      case "listImportJobs": {
+        const jobs = await db.importJob.findMany({ where: { userId: id, status: { in: ["queued", "processing"] } }, orderBy: { createdAt: "asc" }, take: 10 });
+        return NextResponse.json({ jobs: jobs.map(serializeImportJob) });
+      }
+      case "startImportJob": {
+        const value = transactionImportSchema.parse(input.payload) as ParsedTransactionImport;
+        if (!value.transactions.length) throw new Error("There are no valid rows to import.");
+        await validateImportRequest(value);
+        const job = await db.importJob.create({ data: { userId: id, totalRows: value.transactions.length, payload: value as unknown as Prisma.InputJsonValue } });
+        return NextResponse.json({ job: serializeImportJob(job) });
+      }
+      case "processImportJob": {
+        const { jobId } = z.object({ jobId: z.string().min(1) }).parse(input.payload);
+        return NextResponse.json({ job: await processImportJob(jobId) });
+      }
       case "importTransactions": {
-        const { transactions: values, newCategories, newSubcategories } = transactionImportSchema.parse(input.payload);
-        await assertAccountDatesAreOpen(values.map((value) => ({ paymentAccountId: value.paymentAccountId, occurredOn: value.occurredOn })));
-        const accountIds = [...new Set(values.flatMap((value) => value.paymentAccountId ? [value.paymentAccountId] : []))];
-        if (accountIds.length) {
-          const ownedAccounts = await db.paymentAccount.count({ where: { userId: id, id: { in: accountIds } } });
-          if (ownedAccounts !== accountIds.length) throw new Error("One or more online payment accounts are invalid.");
-        }
-        const existingCategories = await db.customCategory.findMany({ where: { userId: id }, select: { id: true } });
-        const allowedCategoryIds = new Set([...CATEGORIES.map((category) => category.id), ...existingCategories.map((category) => category.id)]);
-        for (const category of newCategories) {
-          if (CATEGORIES.some((existing) => existing.id.toLowerCase() === category.name.toLowerCase() || existing.label.toLowerCase() === category.name.toLowerCase())) throw new Error(`${category.name} is already a built-in category.`);
-        }
-        await db.$transaction(async (transaction) => {
-          const importedCategoryIds = new Map<string, string>();
-          if (newCategories.length) {
-            await transaction.customCategory.createMany({
-              data: newCategories.map((category) => ({ userId: id, name: category.name, kind: category.kind, color: importedCategoryColor(category.name), icon: category.icon })),
-              skipDuplicates: true,
-            });
-            const savedCategories = await transaction.customCategory.findMany({ where: { userId: id, name: { in: newCategories.map((category) => category.name) } }, select: { id: true, name: true } });
-            const savedIdsByName = new Map(savedCategories.map((category) => [category.name, category.id]));
-            for (const category of newCategories) {
-              const categoryId = savedIdsByName.get(category.name);
-              if (!categoryId) throw new Error(`Could not create ${category.name}.`);
-              importedCategoryIds.set(category.key, categoryId);
-            }
-          }
-          const importedIds = new Set(importedCategoryIds.values());
-          const subcategoriesToSave = new Map<string, { userId: string; categoryId: string; name: string; icon: CategoryIconName }>();
-          for (const subcategory of newSubcategories) {
-            const categoryId = importedCategoryIds.get(subcategory.category) ?? subcategory.category;
-            if (!allowedCategoryIds.has(categoryId) && !importedIds.has(categoryId)) throw new Error(`${subcategory.name} references an invalid category.`);
-            if (SUBCATEGORIES[categoryId]?.options.some((name) => name.toLowerCase() === subcategory.name.toLowerCase())) continue;
-            subcategoriesToSave.set(`${categoryId}:${subcategory.name.toLowerCase()}`, { userId: id, categoryId, name: subcategory.name, icon: subcategory.icon });
-          }
-          if (subcategoriesToSave.size) {
-            const candidates = [...subcategoriesToSave.values()];
-            const existingSubcategories = await transaction.customSubcategory.findMany({
-              where: { userId: id, categoryId: { in: [...new Set(candidates.map((subcategory) => subcategory.categoryId))] } },
-              select: { categoryId: true, name: true },
-            });
-            const existingKeys = new Set(existingSubcategories.map((subcategory) => `${subcategory.categoryId}:${subcategory.name.toLowerCase()}`));
-            const missingSubcategories = candidates.filter((subcategory) => !existingKeys.has(`${subcategory.categoryId}:${subcategory.name.toLowerCase()}`));
-            if (missingSubcategories.length) await transaction.customSubcategory.createMany({ data: missingSubcategories, skipDuplicates: true });
-          }
-          const mappedValues = values.map((value) => ({ ...value, category: importedCategoryIds.get(value.category) ?? value.category }));
-          if (mappedValues.some((value) => !allowedCategoryIds.has(value.category) && !importedIds.has(value.category))) throw new Error("One or more transaction categories are invalid.");
-          await transaction.transaction.createMany({ data: mappedValues.map(({ location, ...value }) => ({
-            ...value,
-            occurredOn: asDate(value.occurredOn),
-            userId: id,
-            locationLabel: location?.label ?? null,
-            locationAddress: location?.address ?? null,
-            locationLatitude: location?.latitude ?? null,
-            locationLongitude: location?.longitude ?? null,
-            locationAccuracy: location?.accuracy ?? null,
-            locationSource: location?.source ?? null,
-            savedPlaceId: null,
-          })) });
-        }, { timeout: 15_000 });
+        const value = transactionImportSchema.parse(input.payload) as ParsedTransactionImport;
+        if (!value.transactions.length) throw new Error("There are no valid rows to import.");
+        await writeImportBatch(value);
         break;
       }
       case "saveReceiptSplit": {
@@ -433,6 +529,7 @@ export async function POST(request: Request) {
       case "deleteBudget": await db.budget.deleteMany({ where: { id: recordId, userId: id } }); break;
       case "saveRecurring": {
         const value = recurringSchema.parse(input.payload);
+        if (value.paymentAccountId) await db.paymentAccount.findFirstOrThrow({ where: { id: value.paymentAccountId, userId: id } });
         const schedule = { recurrenceUnit: value.recurrenceUnit, recurrenceInterval: value.recurrenceInterval, anchorDate: value.startOn };
         const existing = recordId ? await db.recurringEntry.findFirstOrThrow({ where: { id: recordId, userId: id } }) : null;
         const scheduleUnchanged = existing
@@ -446,12 +543,13 @@ export async function POST(request: Request) {
           kind: value.kind,
           category: value.category,
           amountMinor: value.amountMinor,
+          paymentAccountId: value.paymentAccountId ?? null,
           note: value.note,
           tags: value.tags,
           recurrenceUnit: value.recurrenceUnit,
           recurrenceInterval: value.recurrenceInterval,
           anchorDate: asDate(value.startOn),
-          dayOfMonth: value.recurrenceUnit === "week" ? null : Number(value.startOn.slice(8, 10)),
+          dayOfMonth: value.recurrenceUnit === "day" || value.recurrenceUnit === "week" ? null : Number(value.startOn.slice(8, 10)),
           nextDueOn: asDate(nextDueOn),
         };
         if (recordId) await db.recurringEntry.updateMany({ where: { id: recordId, userId: id }, data });
@@ -466,6 +564,8 @@ export async function POST(request: Request) {
           const scheduledOn = dateOnly(recurring.nextDueOn)!;
           if (!recurring.active) throw new Error("This recurring entry is paused.");
           if (scheduledOn > dateOnlyInTimeZone("Asia/Kathmandu")) throw new Error("This recurring entry is not due yet.");
+          if (recurring.paymentAccountId) await transaction.paymentAccount.findFirstOrThrow({ where: { id: recurring.paymentAccountId, userId: id } });
+          await assertAccountDatesAreOpen([{ paymentAccountId: recurring.paymentAccountId, occurredOn: scheduledOn }]);
           const nextDueOn = nextRecurringOccurrence({
             recurrenceUnit: recurring.recurrenceUnit as RecurrenceUnit,
             recurrenceInterval: recurring.recurrenceInterval,
@@ -476,7 +576,7 @@ export async function POST(request: Request) {
             data: { nextDueOn: asDate(nextDueOn) },
           });
           if (!updated.count) throw new Error("This recurring entry was already confirmed.");
-          await transaction.transaction.create({ data: { userId: id, kind: recurring.kind, category: recurring.category, amountMinor: recurring.amountMinor, occurredOn: recurring.nextDueOn, note: recurring.note, paymentMode: "cash" } });
+          await transaction.transaction.create({ data: { userId: id, kind: recurring.kind, category: recurring.category, amountMinor: recurring.amountMinor, occurredOn: recurring.nextDueOn, note: recurring.note, paymentMode: recurring.paymentAccountId ? "online" : "cash", paymentAccountId: recurring.paymentAccountId } });
         });
         break;
       }

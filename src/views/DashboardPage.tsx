@@ -14,7 +14,7 @@ import { isInMonth } from "../lib/dates";
 import { dailyExpenseSeries, summarizeLedger } from "../lib/ledger";
 import { generateInsights } from "../lib/insights";
 import { calculatePlaceSpendingTrends, placeTrendPeriodOptions, type PlaceSpendingTrend, type PlaceTrendPeriodMonths } from "../lib/place-spending-trends";
-import { calculateBudgetPacing, calculateMonthlyBreathingRoom } from "../lib/planning-insights";
+import { calculateBudgetPacing, calculateMonthlyBreathingRoom, calculateSafeToSpend } from "../lib/planning-insights";
 import { spendingPeriodOptions, spendingPeriodRange, type SpendingPeriod } from "../lib/spending-period";
 import { totalCurrentBalance } from "../lib/account-balances";
 import type { AppView, Budget, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount, RecurringEntry, SavedPlace, SavingsGoal } from "../types";
@@ -89,10 +89,13 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
   const dayTransactions = transactions
     .filter((item) => item.occurredOn === selectedDayKey)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const daySummary = summarizeLedger(dayTransactions, customCategories);
   const insights = generateInsights(transactions, month, currency, customCategories);
   const currentBudgets = budgets.filter((item) => item.monthKey === format(month, "yyyy-MM"));
   const budgetPacing = calculateBudgetPacing(currentBudgets, transactions, recurringEntries, dueItems, month);
   const breathingRoom = calculateMonthlyBreathingRoom(transactions, recurringEntries, dueItems, month);
+  const safeToSpendMinor = calculateSafeToSpend(trackedBalance, breathingRoom);
+  const currentMonth = isSameMonth(month, new Date());
   const budgetTotal = currentBudgets.reduce((sum, item) => sum + item.amountMinor, 0);
   const budgetSpent = budgetPacing.reduce((sum, item) => sum + item.spentMinor, 0);
   const budgetUpcoming = budgetPacing.reduce((sum, item) => sum + item.upcomingMinor, 0);
@@ -189,6 +192,10 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
           {dayTransactions.map((transaction) => <TransactionRow key={transaction.id} transaction={transaction} currency={currency} customCategories={customCategories} compact />)}
           {!dayTransactions.length && <EmptyState title="No transactions this day" message="Choose another day or add an entry for this date." action={<button className="primary-button small" onClick={() => onAdd(selectedDayKey)}><CalendarBlank size={17} />Add transaction</button>} />}
         </div>
+        {dayTransactions.length > 0 && <div className="dashboard-day-summary" aria-label={`Income and expenses for ${format(selectedDay, "MMMM d")}`}>
+          <div><span>Income</span><strong className="income">{formatMoney(daySummary.income, currency)}</strong></div>
+          <div><span>Expenses</span><strong className="expense">{formatMoney(daySummary.expenses, currency)}</strong></div>
+        </div>}
       </section>
 
       <div className="spending-period-bar">
@@ -300,6 +307,11 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
           <button className="secondary-button" onClick={() => hasPin ? setBalanceUnlockOpen(true) : onNavigate("settings")}><LockKey size={17} />{hasPin ? "Unlock balances" : "Set up PIN"}</button>
         </div>}
       </section>
+
+      {currentMonth && <section className={`safe-to-spend-card${safeToSpendMinor < 0 ? " negative" : ""}`} aria-label="Safe to spend estimate">
+        <div><span className="section-label">Safe to spend next 30 days</span>{hasPin && paymentAccounts.length > 0 && balancesUnlocked ? <h2>{formatMoney(safeToSpendMinor, currency)}</h2> : <h2>Amount locked</h2>}<p>Estimate from your tracked balance, scheduled income, and known upcoming expenses. It is a planning guide, not a live bank balance.</p></div>
+        {hasPin && paymentAccounts.length > 0 && balancesUnlocked ? <div className="safe-to-spend-breakdown"><span><small>Scheduled in</small><strong>{formatMoney(breathingRoom.upcomingIncomeMinor, currency)}</strong></span><span><small>Known out</small><strong>{formatMoney(breathingRoom.upcomingExpensesMinor, currency)}</strong></span></div> : <button className="secondary-button" onClick={() => hasPin ? paymentAccounts.length ? setBalanceUnlockOpen(true) : onNavigate("accounts") : onNavigate("settings")}><LockKey size={17} />{hasPin ? paymentAccounts.length ? "Unlock estimate" : "Add an account" : "Set up PIN"}</button>}
+      </section>}
 
       <section className="dashboard-planning">
         <article className="plan-snapshot">

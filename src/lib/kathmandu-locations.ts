@@ -150,19 +150,30 @@ export function applyKathmanduMapTheme(map: import("maplibre-gl").Map) {
       "hostel",
       "guest_house",
     ]]],
-    ["==", ["get", "class"], "shop"],
+    ["in", ["get", "class"], ["literal", [
+      "shop",
+      "amenity",
+      "education",
+      "healthcare",
+      "historic",
+      "leisure",
+      "place_of_worship",
+      "public_transport",
+      "sport",
+      "tourism",
+    ]]],
   ];
   const expensePlaceFilter: import("maplibre-gl").FilterSpecification = [
     "all",
     ["has", "name"],
-    ["<=", ["coalesce", ["get", "rank"], 99], 12],
+    ["<=", ["coalesce", ["get", "rank"], 99], 24],
     expensePlaceCategoryFilter,
   ];
   const detailedExpensePlaceFilter: import("maplibre-gl").FilterSpecification = [
     "all",
     ["has", "name"],
-    [">", ["coalesce", ["get", "rank"], 99], 12],
-    ["<=", ["coalesce", ["get", "rank"], 99], 40],
+    [">", ["coalesce", ["get", "rank"], 99], 24],
+    ["<=", ["coalesce", ["get", "rank"], 99], 80],
     expensePlaceCategoryFilter,
   ];
   if (map.getSource("openmaptiles") && !map.getLayer("expense-place-dots")) {
@@ -171,7 +182,7 @@ export function applyKathmanduMapTheme(map: import("maplibre-gl").Map) {
       type: "circle",
       source: "openmaptiles",
       "source-layer": "poi",
-      minzoom: 14,
+      minzoom: 12.3,
       filter: expensePlaceFilter,
       paint: {
         "circle-color": [
@@ -195,7 +206,7 @@ export function applyKathmanduMapTheme(map: import("maplibre-gl").Map) {
       type: "circle",
       source: "openmaptiles",
       "source-layer": "poi",
-      minzoom: 15.5,
+      minzoom: 14,
       filter: detailedExpensePlaceFilter,
       paint: {
         "circle-color": "#8b755e",
@@ -212,7 +223,7 @@ export function applyKathmanduMapTheme(map: import("maplibre-gl").Map) {
       type: "symbol",
       source: "openmaptiles",
       "source-layer": "poi",
-      minzoom: 14,
+      minzoom: 12.3,
       filter: expensePlaceFilter,
       layout: {
         "symbol-sort-key": ["coalesce", ["get", "rank"], 30],
@@ -239,7 +250,7 @@ export function applyKathmanduMapTheme(map: import("maplibre-gl").Map) {
       type: "symbol",
       source: "openmaptiles",
       "source-layer": "poi",
-      minzoom: 15.5,
+      minzoom: 14,
       filter: detailedExpensePlaceFilter,
       layout: {
         "symbol-sort-key": ["coalesce", ["get", "rank"], 99],

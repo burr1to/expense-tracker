@@ -7,27 +7,41 @@ const mocks = vi.hoisted(() => {
   const customCategoryFindMany = vi.fn();
   const customSubcategoryFindMany = vi.fn();
   const customSubcategoryCreateMany = vi.fn();
+  const importJobCreate = vi.fn();
+  const importJobFindFirst = vi.fn();
+  const importJobFindFirstOrThrow = vi.fn();
+  const importJobFindMany = vi.fn();
+  const importJobUpdate = vi.fn();
+  const importJobUpdateMany = vi.fn();
   const resetAccountFindFirstOrThrow = vi.fn();
   const resetAccountUpdate = vi.fn();
   const resetReconciliationFindFirst = vi.fn();
   const resetReconciliationDeleteMany = vi.fn();
+  const recurringEntryFindFirstOrThrow = vi.fn();
+  const recurringEntryCreate = vi.fn();
+  const recurringEntryUpdateMany = vi.fn();
+  const recurringPaymentAccountFindFirstOrThrow = vi.fn();
+  const recurringTransactionCreate = vi.fn();
   const transactionClient = {
     receiptScan: { create: receiptScanCreate },
-    transaction: { createMany: transactionCreateMany },
+    transaction: { createMany: transactionCreateMany, create: recurringTransactionCreate },
     customCategory: { createMany: customCategoryCreateMany, findMany: customCategoryFindMany },
     customSubcategory: { findMany: customSubcategoryFindMany, createMany: customSubcategoryCreateMany },
+    importJob: { findFirstOrThrow: importJobFindFirstOrThrow, update: importJobUpdate },
     paymentAccount: { findFirstOrThrow: resetAccountFindFirstOrThrow, update: resetAccountUpdate },
     accountReconciliation: { findFirst: resetReconciliationFindFirst, deleteMany: resetReconciliationDeleteMany },
+    recurringEntry: { findFirstOrThrow: recurringEntryFindFirstOrThrow, updateMany: recurringEntryUpdateMany },
   };
   const db = {
     user: { findUniqueOrThrow: vi.fn() },
     transaction: { findMany: vi.fn(), findFirstOrThrow: vi.fn(), update: vi.fn() },
     budget: { findMany: vi.fn() },
-    recurringEntry: { findMany: vi.fn() },
+    recurringEntry: { findMany: vi.fn(), findFirstOrThrow: recurringEntryFindFirstOrThrow, create: recurringEntryCreate },
     savingsGoal: { findMany: vi.fn() },
     customCategory: { findMany: vi.fn(), findFirst: vi.fn(), updateMany: vi.fn() },
     customSubcategory: { findMany: vi.fn(), findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
-    paymentAccount: { count: vi.fn(), findMany: vi.fn() },
+    importJob: { create: importJobCreate, findFirst: importJobFindFirst, findFirstOrThrow: importJobFindFirstOrThrow, findMany: importJobFindMany, update: importJobUpdate, updateMany: importJobUpdateMany },
+    paymentAccount: { count: vi.fn(), findMany: vi.fn(), findFirstOrThrow: recurringPaymentAccountFindFirstOrThrow },
     accountReconciliation: { findFirst: vi.fn(), findMany: vi.fn() },
     savedPlace: { findMany: vi.fn() },
     accountTransfer: { findMany: vi.fn() },
@@ -37,16 +51,28 @@ const mocks = vi.hoisted(() => {
   };
   return {
     db,
+    transactionClient,
     receiptScanCreate,
     transactionCreateMany,
     customCategoryCreateMany,
     customCategoryFindMany,
     customSubcategoryFindMany,
     customSubcategoryCreateMany,
+    importJobCreate,
+    importJobFindFirst,
+    importJobFindFirstOrThrow,
+    importJobFindMany,
+    importJobUpdate,
+    importJobUpdateMany,
     resetAccountFindFirstOrThrow,
     resetAccountUpdate,
     resetReconciliationFindFirst,
     resetReconciliationDeleteMany,
+    recurringEntryFindFirstOrThrow,
+    recurringEntryCreate,
+    recurringEntryUpdateMany,
+    recurringPaymentAccountFindFirstOrThrow,
+    recurringTransactionCreate,
     verifyStoredReceipt: vi.fn(),
   };
 });
@@ -122,6 +148,8 @@ describe("saveReceiptSplit ledger action", () => {
     mocks.customCategoryFindMany.mockResolvedValue([{ id: "category-investments", name: "Investments" }]);
     mocks.customSubcategoryFindMany.mockResolvedValue([]);
     mocks.customSubcategoryCreateMany.mockResolvedValue({ count: 1 });
+    mocks.importJobFindMany.mockResolvedValue([]);
+    mocks.importJobUpdateMany.mockResolvedValue({ count: 1 });
     mocks.resetAccountFindFirstOrThrow.mockResolvedValue({ id: "account-1", createdAt: new Date("2026-07-01T08:00:00.000Z") });
     mocks.resetAccountUpdate.mockResolvedValue({ id: "account-1" });
     mocks.resetReconciliationFindFirst.mockResolvedValue({ startingBalanceMinor: 100000, startingBalanceAsOf: new Date("2026-07-01T00:00:00.000Z") });
@@ -129,11 +157,13 @@ describe("saveReceiptSplit ledger action", () => {
     mocks.verifyStoredReceipt.mockResolvedValue(undefined);
     mocks.db.$transaction.mockImplementation(async (callback) => callback({
       receiptScan: { create: mocks.receiptScanCreate },
-      transaction: { createMany: mocks.transactionCreateMany },
+      transaction: { createMany: mocks.transactionCreateMany, create: mocks.recurringTransactionCreate },
       customCategory: { createMany: mocks.customCategoryCreateMany, findMany: mocks.customCategoryFindMany },
       customSubcategory: { findMany: mocks.customSubcategoryFindMany, createMany: mocks.customSubcategoryCreateMany },
+      importJob: { findFirstOrThrow: mocks.importJobFindFirstOrThrow, update: mocks.importJobUpdate },
       paymentAccount: { findFirstOrThrow: mocks.resetAccountFindFirstOrThrow, update: mocks.resetAccountUpdate },
       accountReconciliation: { findFirst: mocks.resetReconciliationFindFirst, deleteMany: mocks.resetReconciliationDeleteMany },
+      recurringEntry: { findFirstOrThrow: mocks.recurringEntryFindFirstOrThrow, updateMany: mocks.recurringEntryUpdateMany },
     }));
   });
 
@@ -169,8 +199,8 @@ describe("saveReceiptSplit ledger action", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.customCategoryCreateMany).toHaveBeenCalledWith({ data: [expect.objectContaining({ name: "Investments", icon: "money" })], skipDuplicates: true });
-    expect(mocks.customCategoryFindMany).toHaveBeenCalledTimes(1);
-    expect(mocks.customSubcategoryFindMany).toHaveBeenCalledTimes(1);
+    expect(mocks.customCategoryFindMany).toHaveBeenCalledTimes(2);
+    expect(mocks.customSubcategoryFindMany).toHaveBeenCalledTimes(2);
     expect(mocks.customSubcategoryCreateMany).toHaveBeenCalledWith({ data: [{ userId: "user-1", categoryId: "category-investments", name: "Index funds", icon: "money" }], skipDuplicates: true });
     expect(mocks.transactionCreateMany).toHaveBeenCalledWith({ data: [expect.objectContaining({ category: "category-investments", userId: "user-1" })] });
     expect(mocks.db.$transaction).toHaveBeenCalledWith(expect.any(Function), { timeout: 15_000 });
@@ -194,6 +224,40 @@ describe("saveReceiptSplit ledger action", () => {
       name: "Mutual funds",
       icon: "money",
     } });
+  });
+
+  it("queues a CSV import without loading the full ledger", async () => {
+    const createdAt = new Date("2026-08-03T04:00:00.000Z");
+    mocks.importJobCreate.mockResolvedValue({ id: "import-1", status: "queued", totalRows: 300, processedRows: 0, error: null, createdAt, completedAt: null });
+    const response = await POST(new Request("http://localhost/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "startImportJob", payload: { newCategories: [], newSubcategories: [], transactions: [split("food", 1250, "Lunch")] } }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ job: { id: "import-1", status: "queued", totalRows: 300, processedRows: 0, error: null, createdAt: createdAt.toISOString(), completedAt: null } });
+    expect(mocks.importJobCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ userId: "user-1", totalRows: 1 }) });
+    expect(mocks.db.user.findUniqueOrThrow).not.toHaveBeenCalled();
+  });
+
+  it("processes a queued import batch and marks the job complete", async () => {
+    const createdAt = new Date("2026-08-03T04:00:00.000Z");
+    const job = { id: "import-1", status: "queued", totalRows: 1, processedRows: 0, payload: { newCategories: [], newSubcategories: [], transactions: [split("food", 1250, "Lunch")] }, createdCategoryIds: [], createdSubcategoryIds: [], error: null, lockExpiresAt: null, createdAt, completedAt: null };
+    const completed = { ...job, status: "completed", processedRows: 1, completedAt: new Date("2026-08-03T04:00:02.000Z") };
+    mocks.importJobFindFirst.mockResolvedValue(job);
+    mocks.importJobFindFirstOrThrow.mockResolvedValue(job);
+    mocks.importJobUpdate.mockResolvedValue(completed);
+    const response = await POST(new Request("http://localhost/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "processImportJob", payload: { jobId: "import-1" } }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ job: { id: "import-1", status: "completed", totalRows: 1, processedRows: 1, error: null, createdAt: createdAt.toISOString(), completedAt: completed.completedAt.toISOString() } });
+    expect(mocks.transactionCreateMany).toHaveBeenCalledWith({ data: [expect.objectContaining({ importJobId: "import-1", category: "food" })] });
+    expect(mocks.importJobUpdate).toHaveBeenCalledWith({ where: { id: "import-1" }, data: expect.objectContaining({ status: "completed", processedRows: 1 }) });
   });
 
   it("rejects custom subcategories that duplicate a built-in option", async () => {
@@ -356,5 +420,68 @@ describe("transaction Undo ledger actions", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "The Undo window for this transaction has expired." });
     expect(mocks.db.transaction.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("recurring account ledger actions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.db.user.findUniqueOrThrow.mockResolvedValue({ id: "user-1", name: "Test User", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, pinHash: null });
+    mocks.db.transaction.findMany.mockResolvedValue([]);
+    mocks.db.budget.findMany.mockResolvedValue([]);
+    mocks.db.recurringEntry.findMany.mockResolvedValue([]);
+    mocks.db.savingsGoal.findMany.mockResolvedValue([]);
+    mocks.db.customCategory.findMany.mockResolvedValue([]);
+    mocks.db.customSubcategory.findMany.mockResolvedValue([]);
+    mocks.db.paymentAccount.findMany.mockResolvedValue([]);
+    mocks.db.accountReconciliation.findMany.mockResolvedValue([]);
+    mocks.db.savedPlace.findMany.mockResolvedValue([]);
+    mocks.db.accountTransfer.findMany.mockResolvedValue([]);
+    mocks.db.dueItem.findMany.mockResolvedValue([]);
+    mocks.db.$transaction.mockImplementation(async (callback) => callback(mocks.transactionClient));
+  });
+
+  it("stores the selected account on a recurring entry", async () => {
+    mocks.recurringPaymentAccountFindFirstOrThrow.mockResolvedValue({ id: "account-1" });
+    mocks.recurringEntryCreate.mockResolvedValue({});
+
+    const response = await POST(new Request("http://localhost/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "saveRecurring", payload: { kind: "expense", category: "housing", amountMinor: 380000, paymentAccountId: "account-1", note: "Monthly EMI", tags: [], recurrenceUnit: "month", recurrenceInterval: 1, startOn: "2026-08-10" } }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recurringPaymentAccountFindFirstOrThrow).toHaveBeenCalledWith({ where: { id: "account-1", userId: "user-1" } });
+    expect(mocks.recurringEntryCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ userId: "user-1", paymentAccountId: "account-1" }) });
+  });
+
+  it("uses the selected account when confirming a recurring entry", async () => {
+    mocks.recurringEntryFindFirstOrThrow.mockResolvedValue({
+      id: "recurring-1",
+      userId: "user-1",
+      kind: "expense",
+      category: "housing",
+      amountMinor: 380000,
+      paymentAccountId: "account-1",
+      note: "Monthly EMI",
+      recurrenceUnit: "month",
+      recurrenceInterval: 1,
+      anchorDate: new Date("2026-08-07T00:00:00.000Z"),
+      nextDueOn: new Date("2026-08-07T00:00:00.000Z"),
+      active: true,
+    });
+    mocks.resetAccountFindFirstOrThrow.mockResolvedValue({ id: "account-1" });
+    mocks.recurringEntryUpdateMany.mockResolvedValue({ count: 1 });
+    mocks.recurringTransactionCreate.mockResolvedValue({});
+
+    const response = await POST(new Request("http://localhost/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "confirmRecurring", id: "recurring-1" }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recurringTransactionCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ paymentMode: "online", paymentAccountId: "account-1" }) });
   });
 });

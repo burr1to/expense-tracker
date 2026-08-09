@@ -33,6 +33,10 @@ export interface MonthlyBreathingRoom {
   projectedNetMinor: number;
 }
 
+export function calculateSafeToSpend(currentBalanceMinor: number, breathingRoom: MonthlyBreathingRoom) {
+  return currentBalanceMinor + breathingRoom.upcomingIncomeMinor - breathingRoom.upcomingExpensesMinor;
+}
+
 const sum = (values: readonly number[]) => values.reduce((total, value) => total + value, 0);
 const percentage = (value: number, total: number) => total > 0 ? Math.round((value / total) * 100) : 0;
 

@@ -15,6 +15,7 @@ export default function PlansRoute() {
     dueItems={ledger.dueItems}
     goals={ledger.goals}
     customCategories={ledger.customCategories}
+    paymentAccounts={ledger.paymentAccounts}
     onMonthChange={setMonth}
     onSaveBudget={ledger.saveBudget}
     onDeleteBudget={ledger.deleteBudget}

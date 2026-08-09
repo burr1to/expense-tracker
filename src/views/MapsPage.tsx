@@ -301,6 +301,7 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
       });
       instance.on("idle", () => setMapError(null));
       instance.on("load", () => {
+        instance.resize();
         instance.addSource("transactions", { type: "geojson", data: { type: "FeatureCollection", features } });
         if (mapMode === "heatmap") {
           instance.addLayer({ id: "transaction-heatmap", type: "heatmap", source: "transactions", maxzoom: 17, paint: {

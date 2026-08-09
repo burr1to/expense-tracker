@@ -3,7 +3,7 @@
 import { Loader, TextInput } from "@mantine/core";
 import { ClockCounterClockwise, Crosshair, MagnifyingGlass, MapPin, NavigationArrow, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { KATHMANDU_BOUNDS, KATHMANDU_CENTER, KATHMANDU_MAP_MAX_ZOOM, addKathmanduLabelMarkers, applyKathmanduMapTheme, isInsideKathmandu, kathmanduMapStyle, nearestKathmanduPlace, pinnedKathmanduLocation } from "../lib/kathmandu-locations";
+import { KATHMANDU_BOUNDS, KATHMANDU_CENTER, KATHMANDU_MAP_MAX_ZOOM, KATHMANDU_PLACES, addKathmanduLabelMarkers, applyKathmanduMapTheme, isInsideKathmandu, kathmanduMapStyle, nearestKathmanduPlace, pinnedKathmanduLocation } from "../lib/kathmandu-locations";
 import { savedPlaceIconOptions } from "../lib/saved-places";
 import type { SavedPlace, SavedPlaceDraft, SavedPlaceIconName, TransactionLocationDraft } from "../types";
 import { SavedPlaceIcon } from "./SavedPlaceIcon";
@@ -32,6 +32,7 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
   const map = useRef<import("maplibre-gl").Map | null>(null);
   const marker = useRef<import("maplibre-gl").Marker | null>(null);
   const mapModule = useRef<typeof import("maplibre-gl") | null>(null);
+  const candidateRef = useRef<TransactionLocationDraft | null>(value);
   const [candidate, setCandidate] = useState<TransactionLocationDraft | null>(value);
   const [query, setQuery] = useState("");
   const [locationError, setLocationError] = useState<string | null>(null);
@@ -44,21 +45,29 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const savedLocationDrafts = useMemo(() => savedPlaces.map((place): TransactionLocationDraft => ({ label: place.name, address: place.address, latitude: place.latitude, longitude: place.longitude, accuracy: null, source: "saved", savedPlaceId: place.id })), [savedPlaces]);
+  const curatedSearchResults = useMemo<LocationSearchResult[]>(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return [];
+    return KATHMANDU_PLACES
+      .filter((place) => `${place.name} ${place.address}`.toLowerCase().includes(normalized))
+      .map(({ name: label, address, latitude, longitude }) => ({ label, address, latitude, longitude }));
+  }, [query]);
   const visibleLocations = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     const previousLocations = mode === "transaction" ? [...savedLocationDrafts, ...recentLocations] : recentLocations;
     if (!normalized) return previousLocations.slice(0, 8);
     const previousMatches = previousLocations.filter((place) => `${place.label} ${place.address}`.toLowerCase().includes(normalized));
     const seen = new Set(previousMatches.map((place) => `${place.latitude.toFixed(5)}-${place.longitude.toFixed(5)}`));
-    return [...previousMatches, ...searchResults.filter((place) => {
+    return [...previousMatches, ...[...curatedSearchResults, ...searchResults].filter((place) => {
       const key = `${place.latitude.toFixed(5)}-${place.longitude.toFixed(5)}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     })].slice(0, 8);
-  }, [mode, query, recentLocations, savedLocationDrafts, searchResults]);
+  }, [curatedSearchResults, mode, query, recentLocations, savedLocationDrafts, searchResults]);
 
   const moveMarker = (next: TransactionLocationDraft, zoom = 16) => {
+    candidateRef.current = next;
     setCandidate(next);
     if (!map.current || !mapModule.current) return;
     if (!marker.current) {
@@ -67,7 +76,11 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
         .addTo(map.current);
       marker.current.on("dragend", () => {
         const point = marker.current?.getLngLat();
-        if (point) setCandidate(pinnedKathmanduLocation(point.lat, point.lng));
+        if (point) {
+          const pinned = pinnedKathmanduLocation(point.lat, point.lng);
+          candidateRef.current = pinned;
+          setCandidate(pinned);
+        }
       });
     } else marker.current.setLngLat([next.longitude, next.latitude]);
     map.current.flyTo({ center: [next.longitude, next.latitude], zoom });
@@ -75,6 +88,7 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
 
   useEffect(() => {
     if (!open) return;
+    candidateRef.current = value;
     setCandidate(value);
     setQuery("");
     setLocationError(null);
@@ -87,15 +101,17 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
     setSaveError(null);
     let active = true;
     let removeLabels = () => {};
+    let resizeObserver: ResizeObserver | null = null;
     void import("maplibre-gl").then((module) => {
       if (!active || !mapNode.current) return;
       mapModule.current = module;
-      const center: [number, number] = value ? [value.longitude, value.latitude] : KATHMANDU_CENTER;
+      const initialCandidate = candidateRef.current;
+      const center: [number, number] = initialCandidate ? [initialCandidate.longitude, initialCandidate.latitude] : KATHMANDU_CENTER;
       const instance = new module.Map({
         container: mapNode.current,
         style: kathmanduMapStyle(),
         center,
-        zoom: value ? 16 : 12.5,
+        zoom: initialCandidate ? 16 : 12.5,
         maxBounds: [[KATHMANDU_BOUNDS.west, KATHMANDU_BOUNDS.south], [KATHMANDU_BOUNDS.east, KATHMANDU_BOUNDS.north]],
         minZoom: 11,
         maxZoom: KATHMANDU_MAP_MAX_ZOOM,
@@ -104,6 +120,8 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
       instance.addControl(new module.NavigationControl({ showCompass: false }), "top-right");
       instance.on("style.load", () => applyKathmanduMapTheme(instance));
       removeLabels = addKathmanduLabelMarkers(instance, module.Marker);
+      resizeObserver = new ResizeObserver(() => instance.resize());
+      resizeObserver.observe(mapNode.current);
       instance.on("error", (event) => {
         const message = event.error?.message ?? "";
         if (/AJAXError|Failed to fetch|tile/i.test(message)) {
@@ -113,17 +131,34 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
         console.error("[location-picker] Map error", event.error);
       });
       instance.on("idle", () => setMapError(null));
+      instance.on("load", () => instance.resize());
       instance.on("click", (event) => moveMarker(pinnedKathmanduLocation(event.lngLat.lat, event.lngLat.lng)));
-      if (value) moveMarker(value, 16);
+      if (initialCandidate) moveMarker(initialCandidate, 16);
+    }).catch((error) => {
+      if (!active) return;
+      setMapError("The map could not load. You can still search for a place or try again.");
+      console.error("[location-picker] Map initialization failed", error);
     });
     return () => {
       active = false;
       removeLabels();
+      resizeObserver?.disconnect();
       marker.current?.remove();
       marker.current = null;
       map.current?.remove();
       map.current = null;
       mapModule.current = null;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const resize = () => map.current?.resize();
+    const frame = window.requestAnimationFrame(resize);
+    const timer = window.setTimeout(resize, 360);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
     };
   }, [open]);
 
@@ -251,7 +286,7 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
       </div>
       <footer className={mode === "saved-place" ? "location-picker-footer save-place-mode" : "location-picker-footer"}>
         <div className="selected-location">
-          {candidate ? <><MapPin size={20} weight="fill" /><div><TextInput aria-label="Location label" value={candidate.label} onChange={(event) => setCandidate({ ...candidate, label: event.target.value })} /><small>{candidate.address}</small></div></> : <><MapPin size={20} /><div><strong>No location selected</strong><small>Click anywhere inside the Kathmandu map.</small></div></>}
+          {candidate ? <><MapPin size={20} weight="fill" /><div><TextInput aria-label="Location label" value={candidate.label} onChange={(event) => { const next = { ...candidate, label: event.target.value }; candidateRef.current = next; setCandidate(next); }} /><small>{candidate.address}</small></div></> : <><MapPin size={20} /><div><strong>No location selected</strong><small>Click anywhere inside the Kathmandu map.</small></div></>}
         </div>
         {mode === "saved-place" && <div className="location-picker-actions"><TextInput label="Place name" aria-label="Saved place name" value={savedPlaceName} onChange={(event) => setSavedPlaceName(event.currentTarget.value)} placeholder="e.g. Home or Office" /><fieldset className="saved-place-icon-picker"><legend>Icon</legend>{savedPlaceIconOptions.map((option) => <button type="button" className={savedPlaceIcon === option.value ? "active" : undefined} aria-label={option.label} aria-pressed={savedPlaceIcon === option.value} title={option.label} key={option.value} onClick={() => setSavedPlaceIcon(option.value)}><SavedPlaceIcon icon={option.value} size={18} /></button>)}</fieldset>{saveError && <div className="form-error" role="alert">{saveError}</div>}</div>}
         <div className="dialog-actions"><button type="button" className="secondary-button" disabled={saving} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={saving || !candidate || !candidate.label.trim() || (mode === "saved-place" && !savedPlaceName.trim())} onClick={() => void confirm()}><MapPin size={17} />{saving ? "Saving…" : mode === "saved-place" ? "Save place" : "Use this location"}</button></div>

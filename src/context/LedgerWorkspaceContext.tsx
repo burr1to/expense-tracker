@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, type Dispatch, type SetStateAction } from "react";
+import type { OnboardingStepId } from "../lib/onboarding";
 import type { LedgerTransaction, SavedPlace } from "../types";
 import { useLedger } from "./LedgerContext";
 
@@ -23,6 +24,7 @@ interface LedgerWorkspaceContextValue {
   openEdit: (transaction: LedgerTransaction) => void;
   removeTransaction: (transaction: LedgerTransaction) => Promise<void>;
   navigate: (view: import("../types").AppView) => void;
+  completeOnboardingStep: (step: OnboardingStepId) => void;
   lock: () => void;
 }
 

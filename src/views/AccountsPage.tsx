@@ -1,4 +1,4 @@
-import { ArrowCounterClockwise, ArrowsLeftRight, Bank, CalendarBlank, Check, CheckCircle, Copy, LockKey, Plus, Receipt, Scales, ShieldCheck, Trash, TrendDown, TrendUp } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowsLeftRight, Bank, CalendarBlank, Check, CheckCircle, Copy, LockKey, Plus, Receipt, Scales, ShieldCheck, Trash, TrendDown, TrendUp, UploadSimple } from "@phosphor-icons/react";
 import { Modal, NumberInput, Select, TextInput } from "@mantine/core";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -6,7 +6,7 @@ import { ButtonSpinner } from "../components/ButtonSpinner";
 import { EmptyState } from "../components/EmptyState";
 import { TransactionRow } from "../components/TransactionRow";
 import { useLedger } from "../context/LedgerContext";
-import { expectedAccountBalanceThrough } from "../lib/account-balances";
+import { accountActivityThrough, expectedAccountBalanceThrough } from "../lib/account-balances";
 import { formatMoney, majorToMinor } from "../lib/currency";
 import { toDateInput } from "../lib/dates";
 import { NEPAL_MOBILE_BANKS, PAYMENT_ACCOUNT_TYPES, paymentAccountLabel } from "../lib/payment-accounts";
@@ -90,6 +90,10 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
   const accountExpenses = accountTransactions.reduce((sum, transaction) => sum + (transaction.kind === "expense" ? transaction.amountMinor : 0), 0);
   const selectedReconciliations = reconciliations.filter((item) => item.paymentAccountId === selectedAccountId);
   const existingReconciliation = selectedReconciliations.find((item) => item.monthKey === reconciliationMonth) ?? null;
+  const latestReconciliation = selectedReconciliations[0] ?? null;
+  const postReconciliationActivity = latestReconciliation?.id === existingReconciliation?.id && selectedAccount
+    ? accountActivityThrough(selectedAccount, transactions, transfers)
+    : null;
   const reconciliationPreview = selectedAccount && reconciliationCheckedOn >= selectedAccount.balanceAsOf
     ? expectedAccountBalanceThrough(selectedAccount, transactions, transfers, reconciliationCheckedOn)
     : null;
@@ -229,6 +233,11 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
   return <div className="page accounts-page">
     <header className="page-header"><div><span className="eyebrow">Your money sources</span><h1>Accounts</h1><p>Manage tracked balances, move money between accounts, and review each account’s transactions.</p></div></header>
 
+    <section className="import-reconcile-note" aria-label="Import and reconciliation guidance">
+      <div><strong>Import history first, reconcile later</strong><p>CSV import adds past transactions. Reconciliation is a separate, optional check against the balance currently shown by your bank or wallet. You do not need to do both during setup.</p></div>
+      <Link className="secondary-button small" href="/transactions#import-csv"><UploadSimple size={16} />Import past history</Link>
+    </section>
+
     <section className="accounts-overview" aria-label="Tracked accounts">
       <div className="section-heading"><div><span className="section-label">Balances</span><h2>Tracked accounts</h2></div><Bank size={23} weight="duotone" /></div>
       <div className="account-summary-grid">
@@ -240,7 +249,7 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
     </section>
 
     <div className="accounts-management-grid">
-      <section className="settings-panel" id="add-account"><div className="settings-title"><span className="settings-icon"><Bank size={23} /></span><div><h2>Add and manage accounts</h2><p>Enter the real balance currently shown by your bank or wallet.</p></div></div>
+      <section className="settings-panel" id="add-account"><div className="settings-title"><span className="settings-icon"><Bank size={23} /></span><div><h2>Add and manage accounts</h2><p>Enter the real balance currently shown by your bank or wallet. Create this account before importing its past online transactions.</p></div></div>
         {profile.hasPin ? <form className="settings-form" onSubmit={addPaymentAccount} aria-busy={accountAction === "add"}>
           <Select label="Account type" value={accountType} onChange={(value) => { if (!value) return; setAccountType(value as PaymentAccountType); setAccountProvider(""); }} data={[...PAYMENT_ACCOUNT_TYPES]} allowDeselect={false} disabled={Boolean(accountAction)} />
           {accountType === "mobile_banking" && <Select label="Bank" placeholder="Search Nepal banks" value={accountProvider || null} onChange={(value) => setAccountProvider(value ?? "")} data={NEPAL_MOBILE_BANKS.map((bank) => ({ value: bank, label: bank }))} searchable required disabled={Boolean(accountAction)} />}
@@ -252,7 +261,7 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
         </form> : <div className="account-pin-required"><span><LockKey size={21} weight="duotone" /></span><div><strong>PIN required to add an account</strong><p>Set up a 4–6 digit ledger PIN in Profile first. It protects the balances shown on your dashboard.</p></div><Link className="primary-button" href="/profile#security-heading">Go to PIN setup</Link></div>}
         <div className="payment-account-list">{paymentAccounts.map((account) => {
           const hasAuditHistory = reconciliations.some((item) => item.paymentAccountId === account.id);
-          return <div key={account.id} className="payment-account-item" aria-busy={accountAction === account.id}><div className="payment-account-summary"><span><strong>{paymentAccountLabel(account)}</strong><small>{formatMoney(account.currentBalanceMinor, profile.currency)} · checked {account.balanceAsOf}</small><span className="account-import-id"><span>CSV import ID</span><code>{account.importId}</code><button type="button" onClick={() => void copyImportId(account.importId)} aria-label={`Copy CSV import ID for ${paymentAccountLabel(account)}`}>{copiedImportId === account.importId ? <Check size={13} /> : <Copy size={13} />}{copiedImportId === account.importId ? "Copied" : "Copy"}</button></span></span><div className="payment-account-actions">{hasAuditHistory ? <><small className="account-audit-managed"><ShieldCheck size={14} />Reconciled</small><button type="button" className="text-button danger-text" disabled={Boolean(accountAction)} onClick={() => { setResetAccount(account); setResetError(null); }}><ArrowCounterClockwise size={15} />Reset audit history</button></> : <button type="button" className="text-button" disabled={Boolean(accountAction)} onClick={() => beginBalanceEdit(account)}>Correct opening balance</button>}<button type="button" className="icon-button danger" disabled={Boolean(accountAction) || hasAuditHistory} title={hasAuditHistory ? "Reset this account's audit history before removing it." : undefined} onClick={() => void removePaymentAccount(account.id)} aria-label={`Remove ${paymentAccountLabel(account)}`}>{accountAction === account.id ? <ButtonSpinner /> : <Trash size={16} />}</button></div></div>{editingBalanceId === account.id && !hasAuditHistory && <form className="account-balance-form" onSubmit={saveBalance}><NumberInput label="Opening balance" value={editingBalance} onChange={(value) => setEditingBalance(String(value))} decimalScale={2} thousandSeparator="," required disabled={Boolean(accountAction)} /><TextInput label="Balance as of" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={editingBalanceAsOf} onChange={(event) => setEditingBalanceAsOf(event.currentTarget.value)} required disabled={Boolean(accountAction)} /><div className="inline-actions"><button type="button" className="secondary-button" onClick={() => setEditingBalanceId(null)} disabled={Boolean(accountAction)}>Cancel</button><button className="primary-button" disabled={Boolean(accountAction)}>{accountAction === account.id ? <><ButtonSpinner />Saving…</> : "Save opening balance"}</button></div></form>}</div>;
+          return <div key={account.id} className="payment-account-item" aria-busy={accountAction === account.id}><div className="payment-account-summary"><span><strong>{paymentAccountLabel(account)}</strong><small>{formatMoney(account.currentBalanceMinor, profile.currency)} · checked {account.balanceAsOf}</small><span className="account-import-id"><span>Use this ID in CSV imports</span><code>{account.importId}</code><button type="button" onClick={() => void copyImportId(account.importId)} aria-label={`Copy CSV import ID for ${paymentAccountLabel(account)}`}>{copiedImportId === account.importId ? <Check size={13} /> : <Copy size={13} />}{copiedImportId === account.importId ? "Copied" : "Copy"}</button></span></span><div className="payment-account-actions">{hasAuditHistory ? <><small className="account-audit-managed"><ShieldCheck size={14} />Reconciled</small><button type="button" className="text-button danger-text" disabled={Boolean(accountAction)} onClick={() => { setResetAccount(account); setResetError(null); }}><ArrowCounterClockwise size={15} />Reset audit history</button></> : <button type="button" className="text-button" disabled={Boolean(accountAction)} onClick={() => beginBalanceEdit(account)}>Correct opening balance</button>}<button type="button" className="icon-button danger" disabled={Boolean(accountAction) || hasAuditHistory} title={hasAuditHistory ? "Reset this account's audit history before removing it." : undefined} onClick={() => void removePaymentAccount(account.id)} aria-label={`Remove ${paymentAccountLabel(account)}`}>{accountAction === account.id ? <ButtonSpinner /> : <Trash size={16} />}</button></div></div>{editingBalanceId === account.id && !hasAuditHistory && <form className="account-balance-form" onSubmit={saveBalance}><NumberInput label="Opening balance" value={editingBalance} onChange={(value) => setEditingBalance(String(value))} decimalScale={2} thousandSeparator="," required disabled={Boolean(accountAction)} /><TextInput label="Balance as of" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={editingBalanceAsOf} onChange={(event) => setEditingBalanceAsOf(event.currentTarget.value)} required disabled={Boolean(accountAction)} /><div className="inline-actions"><button type="button" className="secondary-button" onClick={() => setEditingBalanceId(null)} disabled={Boolean(accountAction)}>Cancel</button><button className="primary-button" disabled={Boolean(accountAction)}>{accountAction === account.id ? <><ButtonSpinner />Saving…</> : "Save opening balance"}</button></div></form>}</div>;
         })}{!paymentAccounts.length && <p>No tracked accounts yet.</p>}</div>
       </section>
 
@@ -264,7 +273,7 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
 
     <section className="account-reconciliation-section" aria-labelledby="account-reconciliation-title">
       <div className="section-heading reconciliation-heading">
-        <div><span className="section-label">Monthly audit</span><h2 id="account-reconciliation-title">Account reconciliation</h2><p>Compare the ledger with the balance shown by your bank or wallet, then lock the result.</p></div>
+        <div><span className="section-label">Optional account check</span><h2 id="account-reconciliation-title">Reconcile an account</h2><p>Importing fills your history. Reconciliation compares that history with the balance currently shown by your bank or wallet, then locks the result for audit.</p></div>
         <Scales size={25} weight="duotone" />
       </div>
 
@@ -286,25 +295,35 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
             <div className="reconciliation-approved-title"><span><CheckCircle size={22} weight="fill" /></span><div><strong>Approved and locked</strong><small>Checked {existingReconciliation.checkedOn} · approved {new Date(existingReconciliation.approvedAt).toLocaleString()}</small></div></div>
             <div className="reconciliation-calculation">
               <div><span>Starting balance</span><strong>{formatMoney(existingReconciliation.startingBalanceMinor, profile.currency)}</strong></div>
-              <div><span>Income</span><strong className="positive">+{formatMoney(existingReconciliation.incomeMinor, profile.currency)}</strong></div>
-              <div><span>Expenses</span><strong className="negative">−{formatMoney(existingReconciliation.expenseMinor, profile.currency)}</strong></div>
+              <div><span>Account income</span><strong className="positive">+{formatMoney(existingReconciliation.incomeMinor, profile.currency)}</strong></div>
+              <div><span>Account expenses</span><strong className="negative">−{formatMoney(existingReconciliation.expenseMinor, profile.currency)}</strong></div>
               <div><span>Transfers in</span><strong>+{formatMoney(existingReconciliation.transfersInMinor, profile.currency)}</strong></div>
               <div><span>Transfers out</span><strong>−{formatMoney(existingReconciliation.transfersOutMinor, profile.currency)}</strong></div>
               <div className="reconciliation-total"><span>Expected balance</span><strong>{formatMoney(existingReconciliation.expectedBalanceMinor, profile.currency)}</strong></div>
               <div><span>Actual balance</span><strong>{formatMoney(existingReconciliation.actualBalanceMinor, profile.currency)}</strong></div>
               <div className="reconciliation-total"><span>Adjustment</span><strong>{formatMoney(existingReconciliation.adjustmentMinor, profile.currency)}</strong></div>
             </div>
+            {postReconciliationActivity && <div>
+              <div className="reconciliation-period-copy"><span>Activity after this reconciliation was approved</span><small>These account entries are not part of the locked audit above. They are included in the current tracked balance.</small></div>
+              <div className="reconciliation-calculation">
+                <div><span>New account income</span><strong className="positive">+{formatMoney(postReconciliationActivity.incomeMinor, profile.currency)}</strong></div>
+                <div><span>New account expenses</span><strong className="negative">−{formatMoney(postReconciliationActivity.expenseMinor, profile.currency)}</strong></div>
+                <div><span>New transfers in</span><strong>+{formatMoney(postReconciliationActivity.transfersInMinor, profile.currency)}</strong></div>
+                <div><span>New transfers out</span><strong>−{formatMoney(postReconciliationActivity.transfersOutMinor, profile.currency)}</strong></div>
+                <div className="reconciliation-total"><span>Current tracked balance</span><strong>{formatMoney(selectedAccount.currentBalanceMinor, profile.currency)}</strong></div>
+              </div>
+            </div>}
             {existingReconciliation.adjustmentNote && <p className="reconciliation-note"><strong>Explanation:</strong> {existingReconciliation.adjustmentNote}</p>}
           </div> : reconciliationDateInvalid || !reconciliationPreview ? <div className="reconciliation-unavailable">
             <CalendarBlank size={22} />
             <div><strong>This period cannot be reconciled</strong><p>{selectedAccount && reconciliationCheckedOn < selectedAccount.balanceAsOf ? `The account balance is already checked through ${selectedAccount.balanceAsOf}. Choose that month or a later one.` : "Choose a valid account, month, and date that is not in the future."}</p></div>
           </div> : <form className="reconciliation-form" onSubmit={approveReconciliation} aria-busy={reconciling}>
-            <div className="reconciliation-period-copy"><span>Starting from the confirmed balance on <strong>{selectedAccount?.balanceAsOf}</strong></span><small>Only account activity after that snapshot and through the checked date is included, so nothing is counted twice.</small></div>
+            <div className="reconciliation-period-copy"><span>Account activity for <strong>{selectedAccount ? paymentAccountLabel(selectedAccount) : "the selected account"}</strong> since <strong>{selectedAccount?.balanceAsOf}</strong></span><small>Only this account’s activity after its confirmed balance and through the checked date is included. Dashboard income and expense totals cover the whole ledger, so they can differ from this account check.</small></div>
             <TextInput label="Balance checked on" type="date" value={reconciliationCheckedOn} min={`${reconciliationMonth}-01`} max={maximumCheckedOn} onChange={(event) => { setReconciliationCheckedOn(event.currentTarget.value); setReconciliationError(null); }} required disabled={reconciling} />
             <div className="reconciliation-calculation">
               <div><span>Confirmed starting balance</span><strong>{formatMoney(selectedAccount?.balanceMinor ?? 0, profile.currency)}</strong></div>
-              <div><span>Income added</span><strong className="positive">+{formatMoney(reconciliationPreview.incomeMinor, profile.currency)}</strong></div>
-              <div><span>Expenses deducted</span><strong className="negative">−{formatMoney(reconciliationPreview.expenseMinor, profile.currency)}</strong></div>
+              <div><span>Account income added</span><strong className="positive">+{formatMoney(reconciliationPreview.incomeMinor, profile.currency)}</strong></div>
+              <div><span>Account expenses deducted</span><strong className="negative">−{formatMoney(reconciliationPreview.expenseMinor, profile.currency)}</strong></div>
               <div><span>Transfers in</span><strong>+{formatMoney(reconciliationPreview.transfersInMinor, profile.currency)}</strong></div>
               <div><span>Transfers out</span><strong>−{formatMoney(reconciliationPreview.transfersOutMinor, profile.currency)}</strong></div>
               <div className="reconciliation-total"><span>Expected closing balance</span><strong>{formatMoney(reconciliationPreview.expectedBalanceMinor, profile.currency)}</strong></div>

@@ -1,0 +1,3 @@
+export const ASYNC_IMPORT_THRESHOLD = 250;
+export const IMPORT_BATCH_SIZE = 100;
+export const IMPORT_POLL_INTERVAL_MS = 1_500;

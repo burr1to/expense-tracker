@@ -1,11 +1,22 @@
 export type CurrencyCode = "NPR" | "USD" | "AUD";
 export type TransactionKind = "income" | "expense";
-export type AppView = "home" | "plan" | "dues" | "reports" | "transactions" | "accounts" | "maps" | "settings";
+export type AppView = "home" | "plan" | "calculator" | "dues" | "reports" | "transactions" | "accounts" | "maps" | "settings";
 export type TransactionCategory = string;
 export type PaymentMode = "cash" | "cheque" | "online";
 export type PaymentAccountType = "mobile_banking" | "esewa" | "khalti" | "connect_ips";
 export type CategoryIconName = "tag" | "money" | "work" | "gift" | "home" | "food" | "transport" | "utilities" | "shopping" | "health" | "entertainment" | "education" | "travel";
 export type RecurrenceUnit = "day" | "week" | "month" | "year";
+export type ImportJobStatus = "queued" | "processing" | "completed" | "failed";
+
+export interface ImportJob {
+  id: string;
+  status: ImportJobStatus;
+  totalRows: number;
+  processedRows: number;
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
 
 export interface Profile {
   id: string;
@@ -152,6 +163,7 @@ export interface RecurringEntry {
   kind: TransactionKind;
   category: TransactionCategory;
   amountMinor: number;
+  paymentAccountId: string | null;
   note: string;
   tags: string[];
   dayOfMonth: number | null;
@@ -166,6 +178,7 @@ export interface RecurringDraft {
   kind: TransactionKind;
   category: TransactionCategory;
   amount: string;
+  paymentAccountId: string | null;
   note: string;
   tags: string;
   recurrenceUnit: RecurrenceUnit;

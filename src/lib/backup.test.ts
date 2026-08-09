@@ -72,13 +72,14 @@ describe("full backup CSV", () => {
   it("accepts both legacy monthly and richer recurring schedules", () => {
     const csv = serializeBackupCsv([
       ...baseRecords,
+      { entity: "payment_account", backupId: "account-1", payload: { importId: "11111111-1111-4111-8111-111111111111", type: "esewa", provider: "esewa", label: "Daily wallet", balanceMinor: 125000, balanceAsOf: "2026-07-25", balanceRecordedAt: exportedAt, createdAt: exportedAt, updatedAt: exportedAt } },
       { entity: "recurring_entry", backupId: "legacy", payload: { kind: "expense", category: "housing", amountMinor: 2000000, note: "Rent", tags: [], dayOfMonth: 1, nextDueOn: "2026-08-01", active: true, createdAt: exportedAt, updatedAt: exportedAt } },
-      { entity: "recurring_entry", backupId: "fortnightly", payload: { kind: "income", category: "salary", amountMinor: 500000, note: "Contract work", tags: [], dayOfMonth: null, recurrenceUnit: "week", recurrenceInterval: 2, anchorDate: "2026-07-27", nextDueOn: "2026-08-10", active: true, createdAt: exportedAt, updatedAt: exportedAt } },
+      { entity: "recurring_entry", backupId: "fortnightly", payload: { kind: "income", category: "salary", amountMinor: 500000, paymentAccountId: "account-1", note: "Contract work", tags: [], dayOfMonth: null, recurrenceUnit: "week", recurrenceInterval: 2, anchorDate: "2026-07-27", nextDueOn: "2026-08-10", active: true, createdAt: exportedAt, updatedAt: exportedAt } },
     ]);
 
     const recurring = parseBackupCsv(csv).records.filter((record) => record.entity === "recurring_entry");
     expect(recurring).toHaveLength(2);
     expect(recurring[0].payload).not.toHaveProperty("recurrenceUnit");
-    expect(recurring[1].payload).toMatchObject({ recurrenceUnit: "week", recurrenceInterval: 2, anchorDate: "2026-07-27" });
+    expect(recurring[1].payload).toMatchObject({ recurrenceUnit: "week", recurrenceInterval: 2, anchorDate: "2026-07-27", paymentAccountId: "account-1" });
   });
 });

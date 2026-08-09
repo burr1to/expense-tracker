@@ -3,6 +3,7 @@ import type { AppView } from "../types";
 export const appRoutes: Record<AppView, string> = {
   home: "/",
   plan: "/plans",
+  calculator: "/calculator",
   dues: "/dues",
   reports: "/reports",
   transactions: "/transactions",
@@ -13,6 +14,7 @@ export const appRoutes: Record<AppView, string> = {
 
 export function viewFromPathname(pathname: string): AppView {
   if (pathname.startsWith("/plans")) return "plan";
+  if (pathname.startsWith("/calculator")) return "calculator";
   if (pathname.startsWith("/dues")) return "dues";
   if (pathname.startsWith("/reports")) return "reports";
   if (pathname.startsWith("/transactions")) return "transactions";

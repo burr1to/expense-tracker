@@ -38,6 +38,7 @@ model User {
   receiptScans      ReceiptScan[]
   savedPlaces       SavedPlace[]
   recovery          AccountRecovery?
+  importJobs        ImportJob[]
 }
 
 model Session {
@@ -119,6 +120,7 @@ model Transaction {
   locationSource    String?
   savedPlaceId      String?
   receiptScanId     String?
+  importJobId       String?
   deletedAt         DateTime?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
@@ -127,12 +129,34 @@ model Transaction {
   savedPlace        SavedPlace?        @relation(fields: [savedPlaceId], references: [id], onDelete: SetNull)
   receipt           ReceiptAttachment?
   receiptScan       ReceiptScan?       @relation(fields: [receiptScanId], references: [id], onDelete: SetNull)
+  importJob         ImportJob?        @relation(fields: [importJobId], references: [id], onDelete: SetNull)
 
   @@index([userId, occurredOn])
   @@index([userId, deletedAt])
   @@index([paymentAccountId])
   @@index([savedPlaceId])
   @@index([receiptScanId])
+  @@index([importJobId])
+}
+
+model ImportJob {
+  id                    String        @id @default(cuid())
+  userId                String
+  status                String        @default("queued")
+  totalRows             Int
+  processedRows         Int           @default(0)
+  payload               Json
+  createdCategoryIds    String[]      @default([])
+  createdSubcategoryIds String[]      @default([])
+  error                 String?
+  lockExpiresAt         DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  user                  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions          Transaction[]
+
+  @@index([userId, status])
 }
 
 model SavedPlace {
@@ -167,6 +191,7 @@ model PaymentAccount {
   user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   reconciliations   AccountReconciliation[]
   transactions      Transaction[]
+  recurringEntries   RecurringEntry[]
   outgoingTransfers AccountTransfer[] @relation("TransferFrom")
   incomingTransfers AccountTransfer[] @relation("TransferTo")
 
@@ -236,6 +261,7 @@ model RecurringEntry {
   kind               String
   category           String
   amountMinor        Int
+  paymentAccountId   String?
   note               String   @default("")
   tags               String[] @default([])
   dayOfMonth         Int?
@@ -247,8 +273,10 @@ model RecurringEntry {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paymentAccount     PaymentAccount? @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
 
   @@index([userId, nextDueOn])
+  @@index([paymentAccountId])
 }
 
 model SavingsGoal {

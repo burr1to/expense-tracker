@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateBudgetPacing, calculateMonthlyBreathingRoom } from "./planning-insights";
+import { calculateBudgetPacing, calculateMonthlyBreathingRoom, calculateSafeToSpend } from "./planning-insights";
 import type { Budget, DueItem, LedgerTransaction, RecurringEntry } from "../types";
 
 const budget: Budget = { id: "budget-1", userId: "user-1", monthKey: "2026-07", category: "food", amountMinor: 1200000 };
@@ -31,6 +31,7 @@ const recurring = (overrides: Partial<RecurringEntry>): RecurringEntry => ({
   kind: "expense",
   category: "food",
   amountMinor: 200000,
+  paymentAccountId: null,
   note: "",
   tags: [],
   dayOfMonth: 20,
@@ -131,6 +132,18 @@ describe("budget pacing", () => {
 });
 
 describe("monthly breathing room", () => {
+  it("calculates a safe-to-spend estimate from current balance and known commitments", () => {
+    expect(calculateSafeToSpend(1000000, {
+      loggedIncomeMinor: 0,
+      loggedExpensesMinor: 0,
+      upcomingIncomeMinor: 250000,
+      upcomingExpensesMinor: 400000,
+      projectedIncomeMinor: 250000,
+      projectedExpensesMinor: 400000,
+      projectedNetMinor: -150000,
+    })).toBe(850000);
+  });
+
   it("projects logged and upcoming income and expenses without mixing their states", () => {
     const result = calculateMonthlyBreathingRoom(
       [

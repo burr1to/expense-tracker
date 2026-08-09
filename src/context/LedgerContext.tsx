@@ -2,9 +2,10 @@
 "use client";
 
 import { addDays, format } from "date-fns";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { majorToMinor } from "../lib/currency";
-import type { AccountReconciliation, AccountTransfer, Budget, CategoryIconName, CustomCategory, CustomSubcategory, DueDraft, DueItem, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, ReceiptUpload, RecurringDraft, RecurringEntry, SavedPlace, SavedPlaceDraft, SavingsGoal, TransactionDraft, TransactionKind } from "../types";
+import { ASYNC_IMPORT_THRESHOLD, IMPORT_POLL_INTERVAL_MS } from "../lib/import-job";
+import type { AccountReconciliation, AccountTransfer, Budget, CategoryIconName, CustomCategory, CustomSubcategory, DueDraft, DueItem, ImportJob, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, ReceiptUpload, RecurringDraft, RecurringEntry, SavedPlace, SavedPlaceDraft, SavingsGoal, TransactionDraft, TransactionKind } from "../types";
 import type { CsvCategoryDraft, CsvSubcategoryDraft } from "../lib/csv";
 import { useAuth } from "./AuthContext";
 
@@ -18,7 +19,7 @@ interface LedgerData { profile: Profile; transactions: LedgerTransaction[]; budg
 export interface BackupRestoreResult { restoredAt: string; exportedAt: string; counts: Record<string, number> }
 interface LedgerContextValue extends LedgerData {
   loading: boolean; error: string | null;
-  saveTransaction: (draft: TransactionDraft, id?: string) => Promise<string | undefined>; importTransactions: (drafts: TransactionDraft[], newCategories?: CsvCategoryDraft[], newSubcategories?: CsvSubcategoryDraft[]) => Promise<number>; saveReceiptSplit: (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => Promise<number>; deleteTransaction: (id: string) => Promise<void>; restoreTransaction: (id: string) => Promise<void>;
+  saveTransaction: (draft: TransactionDraft, id?: string) => Promise<string | undefined>; importTransactions: (drafts: TransactionDraft[], newCategories?: CsvCategoryDraft[], newSubcategories?: CsvSubcategoryDraft[]) => Promise<ImportJob | null>; importJobs: ImportJob[]; dismissImportJob: (id: string) => void; saveReceiptSplit: (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => Promise<number>; deleteTransaction: (id: string) => Promise<void>; restoreTransaction: (id: string) => Promise<void>;
   saveSavedPlace: (draft: SavedPlaceDraft, id?: string) => Promise<void>; deleteSavedPlace: (id: string) => Promise<void>;
   saveBudget: (draft: BudgetDraft, id?: string) => Promise<void>; deleteBudget: (id: string) => Promise<void>;
   saveRecurring: (draft: RecurringDraft, id?: string) => Promise<void>; deleteRecurring: (id: string) => Promise<void>; confirmRecurring: (id: string) => Promise<void>;
@@ -47,29 +48,63 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<LedgerData>(emptyData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
+  const importJobsRef = useRef<ImportJob[]>([]);
+  const importPollInFlight = useRef(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (showLoading = true) => {
     if (!user) { setData(emptyData); return; }
-    setLoading(true); setError(null);
+    if (showLoading) setLoading(true);
+    setError(null);
     try {
       const response = await fetch("/api/ledger", { cache: "no-store" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Could not load your ledger.");
       setData(body as LedgerData);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not load your ledger."); }
-    finally { setLoading(false); }
+    finally { if (showLoading) setLoading(false); }
   }, [user]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
-
-  const mutate = useCallback(async (action: string, payload?: unknown, id?: string, onData?: (next: LedgerData) => void) => {
+  const requestAction = useCallback(async (action: string, payload?: unknown, id?: string) => {
     const response = await fetch("/api/ledger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, payload, id }) });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error ?? "Could not save your changes.");
-    const next = body as LedgerData;
+    return body as unknown;
+  }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { importJobsRef.current = importJobs; }, [importJobs]);
+  useEffect(() => {
+    if (!user) { setImportJobs([]); return; }
+    let cancelled = false;
+    const mergeJobs = (jobs: ImportJob[]) => setImportJobs((current) => {
+      const merged = new Map(current.map((job) => [job.id, job]));
+      for (const job of jobs) merged.set(job.id, job);
+      return [...merged.values()];
+    });
+    void requestAction("listImportJobs").then((body) => {
+      if (!cancelled) mergeJobs((body as { jobs: ImportJob[] }).jobs);
+    }).catch(() => undefined);
+    const interval = window.setInterval(() => {
+      if (cancelled || importPollInFlight.current) return;
+      const pending = importJobsRef.current.find((job) => job.status === "queued" || job.status === "processing");
+      if (!pending) return;
+      importPollInFlight.current = true;
+      void requestAction("processImportJob", { jobId: pending.id }).then(async (body) => {
+        if (cancelled) return;
+        const job = (body as { job: ImportJob }).job;
+        mergeJobs([job]);
+        if (job.status === "completed") await refresh(false);
+      }).catch(() => undefined).finally(() => { importPollInFlight.current = false; });
+    }, IMPORT_POLL_INTERVAL_MS);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [refresh, requestAction, user]);
+
+  const mutate = useCallback(async (action: string, payload?: unknown, id?: string, onData?: (next: LedgerData) => void) => {
+    const next = await requestAction(action, payload, id) as LedgerData;
     setData(next);
     onData?.(next);
-  }, []);
+  }, [requestAction]);
 
   const transactionPayload = (draft: TransactionDraft) => ({ kind: draft.kind, category: draft.category, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn, note: draft.note.trim(), subcategory: draft.subcategory.trim() || null, area: draft.area.trim() || null, paymentMode: draft.paymentMode, paymentAccountId: draft.paymentMode === "online" ? draft.paymentAccountId || null : null, location: draft.location ?? null, receipt: draft.receipt, removeReceipt: draft.removeReceipt });
   const saveTransaction = useCallback(async (draft: TransactionDraft, id?: string) => {
@@ -80,7 +115,17 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     });
     return savedId;
   }, [data.transactions, mutate]);
-  const importTransactions = useCallback(async (drafts: TransactionDraft[], newCategories: CsvCategoryDraft[] = [], newSubcategories: CsvSubcategoryDraft[] = []) => { await mutate("importTransactions", { transactions: drafts.map(transactionPayload), newCategories, newSubcategories }); return drafts.length; }, [mutate]);
+  const importTransactions = useCallback(async (drafts: TransactionDraft[], newCategories: CsvCategoryDraft[] = [], newSubcategories: CsvSubcategoryDraft[] = []) => {
+    const payload = { transactions: drafts.map(transactionPayload), newCategories, newSubcategories };
+    if (drafts.length > ASYNC_IMPORT_THRESHOLD) {
+      const body = await requestAction("startImportJob", payload) as { job: ImportJob };
+      setImportJobs((current) => [...current.filter((job) => job.id !== body.job.id), body.job]);
+      return body.job;
+    }
+    await mutate("importTransactions", payload);
+    return null;
+  }, [mutate, requestAction]);
+  const dismissImportJob = useCallback((id: string) => setImportJobs((current) => current.filter((job) => job.id !== id)), []);
   const saveReceiptSplit = useCallback(async (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => {
     await mutate("saveReceiptSplit", { transactions: drafts.map(transactionPayload), receipt, totalMinor });
     return drafts.length;
@@ -96,6 +141,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       kind: draft.kind,
       category: draft.category,
       amountMinor: majorToMinor(draft.amount),
+      paymentAccountId: draft.paymentAccountId || null,
       note: draft.note.trim(),
       tags: splitTags(draft.tags),
       recurrenceUnit: draft.recurrenceUnit,
@@ -145,7 +191,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const updateProfile = useCallback(async (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes">>) => mutate("updateProfile", { ...data.profile, ...changes }), [data.profile, mutate]);
   const resetDemo = useCallback(() => undefined, []);
 
-  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, saveTransaction, importTransactions, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, resetDemo }), [data, loading, error, saveTransaction, importTransactions, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, resetDemo]);
+  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, resetDemo }), [data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, resetDemo]);
   return <LedgerContext.Provider value={value}>{children}</LedgerContext.Provider>;
 }
 

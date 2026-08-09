@@ -12,7 +12,19 @@ export default function TransactionsRoute() {
     openDuplicate,
     openEdit,
     removeTransaction,
+    completeOnboardingStep,
   } = useLedgerWorkspace();
+
+  const importPastTransactions = async (...args: Parameters<typeof ledger.importTransactions>) => {
+    const job = await ledger.importTransactions(...args);
+    completeOnboardingStep("import");
+    return job;
+  };
+  const saveReceiptSplit = async (...args: Parameters<typeof ledger.saveReceiptSplit>) => {
+    const count = await ledger.saveReceiptSplit(...args);
+    completeOnboardingStep("transaction");
+    return count;
+  };
 
   return <TransactionsPage
     month={month}
@@ -26,7 +38,9 @@ export default function TransactionsRoute() {
     onDuplicate={openDuplicate}
     onEdit={openEdit}
     onDelete={removeTransaction}
-    onImport={ledger.importTransactions}
-    onSaveReceiptSplit={ledger.saveReceiptSplit}
+    onImport={importPastTransactions}
+    importJobs={ledger.importJobs}
+    onDismissImportJob={ledger.dismissImportJob}
+    onSaveReceiptSplit={saveReceiptSplit}
   />;
 }

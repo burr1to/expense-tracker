@@ -12,6 +12,7 @@ import { getCategory } from "../lib/categories";
 import { toDateInput } from "../lib/dates";
 import { monthlyReportNotice } from "../lib/monthly-report";
 import { recurrenceLabel } from "../lib/recurrence";
+import { markOnboardingStep } from "../lib/onboarding";
 import { appRoutes, viewFromPathname } from "../lib/routes";
 import type { AppView, LedgerTransaction, SavedPlace, TransactionDraft, TransactionLocationDraft } from "../types";
 import { AuthPage } from "../views/AuthPage";
@@ -20,7 +21,8 @@ import { BrandIcon } from "./BrandIcon";
 import { ButtonSpinner } from "./ButtonSpinner";
 import { ReminderBell } from "./ReminderBell";
 import { TransactionForm } from "./TransactionForm";
-import { OnboardingGuide, type OnboardingStepId } from "./OnboardingGuide";
+import { OnboardingGuide } from "./OnboardingGuide";
+import type { OnboardingStepId } from "../lib/onboarding";
 
 const UNDO_NOTICE_MS = 8_000;
 
@@ -84,10 +86,14 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   }, [ledger.profile.autoLockMinutes, ledger.profile.hasPin, locked, user, isDemo]);
 
   const navigate = (nextView: AppView) => router.push(appRoutes[nextView]);
+  const completeOnboardingStep = (step: OnboardingStepId) => {
+    if (user && !isDemo) markOnboardingStep(user.id, step);
+  };
   const runOnboardingAction = (step: OnboardingStepId) => {
     if (step === "pin") router.push(`${appRoutes.settings}#security-heading`);
     else if (step === "account") router.push(`${appRoutes.accounts}#add-account`);
-    else if (step === "budget") router.push(`${appRoutes.plan}#add-budget`);
+    else if (step === "import") router.push(`${appRoutes.transactions}#import-csv`);
+    else if (step === "customize") router.push(`${appRoutes.settings}#customizations-heading`);
     else openAdd();
   };
   const openDue = (id?: string, action?: "repay") => {
@@ -134,6 +140,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const saveTransaction = async (draft: TransactionDraft, id?: string) => {
     const savedId = await ledger.saveTransaction(draft, id);
     if (!id && savedId) {
+      completeOnboardingStep("transaction");
       setRecentlyAddedTransactionId(savedId);
       setUndoError(null);
       setTransactionNotice({ id: savedId, action: "created", label: draft.note.trim() || (draft.kind === "income" ? "Income" : "Expense"), expiresAt: Date.now() + UNDO_NOTICE_MS });
@@ -192,6 +199,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     openEdit,
     removeTransaction,
     navigate,
+    completeOnboardingStep,
     lock: () => { if (ledger.profile.hasPin) setLocked(true); },
   };
 
@@ -211,7 +219,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
             hasPin={ledger.profile.hasPin}
             hasAccount={ledger.paymentAccounts.length > 0}
             hasTransaction={ledger.transactions.length > 0}
-            hasBudget={ledger.budgets.length > 0}
+            hasCustomizations={ledger.customCategories.length > 0 || ledger.customSubcategories.length > 0}
             onAction={runOnboardingAction}
           />
         )}

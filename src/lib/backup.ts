@@ -126,6 +126,7 @@ export const backupEntitySchemas = {
     amountMinor: z.number().int().positive(),
     note: z.string().max(240),
     tags: z.array(z.string().max(40)).max(8),
+    paymentAccountId: optionalRelation.optional(),
     dayOfMonth: z.number().int().min(1).max(31).nullable().optional(),
     recurrenceUnit: z.enum(["day", "week", "month", "year"]).optional(),
     recurrenceInterval: z.number().int().min(1).max(365).optional(),
@@ -335,6 +336,8 @@ export function parseBackupCsv(input: string): ParsedBackup {
       requireRelation("fromAccountId", accountIds);
       requireRelation("toAccountId", accountIds);
     } else if (record.entity === "account_reconciliation") {
+      requireRelation("paymentAccountId", accountIds);
+    } else if (record.entity === "recurring_entry") {
       requireRelation("paymentAccountId", accountIds);
     } else if (record.entity === "savings_goal_contribution") requireRelation("goalId", goalIds);
     else if (record.entity === "due_payment") {

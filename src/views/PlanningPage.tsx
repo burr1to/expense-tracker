@@ -13,13 +13,14 @@ import { formatMoney } from "../lib/currency";
 import { monthKey } from "../lib/dates";
 import { calculateBudgetPacing } from "../lib/planning-insights";
 import { recurrenceLabel } from "../lib/recurrence";
-import type { Budget, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, RecurrenceUnit, RecurringDraft, RecurringEntry, SavingsGoal, TransactionKind } from "../types";
+import { paymentAccountLabel } from "../lib/payment-accounts";
+import type { Budget, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount, RecurrenceUnit, RecurringDraft, RecurringEntry, SavingsGoal, TransactionKind } from "../types";
 
 type PlanTab = "budgets" | "goals" | "recurring" | "calendar";
 const previewMinor = (value: string) => Math.round(Number(value.replace(/,/g, "")) * 100) || 0;
 
 interface PlanningPageProps {
-  month: Date; currency: CurrencyCode; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; dueItems: DueItem[]; goals: SavingsGoal[]; customCategories: CustomCategory[];
+  month: Date; currency: CurrencyCode; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; dueItems: DueItem[]; goals: SavingsGoal[]; customCategories: CustomCategory[]; paymentAccounts: PaymentAccount[];
   onMonthChange: (date: Date) => void;
   onSaveBudget: (draft: { category: string; amount: string; monthKey: string }, id?: string) => Promise<void>;
   onDeleteBudget: (id: string) => Promise<void>;
@@ -110,11 +111,12 @@ function RecurringKindToggle({ value, disabled, onChange }: { value: Transaction
   </div>;
 }
 
-function RecurringSection({ currency, recurringEntries, customCategories, onSaveRecurring, onDeleteRecurring, onConfirmRecurring }: PlanningPageProps) {
+function RecurringSection({ currency, recurringEntries, customCategories, paymentAccounts, onSaveRecurring, onDeleteRecurring, onConfirmRecurring }: PlanningPageProps) {
   const today = format(new Date(), "yyyy-MM-dd");
   const [kind, setKind] = useState<TransactionKind>("expense");
   const [category, setCategory] = useState("housing");
   const [amount, setAmount] = useState("");
+  const [paymentAccountId, setPaymentAccountId] = useState("");
   const [note, setNote] = useState("");
   const [schedule, setSchedule] = useState("month:1");
   const [startOn, setStartOn] = useState(today);
@@ -123,6 +125,7 @@ function RecurringSection({ currency, recurringEntries, customCategories, onSave
   const [saving, setSaving] = useState(false); const [pendingEntry, setPendingEntry] = useState<{ id: string; action: "confirm" | "delete" } | null>(null);
   const resetForm = () => {
     setAmount("");
+    setPaymentAccountId("");
     setNote("");
     setSchedule("month:1");
     setStartOn(today);
@@ -135,7 +138,7 @@ function RecurringSection({ currency, recurringEntries, customCategories, onSave
     setSaving(true);
     try {
       setError(null);
-      await onSaveRecurring({ kind, category, amount, note, tags: "", recurrenceUnit, recurrenceInterval: Number(interval), startOn }, editing?.id);
+      await onSaveRecurring({ kind, category, amount, paymentAccountId: paymentAccountId || null, note, tags: "", recurrenceUnit, recurrenceInterval: Number(interval), startOn }, editing?.id);
       resetForm();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save recurring entry.");
@@ -148,6 +151,7 @@ function RecurringSection({ currency, recurringEntries, customCategories, onSave
     setKind(entry.kind);
     setCategory(entry.category);
     setAmount(String(entry.amountMinor / 100));
+    setPaymentAccountId(entry.paymentAccountId ?? "");
     setNote(entry.note);
     setSchedule(`${entry.recurrenceUnit}:${entry.recurrenceInterval}`);
     setStartOn(entry.anchorDate);
@@ -170,6 +174,7 @@ function RecurringSection({ currency, recurringEntries, customCategories, onSave
         <RecurringKindToggle value={kind} disabled={saving} onChange={(next) => { setKind(next); setCategory(next === "expense" ? "housing" : "salary"); }} />
         <Select label="Category" value={category} disabled={saving} onChange={(value) => value && setCategory(value)} data={allCategoriesFor(kind, customCategories).map((item) => ({ value: item.id, label: item.label }))} searchable allowDeselect={false} />
         <NumberInput label={`Amount in ${currency}`} value={amount} disabled={saving} onChange={(value) => setAmount(String(value))} required min={0} thousandSeparator="," decimalScale={2} />
+        <Select label={kind === "expense" ? "Money from" : "Money to"} description={paymentAccounts.length ? "Leave blank for cash, or choose a tracked account." : "Optional — add a tracked account on Accounts to link this plan."} placeholder={paymentAccounts.length ? "Cash / choose an account" : "Cash / untracked"} value={paymentAccountId || null} disabled={saving} onChange={(value) => setPaymentAccountId(value ?? "")} data={paymentAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))} searchable clearable />
         <TextInput label="Note" value={note} disabled={saving} onChange={(event) => setNote(event.target.value)} placeholder={kind === "expense" ? "Rent, subscription, or bill" : "Salary or regular income"} />
         <Select label="Repeats" value={schedule} disabled={saving} onChange={(value) => value && setSchedule(value)} data={scheduleOptions} allowDeselect={false} />
         <DatePickerInput label="First due date" description="The schedule advances from this date" value={startOn} onChange={(value) => setStartOn(value ?? "")} disabled={saving} valueFormat="MMM D, YYYY" firstDayOfWeek={0} required />
@@ -185,11 +190,14 @@ function RecurringSection({ currency, recurringEntries, customCategories, onSave
         const confirming = pendingEntry?.id === entry.id && pendingEntry.action === "confirm";
         const deleting = pendingEntry?.id === entry.id && pendingEntry.action === "delete";
         const definition = getCategory(entry.category, customCategories);
+        const account = entry.paymentAccountId ? paymentAccounts.find((item) => item.id === entry.paymentAccountId) : null;
+        const accountText = `${entry.kind === "expense" ? "From" : "To"}: ${account ? paymentAccountLabel(account) : "Cash / untracked"}`;
         return <article key={entry.id} aria-busy={confirming || deleting}>
           <div className="transaction-icon"><CategoryIcon category={entry.category} icon={definition.icon} /></div>
           <div>
             <strong>{entry.note || getCategory(entry.category, customCategories).label}</strong>
             <span>{formatMoney(entry.amountMinor, currency)} · {recurrenceLabel(entry)}</span>
+            <small>{accountText}</small>
             <small>{deleting ? "Removing…" : `Next: ${format(parseISO(entry.nextDueOn), "MMM d, yyyy")}`}</small>
           </div>
           <button className="secondary-button small" disabled={!ready || confirming || deleting} onClick={() => void runEntryAction(entry.id, "confirm")}>{confirming ? <><ButtonSpinner />Confirming…</> : ready ? <><Check size={15} />Confirm</> : "Scheduled"}</button>

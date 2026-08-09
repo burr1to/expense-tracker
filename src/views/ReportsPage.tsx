@@ -12,6 +12,8 @@ import type { CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentA
 import { totalCurrentBalance } from "../lib/account-balances";
 import { isCompletedReportMonth } from "../lib/monthly-report";
 
+const reportCategoryColors = ["#0072b2", "#e69f00", "#009e73", "#d55e00", "#cc79a7", "#56b4e9", "#f0e442", "#6f6f6f", "#332288", "#117733", "#cc6677", "#88ccee"] as const;
+
 interface ReportsPageProps {
   month: Date;
   currency: CurrencyCode;
@@ -28,9 +30,10 @@ export function ReportsPage({ month, currency, transactions, customCategories, p
   const [activeCategoryIndex, setActiveCategoryIndex] = useState<number | null>(null);
   const current = transactions.filter((item) => isInMonth(item.occurredOn, month));
   const summary = summarizeLedger(current, customCategories);
+  const categoryData = summary.categories.map((item, index) => ({ ...item, color: reportCategoryColors[index % reportCategoryColors.length] }));
   const history = monthlySeries(transactions);
   const milestones = financialMilestones(transactions, dueItems);
-  const activeCategory = activeCategoryIndex === null ? undefined : summary.categories[activeCategoryIndex];
+  const activeCategory = activeCategoryIndex === null ? undefined : categoryData[activeCategoryIndex];
   const trackedBalance = totalCurrentBalance(paymentAccounts);
   const reportMonthKey = format(month, "yyyy-MM");
   const canDownloadPdf = allowPdfDownload && isCompletedReportMonth(reportMonthKey);
@@ -48,8 +51,8 @@ export function ReportsPage({ month, currency, transactions, customCategories, p
         <article className="report-panel category-report">
           <div className="section-heading"><div><span className="section-label">Category mix</span><h2>Where it went</h2></div><strong>{formatMoney(summary.expenses, currency)}</strong></div>
           {summary.categories.length ? <>
-            <div className="donut-wrap"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={summary.categories} dataKey="value" nameKey="label" innerRadius="65%" outerRadius="90%" paddingAngle={2} stroke="none" rootTabIndex={-1} isAnimationActive={false} onMouseEnter={(_, index) => setActiveCategoryIndex(index)} onMouseLeave={() => setActiveCategoryIndex(null)}>{summary.categories.map((item) => <Cell key={item.category} fill={item.color} />)}</Pie></PieChart></ResponsiveContainer><div><span>{activeCategory?.label ?? "Expenses"}</span><strong>{formatMoney(activeCategory?.value ?? summary.expenses, currency, true)}</strong></div></div>
-            <div className="legend-list">{summary.categories.map((item) => <div key={item.category}><span className="legend-dot" style={{ backgroundColor: item.color }} /><span>{item.label}</span><strong>{item.percentage}%</strong></div>)}</div>
+            <div className="donut-wrap"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={categoryData} dataKey="value" nameKey="label" innerRadius="65%" outerRadius="90%" paddingAngle={2} stroke="none" rootTabIndex={-1} isAnimationActive={false} onMouseEnter={(_, index) => setActiveCategoryIndex(index)} onMouseLeave={() => setActiveCategoryIndex(null)}>{categoryData.map((item) => <Cell key={item.category} fill={item.color} />)}</Pie></PieChart></ResponsiveContainer><div><span>{activeCategory?.label ?? "Expenses"}</span><strong>{formatMoney(activeCategory?.value ?? summary.expenses, currency, true)}</strong></div></div>
+            <div className="legend-list">{categoryData.map((item) => <div key={item.category}><span className="legend-dot" style={{ backgroundColor: item.color }} /><span>{item.label}</span><strong>{item.percentage}%</strong></div>)}</div>
           </> : <EmptyState action={<button className="text-button" onClick={onAdd}>Log an expense</button>} />}
         </article>
         <article className="report-panel history-report">
