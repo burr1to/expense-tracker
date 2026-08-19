@@ -1,4 +1,4 @@
-import { CalendarDots, Check, Flag, PencilSimple, Plus, Repeat, Trash, WarningCircle } from "@phosphor-icons/react";
+import { CalendarDots, Check, Flag, PencilSimple, Plus, Repeat, Sparkle, Trash, WarningCircle } from "@phosphor-icons/react";
 import { NumberInput, Select, TextInput } from "@mantine/core";
 import { eachDayOfInterval, endOfMonth, format, getDay, isSameDay, isSameMonth, parseISO, startOfMonth } from "date-fns";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
@@ -10,16 +10,18 @@ import { MonthPicker } from "../components/MonthPicker";
 import { allCategoriesFor, getCategory } from "../lib/categories";
 import { dailyCashFlow } from "../lib/calendar";
 import { formatMoney } from "../lib/currency";
-import { monthKey } from "../lib/dates";
+import { monthKey, todayInput } from "../lib/dates";
 import { calculateBudgetPacing } from "../lib/planning-insights";
 import { recurrenceLabel } from "../lib/recurrence";
 import { paymentAccountLabel } from "../lib/payment-accounts";
-import type { Budget, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount, RecurrenceUnit, RecurringDraft, RecurringEntry, SavingsGoal, TransactionKind } from "../types";
+import { detectRecurringPatterns, type RecurringPatternSuggestion } from "../lib/transaction-intelligence";
+import type { CalendarSystem, Budget, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount, RecurrenceUnit, RecurringDraft, RecurringEntry, SavingsGoal, TransactionKind } from "../types";
 
 type PlanTab = "budgets" | "goals" | "recurring" | "calendar";
 const previewMinor = (value: string) => Math.round(Number(value.replace(/,/g, "")) * 100) || 0;
 
 interface PlanningPageProps {
+  calendarSystem: CalendarSystem;
   month: Date; currency: CurrencyCode; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; dueItems: DueItem[]; goals: SavingsGoal[]; customCategories: CustomCategory[]; paymentAccounts: PaymentAccount[];
   onMonthChange: (date: Date) => void;
   onSaveBudget: (draft: { category: string; amount: string; monthKey: string }, id?: string) => Promise<void>;
@@ -33,6 +35,7 @@ interface PlanningPageProps {
 }
 
 export function PlanningPage(props: PlanningPageProps) {
+  const calendarSystem = props.calendarSystem;
   const [tab, setTab] = useState<PlanTab>("budgets");
   const tabs: { id: PlanTab; label: string; icon: typeof Flag }[] = [
     { id: "budgets", label: "Budgets", icon: Flag }, { id: "goals", label: "Goals", icon: Check },
@@ -40,7 +43,7 @@ export function PlanningPage(props: PlanningPageProps) {
   ];
   return (
     <div className="page planning-page">
-      <header className="page-header"><div><span className="eyebrow">Your money plan</span><h1>Plan</h1><p>Set gentle guardrails and prepare the entries that repeat.</p></div><MonthPicker month={props.month} onChange={props.onMonthChange} /></header>
+      <header className="page-header"><div><span className="eyebrow">Your money plan</span><h1>Plan</h1><p>Set gentle guardrails and prepare the entries that repeat.</p></div><MonthPicker calendarSystem={calendarSystem} month={props.month} onChange={props.onMonthChange} /></header>
       <nav className="section-tabs" aria-label="Planning sections">{tabs.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}><Icon size={18} />{label}</button>)}</nav>
       {tab === "budgets" && <BudgetsSection {...props} />}
       {tab === "goals" && <GoalsSection {...props} />}
@@ -111,8 +114,8 @@ function RecurringKindToggle({ value, disabled, onChange }: { value: Transaction
   </div>;
 }
 
-function RecurringSection({ currency, recurringEntries, customCategories, paymentAccounts, onSaveRecurring, onDeleteRecurring, onConfirmRecurring }: PlanningPageProps) {
-  const today = format(new Date(), "yyyy-MM-dd");
+function RecurringSection({ currency, transactions, recurringEntries, customCategories, paymentAccounts, onSaveRecurring, onDeleteRecurring, onConfirmRecurring }: PlanningPageProps) {
+  const today = todayInput();
   const [kind, setKind] = useState<TransactionKind>("expense");
   const [category, setCategory] = useState("housing");
   const [amount, setAmount] = useState("");
@@ -123,6 +126,7 @@ function RecurringSection({ currency, recurringEntries, customCategories, paymen
   const [editing, setEditing] = useState<RecurringEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false); const [pendingEntry, setPendingEntry] = useState<{ id: string; action: "confirm" | "delete" } | null>(null);
+  const suggestions = useMemo(() => detectRecurringPatterns(transactions, recurringEntries), [recurringEntries, transactions]);
   const resetForm = () => {
     setAmount("");
     setPaymentAccountId("");
@@ -157,6 +161,18 @@ function RecurringSection({ currency, recurringEntries, customCategories, paymen
     setStartOn(entry.anchorDate);
     setError(null);
   };
+  const useSuggestion = (suggestion: RecurringPatternSuggestion) => {
+    setEditing(null);
+    setKind(suggestion.kind);
+    setCategory(suggestion.category);
+    setAmount(String(suggestion.amountMinor / 100));
+    setPaymentAccountId(suggestion.paymentAccountId ?? "");
+    setNote(suggestion.note);
+    setSchedule(`${suggestion.recurrenceUnit}:${suggestion.recurrenceInterval}`);
+    setStartOn(suggestion.startOn);
+    setError(null);
+    document.getElementById("recurring-entry-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
   const runEntryAction = async (id: string, action: "confirm" | "delete") => { if (pendingEntry) return; setPendingEntry({ id, action }); try { setError(null); await (action === "confirm" ? onConfirmRecurring(id) : onDeleteRecurring(id)); } catch (caught) { setError(caught instanceof Error ? caught.message : `Could not ${action} recurring entry.`); } finally { setPendingEntry(null); } };
   const scheduleOptions = [
     { value: "day:1", label: "Daily" },
@@ -167,7 +183,7 @@ function RecurringSection({ currency, recurringEntries, customCategories, paymen
     { value: "year:1", label: "Yearly" },
   ];
   return <section className="planner-layout">
-    <article className="planner-form-panel">
+    <article className="planner-form-panel" id="recurring-entry-form">
       <span className="section-label">{editing ? "Update schedule" : "Schedule a regular entry"}</span>
       <h2>{editing ? "Edit recurring entry" : "Prepare what repeats"}</h2>
       <form onSubmit={save} className="stack-form" aria-busy={saving}>
@@ -184,6 +200,7 @@ function RecurringSection({ currency, recurringEntries, customCategories, paymen
       </form>
     </article>
     <article className="planner-content">
+      {suggestions.length > 0 && <section className="recurring-suggestions" aria-labelledby="recurring-suggestions-heading"><div className="section-heading"><div><span className="section-label">Detected from your history</span><h2 id="recurring-suggestions-heading">Possible repeating entries</h2></div><Sparkle size={21} weight="duotone" /></div><div>{suggestions.map((suggestion) => <article key={suggestion.id}><span className="transaction-icon"><Sparkle size={17} /></span><div><strong>{suggestion.note || getCategory(suggestion.category, customCategories).label}</strong><small>{formatMoney(suggestion.amountMinor, currency)} · {suggestion.evidenceCount} matching entries · {Math.round(suggestion.confidence * 100)}% confidence</small><span>{suggestion.recurrenceInterval === 1 ? suggestion.recurrenceUnit[0].toUpperCase() + suggestion.recurrenceUnit.slice(1) + "ly" : `Every ${suggestion.recurrenceInterval} ${suggestion.recurrenceUnit}s`}</span></div><button type="button" className="secondary-button small" onClick={() => useSuggestion(suggestion)}>Review schedule</button></article>)}</div></section>}
       <div className="section-heading"><div><span className="section-label">Confirm before logging</span><h2>Recurring entries</h2></div></div>
       <div className="recurring-list">{recurringEntries.map((entry) => {
         const ready = entry.nextDueOn <= today;
@@ -210,7 +227,7 @@ function RecurringSection({ currency, recurringEntries, customCategories, paymen
   </section>;
 }
 
-function CalendarSection({ month, currency, transactions, onMonthChange }: PlanningPageProps) {
+function CalendarSection({ month, currency, transactions, onMonthChange, calendarSystem }: PlanningPageProps) {
   const days = useMemo(() => eachDayOfInterval({ start: startOfMonth(month), end: endOfMonth(month) }), [month]);
   const firstOffset = getDay(days[0]);
   const totals = useMemo(() => dailyCashFlow(transactions), [transactions]);
@@ -218,7 +235,7 @@ function CalendarSection({ month, currency, transactions, onMonthChange }: Plann
   useEffect(() => { setSelected((current) => isSameMonth(current, month) ? current : startOfMonth(month)); }, [month]);
   const selectedKey = format(selected, "yyyy-MM-dd"); const selectedEntries = transactions.filter((item) => item.occurredOn === selectedKey); const selectedTotal = totals.get(selectedKey);
   const netAmount = (value: number) => `${currency} ${value < 0 ? "−" : ""}${formatMoney(Math.abs(value), currency, true).replace(currency, "").trim()}`;
-  return <section className="calendar-layout"><article className="calendar-panel"><div className="calendar-heading"><MonthPicker month={month} onChange={onMonthChange} /></div><div className="weekday-row">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-grid">{Array.from({ length: firstOffset }).map((_, index) => <span key={`blank-${index}`} />)}{days.map((day) => {
+  return <section className="calendar-layout"><article className="calendar-panel"><div className="calendar-heading"><MonthPicker calendarSystem={calendarSystem} month={month} onChange={onMonthChange} /></div><div className="weekday-row">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-grid">{Array.from({ length: firstOffset }).map((_, index) => <span key={`blank-${index}`} />)}{days.map((day) => {
     const key = format(day, "yyyy-MM-dd"); const total = totals.get(key);
     const netTone = !total ? "" : total.net > 0 ? "net-positive" : total.net < 0 ? "net-negative" : "net-balanced";
     const summary = total ? `Income ${formatMoney(total.income, currency)}, expenses ${formatMoney(total.expenses, currency)}, net ${total.net >= 0 ? "positive " : "negative "}${formatMoney(Math.abs(total.net), currency)}` : "No entries";

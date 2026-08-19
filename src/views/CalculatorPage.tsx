@@ -1,6 +1,6 @@
-import { ChartPieSlice, CheckCircle, Calculator, CreditCard, HandCoins, MapTrifold, Plus, ShieldCheck, Target, Trash, WarningCircle } from "@phosphor-icons/react";
-import { NumberInput, Select, TextInput } from "@mantine/core";
-import { addMonths, format } from "date-fns";
+import { ArrowCounterClockwise, ChartPieSlice, CheckCircle, Calculator, CreditCard, HandCoins, MapTrifold, Plus, ShieldCheck, SlidersHorizontal, Target, Trash, WarningCircle } from "@phosphor-icons/react";
+import { NumberInput, Select, Slider, TextInput } from "@mantine/core";
+import { addMonths, format, parseISO } from "date-fns";
 import { useRef, useState } from "react";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { LedgerDatePickerInput as DatePickerInput } from "../components/LedgerDatePickerInput";
@@ -8,8 +8,9 @@ import { calculateAllocationAmounts, minorToMajorInput } from "../lib/allocation
 import { calculateCategoryMonthlyAverages, calculateDebtPayoff, calculateEmergencyFund, calculateEqualSplit, calculateGoalPace } from "../lib/financial-calculators";
 import { getCategory } from "../lib/categories";
 import { formatMoney, majorToMinor } from "../lib/currency";
-import { monthKey } from "../lib/dates";
-import type { CurrencyCode, CustomCategory, LedgerTransaction } from "../types";
+import { monthKey, todayInput } from "../lib/dates";
+import { simulateWhatIf } from "../lib/what-if";
+import type { CurrencyCode, CustomCategory, LedgerTransaction, SavingsGoal } from "../types";
 
 interface GoalDraft {
   name: string;
@@ -24,13 +25,14 @@ interface BudgetDraft {
   monthKey: string;
 }
 
-type CalculatorTool = "split" | "goal-pace" | "budgets" | "debt" | "trip" | "runway" | "bills";
+type CalculatorTool = "split" | "goal-pace" | "budgets" | "what-if" | "debt" | "trip" | "runway" | "bills";
 
 interface CalculatorPageProps {
   currency: CurrencyCode;
   month: Date;
   transactions: LedgerTransaction[];
   customCategories: CustomCategory[];
+  goals?: SavingsGoal[];
   onSaveGoal: (draft: GoalDraft) => Promise<void>;
   onSaveBudget: (draft: BudgetDraft) => Promise<void>;
 }
@@ -55,13 +57,14 @@ const toolItems: { id: CalculatorTool; label: string; description: string; icon:
   { id: "split", label: "Split amount", description: "Allocate by percentage", icon: Calculator },
   { id: "goal-pace", label: "Goal pace", description: "Find your monthly target", icon: Target },
   { id: "budgets", label: "Smart budgets", description: "Use your spending history", icon: ChartPieSlice },
+  { id: "what-if", label: "What if", description: "Test a spending change", icon: SlidersHorizontal },
   { id: "debt", label: "Debt payoff", description: "Estimate time and interest", icon: CreditCard },
   { id: "trip", label: "Trip / event", description: "Plan a shared budget", icon: MapTrifold },
   { id: "runway", label: "Emergency fund", description: "Measure your runway", icon: ShieldCheck },
   { id: "bills", label: "Split a bill", description: "Divide a bill fairly", icon: HandCoins },
 ];
 
-export function CalculatorPage({ currency, month, transactions, customCategories, onSaveGoal, onSaveBudget }: CalculatorPageProps) {
+export function CalculatorPage({ currency, month, transactions, customCategories, goals = [], onSaveGoal, onSaveBudget }: CalculatorPageProps) {
   const [tool, setTool] = useState<CalculatorTool>("split");
   return <div className="page calculator-page">
     <header className="page-header calculator-main-header">
@@ -74,6 +77,7 @@ export function CalculatorPage({ currency, month, transactions, customCategories
     {tool === "split" && <SplitCalculator currency={currency} onSaveGoal={onSaveGoal} />}
     {tool === "goal-pace" && <GoalPaceCalculator currency={currency} onSaveGoal={onSaveGoal} />}
     {tool === "budgets" && <SmartBudgetCalculator currency={currency} month={month} transactions={transactions} customCategories={customCategories} onSaveBudget={onSaveBudget} />}
+    {tool === "what-if" && <WhatIfCalculator currency={currency} month={month} transactions={transactions} customCategories={customCategories} goals={goals} />}
     {tool === "debt" && <DebtCalculator currency={currency} />}
     {tool === "trip" && <TripCalculator currency={currency} onSaveGoal={onSaveGoal} />}
     {tool === "runway" && <EmergencyFundCalculator currency={currency} onSaveGoal={onSaveGoal} />}
@@ -199,6 +203,52 @@ function SmartBudgetCalculator({ currency, month, transactions, customCategories
   return <section className="calculator-tool-layout">
     <article className="calculator-tool-panel"><ToolHeading step="Smart budgets" title="Let your history suggest a limit" description="Use your actual expense history instead of guessing a monthly category budget." /><Select label="Look back over" value={lookback} onChange={(value) => { if (value) setLookback(value); }} data={[{ value: "3", label: "3 months" }, { value: "6", label: "6 months" }, { value: "12", label: "12 months" }]} allowDeselect={false} /><div className="calculator-tool-actions"><button type="button" className="primary-button" disabled={!averages.length || saving} onClick={() => void saveBudgets()}>{saving ? <><ButtonSpinner />Saving budgets…</> : <><ChartPieSlice size={17} />Save budgets for {format(month, "MMMM")}</>}</button></div><ToolMessage error={error} success={success} /></article>
     <aside className="calculator-result-panel"><span className="section-label">Suggested budgets</span><h2>{averages.length ? `Based on the last ${lookback} months` : "Not enough history yet"}</h2>{averages.length ? <div className="calculator-data-list">{averages.map((item) => <div className="calculator-data-row" key={item.category}><div><strong>{getCategory(item.category, customCategories).label}</strong><small>{formatMoney(item.totalMinor, currency)} total in this period</small></div><strong className="calculator-money">{formatMoney(item.averageMinor, currency)}<small> / month</small></strong></div>)}</div> : <p className="calculator-empty">Add a few expense transactions and this tool will turn them into starting budgets.</p>}<p className="calculator-note">Existing budgets for the same month and category are updated, not duplicated.</p></aside>
+  </section>;
+}
+
+function WhatIfCalculator({ currency, month, transactions, customCategories, goals }: { currency: CurrencyCode; month: Date; transactions: LedgerTransaction[]; customCategories: CustomCategory[]; goals: SavingsGoal[] }) {
+  const [lookback, setLookback] = useState("3");
+  const [changes, setChanges] = useState<Record<string, number>>({});
+  const lookbackMonths = Number(lookback) || 3;
+  const topCategories = calculateCategoryMonthlyAverages(transactions, lookbackMonths, month).slice(0, 5);
+  const adjustments = topCategories.map((item) => ({ category: item.category, changePercent: changes[item.category] ?? 0 }));
+  const result = simulateWhatIf(adjustments, transactions, goals, lookbackMonths, month, todayInput());
+  const touched = adjustments.some((adjustment) => adjustment.changePercent !== 0);
+  const monthLabel = (value: string | null) => value ? format(parseISO(value), "MMM yyyy") : null;
+  const shiftLabel = (monthsSaved: number | null) => !monthsSaved ? null : `${Math.abs(monthsSaved)} month${Math.abs(monthsSaved) === 1 ? "" : "s"} ${monthsSaved > 0 ? "earlier" : "later"}`;
+  return <section className="calculator-tool-layout">
+    <article className="calculator-tool-panel">
+      <ToolHeading step="What if" title="Test a spending change before you make it" description="Move a slider to see what cutting or growing a category would do to your monthly net and your goal dates." />
+      <Select label="Base it on" value={lookback} onChange={(value) => { if (value) setLookback(value); }} data={[{ value: "3", label: "Last 3 months" }, { value: "6", label: "Last 6 months" }, { value: "12", label: "Last 12 months" }]} allowDeselect={false} />
+      {topCategories.length ? <div className="what-if-slider-list">{topCategories.map((item) => {
+        const changePercent = changes[item.category] ?? 0;
+        const label = getCategory(item.category, customCategories).label;
+        const projectedMinor = Math.max(0, Math.round(item.averageMinor * (1 + changePercent / 100)));
+        return <div className="what-if-slider" key={item.category}>
+          <div className="what-if-slider-head"><strong>{label}</strong><span>{formatMoney(item.averageMinor, currency)} → <strong className="calculator-money">{formatMoney(projectedMinor, currency)}</strong> <small>{changePercent > 0 ? "+" : ""}{changePercent}%</small></span></div>
+          <Slider value={changePercent} onChange={(value) => setChanges((current) => ({ ...current, [item.category]: value }))} min={-100} max={100} step={5} thumbLabel={`${label} change percentage`} label={(value) => `${value > 0 ? "+" : ""}${value}%`} marks={[{ value: -100 }, { value: 0 }, { value: 100 }]} />
+        </div>;
+      })}</div> : <p className="calculator-empty what-if-empty">No expense history in this period yet. Add a few expenses and your top categories will appear here as sliders.</p>}
+      <div className="calculator-tool-actions"><button type="button" className="secondary-button" disabled={!touched} onClick={() => setChanges({})}><ArrowCounterClockwise size={16} />Reset sliders</button></div>
+    </article>
+    <aside className="calculator-result-panel">
+      <span className="section-label">If nothing else changes</span>
+      <h2 className="calculator-money">{result.deltaMinor > 0 ? "+" : ""}{formatMoney(result.deltaMinor, currency)}<small className="what-if-heading-unit"> / month</small></h2>
+      <div className="calculator-stat-grid">
+        <div className="calculator-stat"><span>Money freed</span><strong className="calculator-money">{result.deltaMinor > 0 ? "+" : ""}{formatMoney(result.deltaMinor, currency)}</strong></div>
+        <div className="calculator-stat"><span>New monthly net</span><strong className="calculator-money">{formatMoney(result.scenarioMonthlyNetMinor, currency)}</strong></div>
+        <div className="calculator-stat"><span>Was</span><strong className="calculator-money">{formatMoney(result.baselineMonthlyNetMinor, currency)}</strong></div>
+      </div>
+      <div className="what-if-goals">
+        <span className="section-label">Goal dates</span>
+        {goals.length ? <div className="calculator-data-list">{result.goals.map((projection) => <div className="calculator-data-row" key={projection.goal.id}>
+          <div><strong>{projection.goal.name}</strong><small>{monthLabel(projection.baselineDate) ? `Now on track for ${monthLabel(projection.baselineDate)}` : "No date can be estimated at the current rate"}</small></div>
+          <strong className="calculator-money">{monthLabel(projection.scenarioDate) ?? "—"}{shiftLabel(projection.monthsSaved) && <small> · {shiftLabel(projection.monthsSaved)}</small>}</strong>
+        </div>)}</div> : <p className="calculator-empty">Create a savings goal in Plans to see how a spending change moves its date.</p>}
+      </div>
+      {result.warnings.map((warning) => <div className="calculator-warning" key={warning} role="status"><WarningCircle size={18} /><span>{warning}</span></div>)}
+      <p className="calculator-note">This is an estimate built from your past average spending over the selected period, not a forecast. It assumes your income and every other category stay exactly as they were.</p>
+    </aside>
   </section>;
 }
 

@@ -8,7 +8,7 @@ import { TransactionRow } from "../components/TransactionRow";
 import { useLedger } from "../context/LedgerContext";
 import { accountActivityThrough, expectedAccountBalanceThrough } from "../lib/account-balances";
 import { formatMoney, majorToMinor } from "../lib/currency";
-import { toDateInput } from "../lib/dates";
+import { todayInput } from "../lib/dates";
 import { NEPAL_MOBILE_BANKS, PAYMENT_ACCOUNT_TYPES, paymentAccountLabel } from "../lib/payment-accounts";
 import type { LedgerTransaction, PaymentAccountType } from "../types";
 
@@ -39,21 +39,21 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
   const [accountProvider, setAccountProvider] = useState("");
   const [accountLabel, setAccountLabel] = useState("");
   const [accountBalance, setAccountBalance] = useState("");
-  const [accountBalanceAsOf, setAccountBalanceAsOf] = useState(toDateInput());
+  const [accountBalanceAsOf, setAccountBalanceAsOf] = useState(todayInput());
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountAction, setAccountAction] = useState<string | null>(null);
   const [copiedImportId, setCopiedImportId] = useState<string | null>(null);
   const [editingBalanceId, setEditingBalanceId] = useState<string | null>(null);
   const [editingBalance, setEditingBalance] = useState("");
-  const [editingBalanceAsOf, setEditingBalanceAsOf] = useState(toDateInput());
+  const [editingBalanceAsOf, setEditingBalanceAsOf] = useState(todayInput());
   const [transferFrom, setTransferFrom] = useState("");
   const [transferTo, setTransferTo] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
-  const [transferDate, setTransferDate] = useState(toDateInput());
+  const [transferDate, setTransferDate] = useState(todayInput());
   const [transferNote, setTransferNote] = useState("");
   const [transferError, setTransferError] = useState<string | null>(null);
   const [transferAction, setTransferAction] = useState<string | null>(null);
-  const today = toDateInput();
+  const today = todayInput();
   const [reconciliationMonth, setReconciliationMonth] = useState(today.slice(0, 7));
   const [reconciliationCheckedOn, setReconciliationCheckedOn] = useState(today);
   const [reconciliationActual, setReconciliationActual] = useState("");
@@ -121,7 +121,7 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
       setAccountProvider("");
       setAccountLabel("");
       setAccountBalance("");
-      setAccountBalanceAsOf(toDateInput());
+      setAccountBalanceAsOf(todayInput());
     } catch (caught) {
       setAccountError(caught instanceof Error ? caught.message : "Could not add the account.");
     } finally {

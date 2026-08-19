@@ -1,7 +1,14 @@
+import {
+  addMonthsToKey,
+  currentMonthKey as currentPeriodKey,
+  isMonthKey,
+  monthLabel,
+  periodBounds,
+  toStorageKey,
+} from "./period";
 import type { CurrencyCode } from "../types";
 
 const MONTH_KEY = /^(\d{4})-(0[1-9]|1[0-2])$/;
-const KATHMANDU_OFFSET_MS = (5 * 60 + 45) * 60_000;
 
 export interface MonthlyReportTransaction {
   id: string;
@@ -104,20 +111,12 @@ export interface MonthlyReport {
   transactions: MonthlyReportTransaction[];
 }
 
-function kathmanduDate(now: Date) {
-  return new Date(now.getTime() + KATHMANDU_OFFSET_MS);
-}
-
 export function currentMonthKey(now = new Date()) {
-  const local = kathmanduDate(now);
-  return `${local.getUTCFullYear()}-${String(local.getUTCMonth() + 1).padStart(2, "0")}`;
+  return toStorageKey(currentPeriodKey("AD", now));
 }
 
 export function previousMonthKey(now = new Date()) {
-  const local = kathmanduDate(now);
-  local.setUTCDate(1);
-  local.setUTCMonth(local.getUTCMonth() - 1);
-  return `${local.getUTCFullYear()}-${String(local.getUTCMonth() + 1).padStart(2, "0")}`;
+  return toStorageKey(addMonthsToKey(currentPeriodKey("AD", now), -1));
 }
 
 export function isCompletedReportMonth(monthKey: string, now = new Date()) {
@@ -130,28 +129,18 @@ export function monthlyReportNotice(now = new Date()) {
 }
 
 export function reportMonthBounds(monthKey: string) {
-  const match = MONTH_KEY.exec(monthKey);
-  if (!match) throw new Error("Invalid report month.");
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const nextYear = month === 12 ? year + 1 : year;
-  const nextMonth = month === 12 ? 1 : month + 1;
-  return {
-    start: `${monthKey}-01`,
-    endExclusive: `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`,
-  };
+  if (!isMonthKey(monthKey)) throw new Error("Invalid report month.");
+  return periodBounds(monthKey);
 }
 
 export function precedingMonthKey(monthKey: string) {
-  const { start } = reportMonthBounds(monthKey);
-  const date = new Date(`${start}T00:00:00.000Z`);
-  date.setUTCMonth(date.getUTCMonth() - 1);
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  if (!isMonthKey(monthKey)) throw new Error("Invalid report month.");
+  return toStorageKey(addMonthsToKey(monthKey, -1));
 }
 
 export function formatMonthLabel(monthKey: string) {
-  const { start } = reportMonthBounds(monthKey);
-  return new Intl.DateTimeFormat("en", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${start}T00:00:00.000Z`));
+  if (!isMonthKey(monthKey)) throw new Error("Invalid report month.");
+  return monthLabel(monthKey);
 }
 
 function sumKind(items: readonly MonthlyReportTransaction[], kind: "income" | "expense") {

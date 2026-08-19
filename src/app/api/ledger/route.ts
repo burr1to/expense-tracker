@@ -6,6 +6,7 @@ import { getBetaSession } from "../../../lib/auth";
 import { getPrisma } from "../../../lib/prisma";
 import { hashPin, verifyPin } from "../../../lib/pin";
 import { NEPAL_MOBILE_BANKS } from "../../../lib/payment-accounts";
+import { STORAGE_PERIOD_KEY } from "../../../lib/period";
 import { removeStoredReceipts, verifyStoredReceipt } from "../../../lib/receipt-storage";
 import { KATHMANDU_BOUNDS } from "../../../lib/kathmandu-locations";
 import { expectedAccountBalanceThrough, withCurrentAccountBalance } from "../../../lib/account-balances";
@@ -13,7 +14,7 @@ import { CATEGORIES, importedCategoryColor, SUBCATEGORIES } from "../../../lib/c
 import { CATEGORY_ICON_NAMES } from "../../../lib/category-icons";
 import { IMPORT_BATCH_SIZE } from "../../../lib/import-job";
 import { dateOnlyInTimeZone, firstRecurringOccurrence, nextRecurringOccurrence } from "../../../lib/recurrence";
-import type { AccountReconciliation, AccountTransfer, CategoryIconName, LedgerTransaction, PaymentAccount, RecurrenceUnit } from "../../../types";
+import type { AccountReconciliation, AccountTransfer, CategoryIconName, LearningSuggestion, LedgerTransaction, PaymentAccount, RecurrenceUnit } from "../../../types";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +51,7 @@ const receiptSplitSchema = z.object({
   totalMinor: z.number().int().positive(),
   transactions: z.array(receiptSplitTransactionSchema).min(1).max(20),
 });
-const budgetSchema = z.object({ monthKey: z.string().regex(/^\d{4}-\d{2}$/), category: z.string().min(1).max(80), amountMinor: z.number().int().positive() });
+const budgetSchema = z.object({ monthKey: z.string().regex(STORAGE_PERIOD_KEY), category: z.string().min(1).max(80), amountMinor: z.number().int().positive() });
 const recurringSchema = z.object({
   kind: z.enum(["income", "expense"]),
   category: z.string().min(1).max(80),
@@ -109,8 +110,8 @@ const resetReconciliationSchema = z.object({ confirmation: z.literal("RESET") })
 const transferSchema = z.object({ fromAccountId: z.string().min(1), toAccountId: z.string().min(1), amountMinor: z.number().int().positive(), occurredOn: z.string().date(), note: z.string().trim().max(240) }).superRefine((value, context) => {
   if (value.fromAccountId === value.toAccountId) context.addIssue({ code: "custom", path: ["toAccountId"], message: "Choose two different accounts." });
 });
-const profileSchema = z.object({ displayName: z.string().trim().min(1).max(50), currency: z.enum(["NPR", "USD", "AUD"]), hideAmounts: z.boolean(), autoLockMinutes: z.number().int().min(0).max(120) });
-const dueSchema = z.object({ kind: z.enum(["payment", "receivable", "lent", "borrowed"]), title: z.string().trim().min(1).max(100), person: z.string().trim().max(80), amountMinor: z.number().int().positive(), category: z.string().min(1).max(80), occurredOn: z.string().date().nullable(), dueOn: z.string().date(), remindOn: z.string().date().nullable(), note: z.string().trim().max(300), receipt: receiptSchema.optional() });
+const profileSchema = z.object({ displayName: z.string().trim().min(1).max(50), currency: z.enum(["NPR", "USD", "AUD"]), hideAmounts: z.boolean(), autoLockMinutes: z.number().int().min(0).max(120), calendarSystem: z.enum(["AD", "BS"]), safeToSpendBufferMinor: z.number().int().min(0).max(1_000_000_000) });
+const dueSchema = z.object({ kind: z.enum(["payment", "receivable", "lent", "borrowed"]), title: z.string().trim().min(1).max(100), person: z.string().trim().max(80), amountMinor: z.number().int().positive(), category: z.string().min(1).max(80), occurredOn: z.string().date().nullable(), dueOn: z.string().date(), remindOn: z.string().date().nullable(), note: z.string().trim().max(300), annualRatePercent: z.number().min(0).max(200).nullable().optional(), receipt: receiptSchema.optional() });
 const duePaymentSchema = z.object({ amountMinor: z.number().int().positive(), occurredOn: z.string().date(), note: z.string().trim().max(240), addToLedger: z.boolean() });
 const pinSchema = z.string().regex(/^\d{4,6}$/, "PIN must contain 4 to 6 digits.");
 const requestSchema = z.object({ action: z.string(), id: z.string().optional(), payload: z.unknown().optional() });
@@ -146,7 +147,23 @@ function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
   const accountById = new Map(paymentAccounts.map((item) => [item.id, item]));
   for (const transaction of transactions) if (transaction.paymentAccountId) transaction.paymentAccount = accountById.get(transaction.paymentAccountId) ?? null;
   return {
-    profile: { id: data.user.id, displayName: data.user.name, currency: data.user.currency, hideAmounts: data.user.hideAmounts, autoLockMinutes: data.user.autoLockMinutes, hasPin: Boolean(data.user.pinHash) },
+    profile: {
+      id: data.user.id,
+      displayName: data.user.name,
+      currency: data.user.currency,
+      hideAmounts: data.user.hideAmounts,
+      autoLockMinutes: data.user.autoLockMinutes,
+      calendarSystem: data.user.calendarSystem as "AD" | "BS",
+      safeToSpendBufferMinor: data.user.safeToSpendBufferMinor,
+      hasPin: Boolean(data.user.pinHash),
+      learning: {
+        enabled: data.user.learningProfile?.enabled ?? false,
+        suggestions: (data.user.learningProfile?.suggestions ?? []) as unknown as LearningSuggestion[],
+        summary: data.user.learningProfile?.summary ?? [],
+        lastTransactionId: data.user.learningProfile?.lastTransactionId ?? null,
+        lastRunAt: data.user.learningProfile?.lastRunAt?.toISOString() ?? null,
+      },
+    },
     transactions,
     budgets: data.budgets,
     recurringEntries: data.recurring.map((item) => ({
@@ -184,7 +201,7 @@ function serializeAccount(item: Awaited<ReturnType<typeof loadLedger>>["paymentA
 async function loadLedger(id: string) {
   const db = getPrisma();
   const [user, transactions, budgets, recurring, goals, categories, subcategories, paymentAccounts, reconciliations, savedPlaces, transfers, dueItems] = await Promise.all([
-    db.user.findUniqueOrThrow({ where: { id }, select: { id: true, name: true, currency: true, hideAmounts: true, autoLockMinutes: true, pinHash: true } }),
+    db.user.findUniqueOrThrow({ where: { id }, select: { id: true, name: true, currency: true, hideAmounts: true, autoLockMinutes: true, calendarSystem: true, safeToSpendBufferMinor: true, pinHash: true, learningProfile: true } }),
     db.transaction.findMany({ where: { userId: id, deletedAt: null }, orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }], include: { receipt: { select: receiptSelect }, receiptScan: { select: receiptSelect }, paymentAccount: true } }),
     db.budget.findMany({ where: { userId: id }, orderBy: { monthKey: "desc" } }),
     db.recurringEntry.findMany({ where: { userId: id }, orderBy: { nextDueOn: "asc" } }),
@@ -866,7 +883,7 @@ export async function POST(request: Request) {
       case "updateProfile": {
         const value = profileSchema.parse(input.payload);
         const pin = await db.user.findUniqueOrThrow({ where: { id }, select: { pinHash: true } });
-        await db.user.update({ where: { id }, data: { name: value.displayName, currency: value.currency, hideAmounts: value.hideAmounts, autoLockMinutes: pin.pinHash ? value.autoLockMinutes : 0 } });
+        await db.user.update({ where: { id }, data: { name: value.displayName, currency: value.currency, hideAmounts: value.hideAmounts, autoLockMinutes: pin.pinHash ? value.autoLockMinutes : 0, calendarSystem: value.calendarSystem, safeToSpendBufferMinor: value.safeToSpendBufferMinor } });
         break;
       }
       case "savePin": {

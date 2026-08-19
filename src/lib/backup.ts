@@ -2,6 +2,7 @@ import { z } from "zod";
 import { CATEGORIES } from "./categories";
 import { CATEGORY_ICON_NAMES } from "./category-icons";
 import { RECEIPT_MAX_BYTES, RECEIPT_TYPES } from "./receipts";
+import { STORAGE_PERIOD_KEY } from "./period";
 
 export const BACKUP_VERSION = "1";
 export const BACKUP_HEADER = ["backup_version", "entity", "backup_id", "payload_json"] as const;
@@ -23,6 +24,7 @@ export const backupEntitySchemas = {
     currency: z.enum(["NPR", "USD", "AUD"]),
     hideAmounts: z.boolean(),
     autoLockMinutes: z.number().int().min(0).max(120),
+    learningEnabled: z.boolean().default(false),
   }),
   custom_category: z.object({
     name: z.string().trim().min(1).max(30),
@@ -114,7 +116,7 @@ export const backupEntitySchemas = {
     if (value.adjustmentMinor !== 0 && !value.adjustmentNote.trim()) context.addIssue({ code: "custom", path: ["adjustmentNote"], message: "A reconciliation difference requires an explanation." });
   }),
   budget: z.object({
-    monthKey: z.string().regex(/^\d{4}-\d{2}$/),
+    monthKey: z.string().regex(STORAGE_PERIOD_KEY),
     category: z.string().min(1).max(200),
     amountMinor: z.number().int().positive(),
     createdAt: dateTime,

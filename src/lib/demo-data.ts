@@ -7,7 +7,10 @@ export const DEMO_PROFILE: Profile = {
   currency: "NPR",
   hideAmounts: false,
   autoLockMinutes: 0,
+  calendarSystem: "AD",
+  safeToSpendBufferMinor: 0,
   hasPin: false,
+  learning: { enabled: false, suggestions: [], summary: [], lastTransactionId: null, lastRunAt: null },
 };
 
 const now = new Date();

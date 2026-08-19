@@ -1,19 +1,22 @@
 import { ArrowSquareOut, CalendarBlank, Check, HandCoins, Paperclip, PencilSimple, Plus, Trash, User, Wallet } from "@phosphor-icons/react";
 import { NumberInput, Select, TextInput, Textarea } from "@mantine/core";
 import { addDays, format, parseISO } from "date-fns";
+import { todayInput } from "../lib/dates";
 import { useEffect, useMemo, useState } from "react";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { EmptyState } from "../components/EmptyState";
 import { allCategoriesFor, getCategory } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
+import { buildDebtPlan, isPlannableDebt, type PayoffStrategy } from "../lib/debt-planner";
 import { dueDateLabel, duePaid, dueRemaining } from "../lib/dues";
 import { discardReceipt, uploadReceipt } from "../lib/receipts";
 import type { CurrencyCode, CustomCategory, DueDraft, DueItem, DueKind, ReceiptUpload } from "../types";
 
 type DuesTab = "upcoming" | "lent" | "borrowed" | "settled";
-const today = () => format(new Date(), "yyyy-MM-dd");
+const today = () => todayInput();
 const dueDefault = () => format(addDays(new Date(), 7), "yyyy-MM-dd");
 const reminderDefault = () => format(addDays(new Date(), 6), "yyyy-MM-dd");
+const strategyLabels: Record<PayoffStrategy, string> = { snowball: "Snowball — smallest balance first", avalanche: "Avalanche — highest rate first", dueDate: "Due date — earliest first" };
 const labels: Record<DueKind, { title: string; amount: string }> = {
   payment: { title: "Payment name", amount: "Amount to pay" }, receivable: { title: "Expected income", amount: "Amount to receive" },
   lent: { title: "What was it for?", amount: "Amount lent" }, borrowed: { title: "What was it for?", amount: "Amount borrowed" },
@@ -70,6 +73,7 @@ export function DuesPage({ currency, items, customCategories, onSave, onDelete, 
     <div className={showForm ? "dues-layout form-open" : "dues-layout"}>
       {showForm && <DueForm key={editing?.id ?? "new"} item={editing} currency={currency} customCategories={customCategories} onSave={async (draft) => { await onSave(draft, editing?.id); setShowForm(false); setEditing(null); }} onCancel={() => { setShowForm(false); setEditing(null); }} />}
       <section className="dues-content">
+        {tab === "borrowed" && items.some(isPlannableDebt) && <DebtPayoffPlan items={items} currency={currency} />}
         <div className="dues-list">{filtered.map((item) => <DueCard key={item.id} item={item} currency={currency} customCategories={customCategories} focused={item.id === focusedId} startRepayment={item.id === focusedId && focusedAction === "repay"} onEdit={() => { setEditing(item); setShowForm(true); }} onDelete={onDelete} onRecordPayment={onRecordPayment} onComplete={onComplete} />)}</div>
         {!filtered.length && <EmptyState action={tab !== "settled" ? <button className="text-button" onClick={() => setShowForm(true)}>Add your first {tab === "upcoming" ? "upcoming payment" : tab.slice(0, -1)}</button> : undefined} />}
       </section>
@@ -77,15 +81,49 @@ export function DuesPage({ currency, items, customCategories, onSave, onDelete, 
   </div>;
 }
 
+/** A starting budget that always produces a real plan: a tenth of the balance, never less than the interest it has to outrun. */
+function suggestedBudgetMinor(debts: readonly DueItem[]) {
+  const remaining = debts.reduce((sum, item) => sum + dueRemaining(item), 0);
+  const interest = debts.reduce((sum, item) => sum + Math.round(dueRemaining(item) * Math.max(0, item.annualRatePercent ?? 0) / 1200), 0);
+  return Math.max(100, Math.ceil(Math.max(remaining / 10, interest * 1.25) / 100) * 100);
+}
+
+function DebtPayoffPlan({ items, currency }: { items: DueItem[]; currency: CurrencyCode }) {
+  const debts = useMemo(() => items.filter(isPlannableDebt), [items]);
+  const hasInterest = debts.some((item) => (item.annualRatePercent ?? 0) > 0);
+  const [strategy, setStrategy] = useState<PayoffStrategy>("snowball");
+  const [budget, setBudget] = useState<string | number>(() => suggestedBudgetMinor(debts) / 100);
+  // With every rate blank, avalanche is a meaningless tie — it is hidden, so never plan with it either.
+  const activeStrategy = strategy === "avalanche" && !hasInterest ? "snowball" : strategy;
+  const budgetMinor = Math.max(0, Math.round(Number(budget || 0) * 100));
+  const plan = useMemo(() => buildDebtPlan(debts, budgetMinor, activeStrategy, today()), [debts, budgetMinor, activeStrategy]);
+  const strategies = (["snowball", "avalanche", "dueDate"] as PayoffStrategy[]).filter((value) => value !== "avalanche" || hasInterest);
+  return <section className="payoff-plan">
+    <div className="section-heading"><div><span className="section-label">Payoff plan</span><h2>Get debt free</h2></div><strong>{formatMoney(plan.totalRemainingMinor, currency)} owed</strong></div>
+    <div className="payoff-plan-controls">
+      <Select label="Order" value={activeStrategy} onChange={(value) => value && setStrategy(value as PayoffStrategy)} data={strategies.map((value) => ({ value, label: strategyLabels[value] }))} allowDeselect={false} />
+      <NumberInput label="Monthly budget" leftSection={currency} leftSectionWidth={58} value={budget} onChange={setBudget} min={0} decimalScale={2} thousandSeparator="," description="Everything you can put towards these debts each month." />
+    </div>
+    {plan.impossible
+      ? <p className="payoff-plan-warning"><HandCoins size={17} weight="duotone" />Your budget does not cover the interest these debts accrue, so the balance never falls. You need more than {formatMoney(plan.minimumMonthlyMinor, currency)} a month before a payoff date exists.</p>
+      : <div className="payoff-plan-headline"><div><span>Debt free</span><strong>{plan.debtFreeOn ? format(parseISO(plan.debtFreeOn), "MMM yyyy") : "—"}</strong><small>{plan.monthsToDebtFree} {plan.monthsToDebtFree === 1 ? "month" : "months"} from today</small></div><div><span>Interest you pay</span><strong>{formatMoney(plan.totalInterestMinor, currency)}</strong><small>{hasInterest ? `${formatMoney(plan.minimumMonthlyMinor, currency)} accruing this month` : "None of these debts charge interest"}</small></div></div>}
+    <ol className="payoff-plan-list">{plan.entries.map((entry) => <li key={entry.item.id} className="payoff-plan-row">
+      <span className="payoff-plan-order">{entry.order + 1}</span>
+      <div className="payoff-plan-row-main"><strong>{entry.item.title}</strong><small>{[entry.item.person, entry.item.annualRatePercent ? `${entry.item.annualRatePercent}% a year` : "No interest"].filter(Boolean).join(" · ")}</small></div>
+      <div className="payoff-plan-row-figures"><strong>{formatMoney(entry.remainingMinor, currency)}</strong><small>{entry.projectedClearedOn ? `Cleared ${format(parseISO(entry.projectedClearedOn), "MMM yyyy")}` : "Never at this budget"}</small></div>
+    </li>)}</ol>
+  </section>;
+}
+
 function DueForm({ item, currency, customCategories, onSave, onCancel }: { item: DueItem | null; currency: CurrencyCode; customCategories: CustomCategory[]; onSave: (draft: DueDraft) => Promise<void>; onCancel: () => void }) {
   const [kind, setKind] = useState<DueKind>(item?.kind ?? "payment"); const [title, setTitle] = useState(item?.title ?? ""); const [person, setPerson] = useState(item?.person ?? ""); const [amount, setAmount] = useState<string | number>(item ? item.amountMinor / 100 : "");
-  const [category, setCategory] = useState(item?.category ?? "other"); const [occurredOn, setOccurredOn] = useState(item?.occurredOn ?? today()); const [dueOn, setDueOn] = useState(item?.dueOn ?? dueDefault()); const [remindOn, setRemindOn] = useState(item ? item.remindOn ?? "" : reminderDefault()); const [note, setNote] = useState(item?.note ?? ""); const [saving, setSaving] = useState(false); const [error, setError] = useState<string | null>(null);
+  const [category, setCategory] = useState(item?.category ?? "other"); const [occurredOn, setOccurredOn] = useState(item?.occurredOn ?? today()); const [dueOn, setDueOn] = useState(item?.dueOn ?? dueDefault()); const [remindOn, setRemindOn] = useState(item ? item.remindOn ?? "" : reminderDefault()); const [note, setNote] = useState(item?.note ?? ""); const [annualRate, setAnnualRate] = useState<string | number>(item?.annualRatePercent ?? ""); const [saving, setSaving] = useState(false); const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ReceiptUpload | undefined>();
   const [receiptUploading, setReceiptUploading] = useState(false);
   const direction = kind === "payment" || kind === "borrowed" ? "expense" : "income";
   const categories = allCategoriesFor(direction, customCategories);
   const changeKind = (value: string) => { const next = value as DueKind; setKind(next); const nextDirection = next === "payment" || next === "borrowed" ? "expense" : "income"; setCategory(allCategoriesFor(nextDirection, customCategories)[0]?.id ?? "other"); };
-  const submit = async (event: React.FormEvent) => { event.preventDefault(); if (receiptUploading) return; setSaving(true); try { setError(null); await onSave({ kind, title, person, amount: String(amount), category, occurredOn: kind === "lent" || kind === "borrowed" ? occurredOn : "", dueOn, remindOn, note, receipt }); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save this due."); } finally { setSaving(false); } };
+  const submit = async (event: React.FormEvent) => { event.preventDefault(); if (receiptUploading) return; setSaving(true); try { setError(null); await onSave({ kind, title, person, amount: String(amount), category, occurredOn: kind === "lent" || kind === "borrowed" ? occurredOn : "", dueOn, remindOn, note, annualRatePercent: String(annualRate ?? ""), receipt }); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save this due."); } finally { setSaving(false); } };
   const cancel = () => { if (receiptUploading) return; if (receipt) void discardReceipt(receipt); onCancel(); };
   return <aside className="due-form-panel"><div className="section-heading"><div><span className="section-label">{item ? "Update reminder" : "New reminder"}</span><h2>{item ? "Edit due" : "Add a due"}</h2></div></div><form className="stack-form" onSubmit={submit} aria-busy={saving || receiptUploading}>
     <DueKindToggle value={kind} onChange={changeKind} disabled={Boolean(item?.payments.length)} />
@@ -96,6 +134,7 @@ function DueForm({ item, currency, customCategories, onSave, onCancel }: { item:
     {(kind === "lent" || kind === "borrowed") && <TextInput label="Date money changed hands" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={occurredOn} onChange={(event) => setOccurredOn(event.currentTarget.value)} required />}
     <TextInput label="Due date" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={dueOn} onChange={(event) => setDueOn(event.currentTarget.value)} required />
     <TextInput label="Remind me on" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={remindOn} onChange={(event) => setRemindOn(event.currentTarget.value)} description="The bell will show this item from this date." />
+    {(kind === "lent" || kind === "borrowed") && <NumberInput label="Interest rate" value={annualRate} onChange={setAnnualRate} min={0} max={200} decimalScale={2} suffix="% a year" description="Leave blank when no interest is charged. Used to order your payoff plan." />}
     <Textarea label="Note" value={note} onChange={(event) => setNote(event.currentTarget.value)} maxLength={300} autosize minRows={2} />
     <div className="receipt-field" aria-busy={receiptUploading}><label className={receiptUploading ? "uploading" : undefined}>{receiptUploading ? <ButtonSpinner /> : <Paperclip size={17} />}<span>{receiptUploading ? "Uploading receipt…" : receipt?.name ?? "Attach receipt or document"}</span><input type="file" disabled={receiptUploading} accept="image/jpeg,image/png,image/webp,application/pdf" onChange={async (event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (!file) return; setError(null); setReceiptUploading(true); try { const value = await uploadReceipt(file); if (receipt) void discardReceipt(receipt); setReceipt(value); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not attach this file."); } finally { setReceiptUploading(false); } }} /></label>{receipt && <button type="button" className="text-button danger-text" disabled={receiptUploading} onClick={() => { void discardReceipt(receipt); setReceipt(undefined); }}>Remove</button>}</div>
     <p className="field-hint">Maximum file size: 3 MB.</p>

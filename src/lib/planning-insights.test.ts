@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateBudgetPacing, calculateMonthlyBreathingRoom, calculateSafeToSpend } from "./planning-insights";
+import { calculateBudgetPacing, calculateMonthlyBreathingRoom, calculateSafeToSpend, calculateSafeToSpendV2, committedBeforeHorizon, detectSpendingHorizon } from "./planning-insights";
 import type { Budget, DueItem, LedgerTransaction, RecurringEntry } from "../types";
 
 const budget: Budget = { id: "budget-1", userId: "user-1", monthKey: "2026-07", category: "food", amountMinor: 1200000 };
@@ -56,6 +56,7 @@ const due = (overrides: Partial<DueItem>): DueItem => ({
   snoozedUntil: null,
   note: "",
   status: "open",
+  annualRatePercent: null,
   completedOn: null,
   createdAt: "2026-07-01T00:00:00.000Z",
   payments: [],
@@ -183,5 +184,130 @@ describe("monthly breathing room", () => {
     );
 
     expect(result.upcomingExpensesMinor).toBe(380000);
+  });
+});
+
+describe("spending horizon", () => {
+  it("uses a scheduled income entry as payday", () => {
+    const horizon = detectSpendingHorizon(
+      [recurring({ id: "salary", kind: "income", category: "salary", nextDueOn: "2026-07-28" })],
+      [],
+      new Date(2026, 6, 1),
+      "2026-07-20",
+    );
+
+    expect(horizon).toEqual({ throughDate: "2026-07-28", daysRemaining: 9, source: "payday" });
+  });
+
+  it("picks the earliest upcoming income when several are scheduled", () => {
+    const horizon = detectSpendingHorizon([
+      recurring({ id: "a", kind: "income", nextDueOn: "2026-08-05" }),
+      recurring({ id: "b", kind: "income", nextDueOn: "2026-07-25" }),
+    ], [], new Date(2026, 6, 1), "2026-07-20");
+
+    expect(horizon.throughDate).toBe("2026-07-25");
+  });
+
+  it("ignores inactive and already-past income entries", () => {
+    const horizon = detectSpendingHorizon([
+      recurring({ id: "a", kind: "income", nextDueOn: "2026-07-28", active: false }),
+      recurring({ id: "b", kind: "income", nextDueOn: "2026-07-01" }),
+    ], [], new Date(2026, 6, 1), "2026-07-20");
+
+    expect(horizon.source).not.toBe("payday");
+  });
+
+  it("falls back to a repeated income day in history", () => {
+    const history = ["2026-04-05", "2026-05-05", "2026-06-05"].map((occurredOn, index) =>
+      transaction({ id: `income-${index}`, kind: "income", category: "salary", occurredOn }));
+    const horizon = detectSpendingHorizon([], history, new Date(2026, 6, 1), "2026-07-20");
+
+    expect(horizon).toEqual({ throughDate: "2026-08-05", daysRemaining: 17, source: "incomePattern" });
+  });
+
+  it("ignores a one-off income date", () => {
+    const horizon = detectSpendingHorizon([], [transaction({ kind: "income", occurredOn: "2026-06-05" })], new Date(2026, 6, 1), "2026-07-20");
+
+    expect(horizon.source).toBe("periodEnd");
+  });
+
+  it("falls back to the end of the month", () => {
+    const horizon = detectSpendingHorizon([], [], new Date(2026, 6, 1), "2026-07-20");
+
+    expect(horizon).toEqual({ throughDate: "2026-07-31", daysRemaining: 12, source: "periodEnd" });
+  });
+
+  it("never reports fewer than one day remaining", () => {
+    const horizon = detectSpendingHorizon([], [], new Date(2026, 6, 1), "2026-07-31");
+
+    expect(horizon.daysRemaining).toBe(1);
+  });
+});
+
+describe("committed before horizon", () => {
+  const horizon = { throughDate: "2026-07-31", daysRemaining: 12, source: "periodEnd" as const };
+
+  it("counts recurring expenses and open dues falling before the horizon", () => {
+    const committed = committedBeforeHorizon(
+      [recurring({ nextDueOn: "2026-07-25", amountMinor: 200000 })],
+      [due({ dueOn: "2026-07-28", amountMinor: 150000 })],
+      horizon,
+      "2026-07-20",
+    );
+
+    expect(committed).toBe(350000);
+  });
+
+  it("excludes dues past the horizon and income entries", () => {
+    const committed = committedBeforeHorizon(
+      [recurring({ kind: "income", nextDueOn: "2026-07-25", amountMinor: 900000 })],
+      [due({ dueOn: "2026-08-15", amountMinor: 150000 })],
+      horizon,
+      "2026-07-20",
+    );
+
+    expect(committed).toBe(0);
+  });
+
+  it("counts only what is still owed on a partly repaid due", () => {
+    const committed = committedBeforeHorizon([], [due({
+      dueOn: "2026-07-25",
+      amountMinor: 200000,
+      payments: [{ id: "p1", userId: "user-1", dueItemId: "due-1", amountMinor: 120000, occurredOn: "2026-07-21", note: "", transactionId: null, createdAt: "2026-07-21T00:00:00.000Z" }],
+    })], horizon, "2026-07-20");
+
+    expect(committed).toBe(80000);
+  });
+
+  it("ignores completed dues", () => {
+    const committed = committedBeforeHorizon([], [due({ dueOn: "2026-07-25", status: "completed" })], horizon, "2026-07-20");
+
+    expect(committed).toBe(0);
+  });
+});
+
+describe("safe to spend v2", () => {
+  const horizon = { throughDate: "2026-07-31", daysRemaining: 10, source: "periodEnd" as const };
+
+  it("subtracts commitments and the buffer, then divides by days remaining", () => {
+    const result = calculateSafeToSpendV2(1_000_000, 300_000, horizon, 200_000);
+
+    expect(result).toMatchObject({ totalMinor: 500_000, perDayMinor: 50_000, committedMinor: 300_000, bufferMinor: 200_000 });
+  });
+
+  it("excludes income that has not arrived, unlike the month-total estimate", () => {
+    // Balance alone, with nothing committed, is the whole allowance.
+    expect(calculateSafeToSpendV2(400_000, 0, horizon).totalMinor).toBe(400_000);
+  });
+
+  it("reports a negative total but never a negative daily allowance", () => {
+    const result = calculateSafeToSpendV2(100_000, 400_000, horizon);
+
+    expect(result.totalMinor).toBe(-300_000);
+    expect(result.perDayMinor).toBe(0);
+  });
+
+  it("rounds the daily allowance down so the horizon is never overspent", () => {
+    expect(calculateSafeToSpendV2(99_999, 0, horizon).perDayMinor).toBe(9_999);
   });
 });

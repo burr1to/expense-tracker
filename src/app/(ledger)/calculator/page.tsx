@@ -11,6 +11,7 @@ export default function CalculatorRoute() {
     month={month}
     transactions={ledger.transactions}
     customCategories={ledger.customCategories}
+    goals={ledger.goals}
     onSaveGoal={ledger.saveGoal}
     onSaveBudget={ledger.saveBudget}
   />;

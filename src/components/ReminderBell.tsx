@@ -1,5 +1,5 @@
 import { Bell, CalendarBlank, Check, ClockCountdown, DownloadSimple, FilePdf, HandCoins, Repeat, X } from "@phosphor-icons/react";
-import { format } from "date-fns";
+import { todayInput } from "../lib/dates";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { dueDateLabel, dueRemaining, groupActionableDues, urgentDueCount, type DueUrgency } from "../lib/dues";
 import { formatMoney } from "../lib/currency";
@@ -55,7 +55,7 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const groups = useMemo(() => groupActionableDues(items), [items]);
-  const recurringGroups = useMemo(() => groupRecurringReminders(recurringEntries, format(new Date(), "yyyy-MM-dd")), [recurringEntries]);
+  const recurringGroups = useMemo(() => groupRecurringReminders(recurringEntries, todayInput()), [recurringEntries]);
   const reminders = useMemo(() => [...groups.overdue, ...groups.today, ...groups.later], [groups]);
   const recurringReminderCount = recurringGroups.overdue.length + recurringGroups.today.length + recurringGroups.later.length;
   const urgentCount = useMemo(() => urgentDueCount(items), [items]);
