@@ -197,14 +197,19 @@ h1, h2, strong { letter-spacing: -0.025em; }
 .negative { color: var(--coral) !important; }
 .account-balance-card { margin: -16px 0 32px; padding: 21px 24px; border: 1px solid color-mix(in srgb, var(--blue) 22%, var(--line)); border-radius: 16px; background: color-mix(in srgb, var(--blue) 5%, transparent); }
 .account-balance-heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
-.account-balance-heading h2 { margin: 4px 0 3px; font-size: 30px; letter-spacing: -.04em; }
-.account-balance-heading p, .account-balance-empty { margin: 0; color: var(--muted); font-size: 11px; }
-.account-balance-heading > svg { color: var(--blue); }
-.account-balance-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 18px; padding-top: 16px; border-top: 1px solid color-mix(in srgb, var(--blue) 16%, var(--line)); }
-.account-balance-list > div { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
-.account-balance-list span { min-width: 0; display: grid; gap: 3px; }
-.account-balance-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.account-balance-list small { color: var(--muted); font-size: 10px; }
+.account-balance-heading .section-label { font-size: 12px; font-weight: 700; letter-spacing: .02em; word-spacing: .08em; }
+.account-balance-heading h2 { margin: 6px 0 6px; font-size: 30px; letter-spacing: -.03em; white-space: nowrap; }
+.account-balance-heading p, .account-balance-empty { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; word-spacing: .04em; }
+.account-balance-heading > svg { flex: 0 0 auto; color: var(--blue); }
+.account-balance-list { display: grid; grid-template-columns: 1fr; gap: 8px; margin: 16px 0 0; padding: 14px 0 0; border-top: 1px solid color-mix(in srgb, var(--blue) 16%, var(--line)); list-style: none; }
+.account-balance-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: center; min-width: 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--blue) 12%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--paper-strong) 78%, transparent); }
+.account-balance-copy { min-width: 0; display: grid; gap: 2px; }
+.account-balance-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 650; letter-spacing: 0; }
+.account-balance-copy small { color: var(--muted); font-size: 11px; letter-spacing: 0; word-spacing: .04em; }
+.account-balance-amount { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0; text-align: right; white-space: nowrap; }
+@media (min-width: 901px) {
+  .account-balance-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .account-balance-empty { margin-top: 15px; }
 .account-balance-locked { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; }
 .account-balance-lock-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 13px; color: var(--blue); background: color-mix(in srgb, var(--blue) 11%, transparent); }
@@ -1185,7 +1190,7 @@ body[data-hide-amounts="true"] :is(.calculator-money, .calculator-row-amount)::a
 .lock-card p { color: var(--muted); font-size: 13px; line-height: 1.5; }
 .lock-card form { display: grid; gap: 12px; margin-top: 20px; }
 .lock-card input { min-height: 46px; border: 1px solid var(--line); border-radius: 9px; padding: 0 12px; background: var(--paper-strong); color: var(--ink); }
-body[data-hide-amounts="true"] :is(.amount, .map-amount, .summary-strip strong, .dashboard-day-summary strong, .savings-copy h1, .report-kpis strong, .account-balance-heading h2, .account-balance-list strong, .payment-account-summary strong, .account-summary-card strong, .account-transaction-kpis strong, .report-account-list strong, .transfer-row > div > strong, .currency-preview strong, .category-bar strong, .goal-card > strong, .calendar-amount, .calendar-day .income, .calendar-day .expense, .home-plan-row p, .dues-summary strong, .due-card-heading > div:last-child strong, .reminder-item-amount, .repeat-suggestion-value strong, .breathing-room-heading h2, .breathing-room-breakdown strong, .budget-pacing-copy > div:first-child > span, .budget-pacing-meta span) {
+body[data-hide-amounts="true"] :is(.amount, .map-amount, .summary-strip strong, .dashboard-day-summary strong, .savings-copy h1, .report-kpis strong, .account-balance-heading h2.amount, .account-balance-amount, .payment-account-summary strong, .account-summary-card strong, .account-transaction-kpis strong, .report-account-list strong, .transfer-row > div > strong, .currency-preview strong, .category-bar strong, .goal-card > strong, .calendar-amount, .calendar-day .income, .calendar-day .expense, .home-plan-row p, .dues-summary strong, .due-card-heading > div:last-child strong, .reminder-item-amount, .repeat-suggestion-value strong, .breathing-room-heading h2, .breathing-room-breakdown strong, .budget-pacing-copy > div:first-child > span, .budget-pacing-meta span) {
   position: relative;
   color: transparent !important;
   text-shadow: none;

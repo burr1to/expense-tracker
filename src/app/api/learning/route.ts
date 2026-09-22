@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { Prisma } from "../../../generated/prisma/client";
-import { getBetaSession } from "../../../lib/auth";
+import { getAuthenticatedSession } from "../../../lib/auth";
 import { CATEGORIES, SUBCATEGORIES } from "../../../lib/categories";
 import { getPrisma } from "../../../lib/prisma";
 import { GEMINI_RECEIPT_MODEL, interactionOutputText } from "../../../lib/receipt-analysis";
@@ -44,7 +44,7 @@ function serialize(profile: { enabled: boolean; suggestions: unknown; summary: s
 }
 
 async function sessionUserId() {
-  const session = await getBetaSession(await headers());
+  const session = await getAuthenticatedSession(await headers());
   return session?.user.id ?? null;
 }
 

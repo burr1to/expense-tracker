@@ -1,8 +1,6 @@
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { betterAuth } from "better-auth";
-import { APIError, createAuthMiddleware } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
-import { BETA_ACCESS_DENIED_MESSAGE, hasBetaAccess } from "./beta-access";
 import { getPrisma } from "./prisma";
 import { removeStoredReceipts } from "./receipt-storage";
 
@@ -46,22 +44,9 @@ export const auth = betterAuth({
     },
   },
   session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 },
-  hooks: {
-    before: createAuthMiddleware(async (context) => {
-      if (!["/sign-up/email", "/sign-in/email", "/request-password-reset"].includes(context.path)) return;
-      const email = typeof context.body?.email === "string" ? context.body.email : null;
-      if (!hasBetaAccess(email)) {
-        throw APIError.from("FORBIDDEN", {
-          code: "BETA_ACCESS_DENIED",
-          message: BETA_ACCESS_DENIED_MESSAGE,
-        });
-      }
-    }),
-  },
   plugins: [nextCookies()],
 });
 
-export async function getBetaSession(requestHeaders: Headers) {
-  const session = await auth.api.getSession({ headers: requestHeaders });
-  return session && hasBetaAccess(session.user.email) ? session : null;
+export async function getAuthenticatedSession(requestHeaders: Headers) {
+  return auth.api.getSession({ headers: requestHeaders });
 }

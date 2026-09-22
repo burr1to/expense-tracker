@@ -1,11 +1,11 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { getBetaSession } from "../../../../lib/auth";
+import { getAuthenticatedSession } from "../../../../lib/auth";
 import { getPrisma } from "../../../../lib/prisma";
 import { ensureReceiptsBucket, getSupabaseStorageAdmin, RECEIPTS_BUCKET } from "../../../../lib/receipt-storage";
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getBetaSession(await headers());
+  const session = await getAuthenticatedSession(await headers());
   if (!session?.user.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const id = (await params).id;
   const db = getPrisma();

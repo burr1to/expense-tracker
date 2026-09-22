@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth, getBetaSession } from "../../../lib/auth";
+import { auth, getAuthenticatedSession } from "../../../lib/auth";
 import {
   BACKUP_MAX_BYTES,
   type BackupEntity,
@@ -264,7 +264,7 @@ async function restoreBackup(userId: string, csv: string) {
 }
 
 export async function GET() {
-  const session = await getBetaSession(await headers());
+  const session = await getAuthenticatedSession(await headers());
   if (!session?.user.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const backup = await buildBackup(session.user.id);
@@ -287,7 +287,7 @@ export async function POST(request: Request) {
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const requestHeaders = await headers();
-  const session = await getBetaSession(requestHeaders);
+  const session = await getAuthenticatedSession(requestHeaders);
   if (!session?.user.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const contentLength = Number(request.headers.get("content-length") ?? 0);
   if (contentLength > BACKUP_MAX_BYTES + 1024 * 1024) return NextResponse.json({ error: "Keep backup files under 75 MB." }, { status: 413 });

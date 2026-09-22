@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getBetaSession } from "../../../../lib/auth";
+import { getAuthenticatedSession } from "../../../../lib/auth";
 import { KATHMANDU_BOUNDS, isInsideKathmandu } from "../../../../lib/kathmandu-locations";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +52,7 @@ async function rateLimitedFetch(url: URL) {
 }
 
 export async function GET(request: Request) {
-  const session = await getBetaSession(await headers());
+  const session = await getAuthenticatedSession(await headers());
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const parsed = querySchema.safeParse(new URL(request.url).searchParams.get("q"));

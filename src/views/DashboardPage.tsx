@@ -311,8 +311,27 @@ export function DashboardPage({ month, focus, currency, transactions, budgets, r
 
       <section className={`account-balance-card${balancesUnlocked ? " unlocked" : " locked"}`} aria-label="Tracked account balances">
         {hasPin && balancesUnlocked ? <>
-          <div className="account-balance-heading"><div><span className="section-label">Your money right now</span><h2>{formatMoney(trackedBalance, currency)}</h2><p>Across {paymentAccounts.length} manually tracked {paymentAccounts.length === 1 ? "account" : "accounts"}</p></div><Bank size={27} weight="duotone" /></div>
-          {paymentAccounts.length ? <div className="account-balance-list">{paymentAccounts.map((account) => <div key={account.id}><span><strong>{account.label || account.provider}</strong><small>Checked {account.balanceAsOf}</small></span><strong>{formatMoney(account.currentBalanceMinor, currency)}</strong></div>)}</div> : <p className="account-balance-empty">Add a bank or wallet on the Accounts page to track its current balance here.</p>}
+          <div className="account-balance-heading">
+            <div>
+              <span className="section-label">Your money right now</span>
+              <h2 className={`amount${trackedBalance < 0 ? " negative" : ""}`}>{formatMoney(trackedBalance, currency)}</h2>
+              <p>Across {paymentAccounts.length} manually tracked {paymentAccounts.length === 1 ? "account" : "accounts"}</p>
+            </div>
+            <Bank size={27} weight="duotone" />
+          </div>
+          {paymentAccounts.length ? (
+            <ul className="account-balance-list">
+              {paymentAccounts.map((account) => (
+                <li key={account.id} className="account-balance-item">
+                  <span className="account-balance-copy">
+                    <strong>{account.label || account.provider}</strong>
+                    <small>Checked {account.balanceAsOf}</small>
+                  </span>
+                  <strong className={`account-balance-amount amount${account.currentBalanceMinor < 0 ? " negative" : ""}`}>{formatMoney(account.currentBalanceMinor, currency)}</strong>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="account-balance-empty">Add a bank or wallet on the Accounts page to track its current balance here.</p>}
         </> : <div className="account-balance-locked">
           <span className="account-balance-lock-icon"><LockKey size={24} weight="duotone" /></span>
           <div><span className="section-label">Your money right now</span><h2>Account balances are locked</h2><p>{hasPin ? "Enter your ledger PIN to reveal the total and each account balance." : "Set up a ledger PIN before adding an account or viewing account balances."}</p></div>

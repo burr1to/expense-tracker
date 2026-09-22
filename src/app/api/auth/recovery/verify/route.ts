@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { hasBetaAccess } from "../../../../../lib/beta-access";
 import { getPrisma } from "../../../../../lib/prisma";
 import { normalizeRecoveryAnswer, normalizeRecoveryCode, RECOVERY_QUESTION_OPTIONS } from "../../../../../lib/recovery";
 import { hashRecoverySecret, verifyRecoverySecret } from "../../../../../lib/recovery-crypto";
@@ -50,10 +49,10 @@ export async function POST(request: Request) {
   }
 
   const db = getPrisma();
-  const user = hasBetaAccess(email) ? await db.user.findFirst({
+  const user = await db.user.findFirst({
     where: { email: { equals: email, mode: "insensitive" } },
     select: { id: true, recovery: true },
-  }) : null;
+  });
   const recovery = user?.recovery;
   if (recovery?.lockedUntil && recovery.lockedUntil.getTime() > now) {
     return NextResponse.json({ error: "Too many recovery attempts. Try again later." }, { status: 429, headers: { "Retry-After": String(Math.ceil((recovery.lockedUntil.getTime() - now) / 1000)) } });

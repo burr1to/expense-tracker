@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { Prisma } from "../../../generated/prisma/client";
-import { getBetaSession } from "../../../lib/auth";
+import { getAuthenticatedSession } from "../../../lib/auth";
 import { getPrisma } from "../../../lib/prisma";
 import { hashPin, verifyPin } from "../../../lib/pin";
 import { NEPAL_MOBILE_BANKS } from "../../../lib/payment-accounts";
@@ -131,7 +131,7 @@ const receiptData = async (receipt: z.infer<typeof receiptSchema>, id: string) =
 const receiptSelect = { id: true, name: true, mimeType: true, size: true } as const;
 
 async function userId() {
-  const session = await getBetaSession(await headers());
+  const session = await getAuthenticatedSession(await headers());
   return session?.user.id ?? null;
 }
 

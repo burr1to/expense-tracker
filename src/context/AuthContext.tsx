@@ -31,8 +31,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refreshSession = useCallback(async () => {
-    const response = await fetch("/api/auth/beta-access", { cache: "no-store", credentials: "include" });
-    if (response.status === 401 || response.status === 403) {
+    const response = await fetch("/api/auth/session", { cache: "no-store", credentials: "include" });
+    if (response.status === 401) {
       setUser(null);
       return;
     }

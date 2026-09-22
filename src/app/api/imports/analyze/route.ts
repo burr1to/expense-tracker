@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getBetaSession } from "../../../../lib/auth";
+import { getAuthenticatedSession } from "../../../../lib/auth";
 import { CATEGORIES, SUBCATEGORIES } from "../../../../lib/categories";
 import { getPrisma } from "../../../../lib/prisma";
 import { type LearningCategory } from "../../../../lib/learning";
@@ -25,7 +25,7 @@ function checkRateLimit(userId: string) {
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
-  const session = await getBetaSession(await headers());
+  const session = await getAuthenticatedSession(await headers());
   if (!session?.user.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const key = process.env.GEMINI_API_KEY?.trim();
