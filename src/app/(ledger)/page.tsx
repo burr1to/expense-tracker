@@ -18,6 +18,7 @@ export default function DashboardRoute() {
 
   return <DashboardPage
     month={month}
+    calendarSystem={ledger.profile.calendarSystem}
     focus={homeFocus}
     currency={ledger.profile.currency}
     transactions={ledger.transactions}
@@ -29,6 +30,7 @@ export default function DashboardRoute() {
     paymentAccounts={ledger.paymentAccounts}
     savedPlaces={ledger.savedPlaces}
     hasPin={ledger.profile.hasPin}
+    safeToSpendBufferMinor={ledger.profile.safeToSpendBufferMinor}
     onMonthChange={setMonth}
     onAdd={openAddForDate}
     onSelectedDayChange={setHomeSelectedDate}

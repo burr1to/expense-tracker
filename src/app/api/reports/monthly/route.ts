@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { getBetaSession } from "../../../../lib/auth";
+import { getAuthenticatedSession } from "../../../../lib/auth";
 import { getCategory } from "../../../../lib/categories";
 import {
   buildMonthlyReport,
@@ -27,7 +27,7 @@ function afterBalanceAnchor(occurredOn: string, createdAt: string, balanceAsOf: 
 }
 
 export async function GET(request: Request) {
-  const session = await getBetaSession(await headers());
+  const session = await getAuthenticatedSession(await headers());
   if (!session?.user.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const monthKey = new URL(request.url).searchParams.get("month") ?? "";

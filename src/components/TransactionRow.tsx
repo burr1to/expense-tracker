@@ -3,7 +3,7 @@ import { useContext, type CSSProperties } from "react";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { getCategory } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
-import { formatTransactionDate } from "../lib/dates";
+import { formatLedgerDate } from "../lib/dates";
 import { paymentAccountLabel } from "../lib/payment-accounts";
 import type { CurrencyCode, CustomCategory, LedgerTransaction } from "../types";
 import { CategoryIcon } from "./CategoryIcon";
@@ -37,7 +37,7 @@ export function TransactionRow({ transaction, currency, onDuplicate, onEdit, onD
           <span><Tag size={13} />{category.label}{transaction.subcategory ? ` · ${transaction.subcategory}` : ""}</span>
           {transaction.area && <span><MapPinLine size={13} />{transaction.area}</span>}
           <span><Wallet size={13} />{payment}</span>
-          <span><CalendarBlank size={13} />{formatTransactionDate(transaction.occurredOn)}</span>
+          <span><CalendarBlank size={13} />{formatLedgerDate(transaction.occurredOn, workspace?.ledger.profile.calendarSystem ?? "AD")}</span>
           {transaction.receipt && <ReceiptPreview receipt={transaction.receipt} className="row-receipt" ariaLabel={`Preview receipt ${transaction.receipt.name}`}><Paperclip size={13} />Receipt</ReceiptPreview>}
         </div>
       </div>

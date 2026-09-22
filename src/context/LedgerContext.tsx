@@ -2,10 +2,11 @@
 "use client";
 
 import { addDays, format } from "date-fns";
+import { todayInput } from "../lib/dates";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { majorToMinor } from "../lib/currency";
 import { ASYNC_IMPORT_THRESHOLD, IMPORT_POLL_INTERVAL_MS } from "../lib/import-job";
-import type { AccountReconciliation, AccountTransfer, Budget, CategoryIconName, CustomCategory, CustomSubcategory, DueDraft, DueItem, ImportJob, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, ReceiptUpload, RecurringDraft, RecurringEntry, SavedPlace, SavedPlaceDraft, SavingsGoal, TransactionDraft, TransactionKind } from "../types";
+import type { AccountReconciliation, AccountTransfer, Budget, CategoryIconName, CustomCategory, CustomSubcategory, DueDraft, DueItem, ImportJob, LearningState, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, ReceiptUpload, RecurringDraft, RecurringEntry, SavedPlace, SavedPlaceDraft, SavingsGoal, TransactionDraft, TransactionKind } from "../types";
 import type { CsvCategoryDraft, CsvSubcategoryDraft } from "../lib/csv";
 import { useAuth } from "./AuthContext";
 
@@ -35,10 +36,12 @@ interface LedgerContextValue extends LedgerData {
   completeDueItem: (id: string, addToLedger: boolean) => Promise<void>;
   savePin: (pin: string, currentPin?: string) => Promise<void>; removePin: (currentPin: string) => Promise<void>; verifyPin: (pin: string) => Promise<void>;
   restoreBackup: (file: File, password: string) => Promise<BackupRestoreResult>;
-  updateProfile: (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes">>) => Promise<void>; resetDemo: () => void;
+  updateProfile: (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes" | "calendarSystem" | "safeToSpendBufferMinor">>) => Promise<void>;
+  setLearningEnabled: (enabled: boolean) => Promise<void>; runLearning: () => Promise<number>; resetLearning: () => Promise<void>;
+  resetDemo: () => void;
 }
 
-const emptyProfile: Profile = { id: "", displayName: "Personal ledger", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, hasPin: false };
+const emptyProfile: Profile = { id: "", displayName: "Personal ledger", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, calendarSystem: "AD", safeToSpendBufferMinor: 0, hasPin: false, learning: { enabled: false, suggestions: [], summary: [], lastTransactionId: null, lastRunAt: null } };
 const emptyData: LedgerData = { profile: emptyProfile, transactions: [], budgets: [], recurringEntries: [], goals: [], customCategories: [], customSubcategories: [], paymentAccounts: [], reconciliations: [], savedPlaces: [], transfers: [], dueItems: [] };
 const LedgerContext = createContext<LedgerContextValue | null>(null);
 const splitTags = (value: string) => [...new Set(value.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean))].slice(0, 8);
@@ -166,11 +169,11 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const deletePaymentAccount = useCallback(async (id: string) => mutate("deletePaymentAccount", undefined, id), [mutate]);
   const saveTransfer = useCallback(async (draft: AccountTransferDraft) => mutate("saveTransfer", { fromAccountId: draft.fromAccountId, toAccountId: draft.toAccountId, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn, note: draft.note.trim() }), [mutate]);
   const deleteTransfer = useCallback(async (id: string) => mutate("deleteTransfer", undefined, id), [mutate]);
-  const saveDueItem = useCallback(async (draft: DueDraft, id?: string) => mutate("saveDueItem", { ...draft, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn || null, remindOn: draft.remindOn || null }, id), [mutate]);
+  const saveDueItem = useCallback(async (draft: DueDraft, id?: string) => mutate("saveDueItem", { ...draft, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn || null, remindOn: draft.remindOn || null, annualRatePercent: draft.annualRatePercent.trim() ? Number(draft.annualRatePercent) : null }, id), [mutate]);
   const deleteDueItem = useCallback(async (id: string) => mutate("deleteDueItem", undefined, id), [mutate]);
   const snoozeDueItem = useCallback(async (id: string) => mutate("snoozeDueItem", { until: format(addDays(new Date(), 1), "yyyy-MM-dd") }, id), [mutate]);
   const recordDuePayment = useCallback(async (id: string, amount: string, occurredOn: string, note: string, addToLedger: boolean) => mutate("recordDuePayment", { amountMinor: majorToMinor(amount), occurredOn, note: note.trim(), addToLedger }, id), [mutate]);
-  const completeDueItem = useCallback(async (id: string, addToLedger: boolean) => mutate("completeDueItem", { addToLedger, occurredOn: format(new Date(), "yyyy-MM-dd") }, id), [mutate]);
+  const completeDueItem = useCallback(async (id: string, addToLedger: boolean) => mutate("completeDueItem", { addToLedger, occurredOn: todayInput() }, id), [mutate]);
   const savePin = useCallback(async (pin: string, currentPin?: string) => mutate("savePin", { pin, currentPin }), [mutate]);
   const removePin = useCallback(async (currentPin: string) => mutate("removePin", { currentPin }), [mutate]);
   const verifyPin = useCallback(async (pin: string) => {
@@ -188,10 +191,20 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     await refresh();
     return body;
   }, [refresh]);
-  const updateProfile = useCallback(async (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes">>) => mutate("updateProfile", { ...data.profile, ...changes }), [data.profile, mutate]);
+  const updateProfile = useCallback(async (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes" | "calendarSystem" | "safeToSpendBufferMinor">>) => mutate("updateProfile", { ...data.profile, ...changes }), [data.profile, mutate]);
+  const learningAction = useCallback(async (payload: { action: "setEnabled"; enabled: boolean } | { action: "run" } | { action: "reset" }) => {
+    const response = await fetch("/api/learning", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const body = await response.json() as { learning?: LearningState; processed?: number; error?: string };
+    if (!response.ok || !body.learning) throw new Error(body.error ?? "Could not update personalization.");
+    setData((current) => ({ ...current, profile: { ...current.profile, learning: body.learning! } }));
+    return body.processed ?? 0;
+  }, []);
+  const setLearningEnabled = useCallback(async (enabled: boolean) => { await learningAction({ action: "setEnabled", enabled }); }, [learningAction]);
+  const runLearning = useCallback(() => learningAction({ action: "run" }), [learningAction]);
+  const resetLearning = useCallback(async () => { await learningAction({ action: "reset" }); }, [learningAction]);
   const resetDemo = useCallback(() => undefined, []);
 
-  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, resetDemo }), [data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, resetDemo]);
+  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, setLearningEnabled, runLearning, resetLearning, resetDemo }), [data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, setLearningEnabled, runLearning, resetLearning, resetDemo]);
   return <LedgerContext.Provider value={value}>{children}</LedgerContext.Provider>;
 }
 

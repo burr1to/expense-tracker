@@ -1,4 +1,5 @@
 export type CurrencyCode = "NPR" | "USD" | "AUD";
+export type CalendarSystem = "AD" | "BS";
 export type TransactionKind = "income" | "expense";
 export type AppView = "home" | "plan" | "calculator" | "dues" | "reports" | "transactions" | "accounts" | "maps" | "settings";
 export type TransactionCategory = string;
@@ -24,7 +25,28 @@ export interface Profile {
   currency: CurrencyCode;
   hideAmounts: boolean;
   autoLockMinutes: number;
+  calendarSystem: CalendarSystem;
+  safeToSpendBufferMinor: number;
   hasPin: boolean;
+  learning: LearningState;
+}
+
+export interface LearningSuggestion {
+  place: string;
+  kind: TransactionKind;
+  category: string;
+  subcategory: string;
+  paymentMode: PaymentMode;
+  confidence: number;
+  evidenceCount: number;
+}
+
+export interface LearningState {
+  enabled: boolean;
+  suggestions: LearningSuggestion[];
+  summary: string[];
+  lastTransactionId: string | null;
+  lastRunAt: string | null;
 }
 
 export interface LedgerTransaction {
@@ -256,6 +278,7 @@ export interface DueItem {
   snoozedUntil: string | null;
   note: string;
   status: DueStatus;
+  annualRatePercent: number | null;
   completedOn: string | null;
   createdAt: string;
   payments: DuePayment[];
@@ -272,6 +295,7 @@ export interface DueDraft {
   dueOn: string;
   remindOn: string;
   note: string;
+  annualRatePercent: string;
   receipt?: ReceiptUpload;
 }
 

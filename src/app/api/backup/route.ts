@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { auth, getBetaSession } from "../../../lib/auth";
+import { auth, getAuthenticatedSession } from "../../../lib/auth";
 import {
   BACKUP_MAX_BYTES,
   type BackupEntity,
@@ -48,7 +48,7 @@ async function receiptBase64(receipt: { storagePath: string | null; data?: Uint8
 async function buildBackup(userId: string) {
   const db = getPrisma();
   const [user, categories, subcategories, savedPlaces, accounts, reconciliations, transactions, transfers, budgets, recurring, goals, dues, receipts, receiptScans] = await Promise.all([
-    db.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true, currency: true, hideAmounts: true, autoLockMinutes: true } }),
+    db.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true, currency: true, hideAmounts: true, autoLockMinutes: true, learningProfile: { select: { enabled: true } } } }),
     db.customCategory.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     db.customSubcategory.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     db.savedPlace.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
@@ -67,7 +67,7 @@ async function buildBackup(userId: string) {
 
   const records: BackupRecord[] = [
     { entity: "metadata", backupId: "backup", payload: { app: "SaveYoRupee", exportedAt: new Date().toISOString() } },
-    { entity: "profile", backupId: "profile", payload: { displayName: user.name, currency: user.currency, hideAmounts: user.hideAmounts, autoLockMinutes: user.autoLockMinutes } },
+    { entity: "profile", backupId: "profile", payload: { displayName: user.name, currency: user.currency, hideAmounts: user.hideAmounts, autoLockMinutes: user.autoLockMinutes, learningEnabled: user.learningProfile?.enabled ?? false } },
     ...categories.map((item): BackupRecord => ({ entity: "custom_category", backupId: item.id, payload: { name: item.name, kind: item.kind, color: item.color, icon: item.icon, createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt) } })),
     ...subcategories.map((item): BackupRecord => ({ entity: "custom_subcategory", backupId: item.id, payload: { categoryId: item.categoryId, name: item.name, icon: item.icon, createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt) } })),
     ...savedPlaces.map((item): BackupRecord => ({ entity: "saved_place", backupId: item.id, payload: { name: item.name, icon: item.icon, address: item.address, latitude: item.latitude, longitude: item.longitude, createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt), lastUsedAt: iso(item.lastUsedAt) } })),
@@ -217,7 +217,9 @@ async function restoreBackup(userId: string, csv: string) {
       await transaction.savedPlace.deleteMany({ where: { userId } });
       await transaction.customSubcategory.deleteMany({ where: { userId } });
       await transaction.customCategory.deleteMany({ where: { userId } });
+      await transaction.learningProfile.deleteMany({ where: { userId } });
       await transaction.user.update({ where: { id: userId }, data: { name: profile.displayName, currency: profile.currency, hideAmounts: profile.hideAmounts, autoLockMinutes: profile.autoLockMinutes } });
+      if (profile.learningEnabled) await transaction.learningProfile.create({ data: { userId, enabled: true } });
 
       if (categories.length) await transaction.customCategory.createMany({ data: categories.map(({ backupId, payload }) => ({ id: categoryIds.get(backupId)!, userId, name: payload.name, kind: payload.kind, color: payload.color, icon: payload.icon, createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
       if (subcategories.length) await transaction.customSubcategory.createMany({ data: subcategories.map(({ backupId, payload }) => ({ id: subcategoryIds.get(backupId)!, userId, categoryId: categoryId(payload.categoryId), name: payload.name, icon: payload.icon, createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
@@ -262,7 +264,7 @@ async function restoreBackup(userId: string, csv: string) {
 }
 
 export async function GET() {
-  const session = await getBetaSession(await headers());
+  const session = await getAuthenticatedSession(await headers());
   if (!session?.user.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const backup = await buildBackup(session.user.id);
@@ -285,7 +287,7 @@ export async function POST(request: Request) {
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const requestHeaders = await headers();
-  const session = await getBetaSession(requestHeaders);
+  const session = await getAuthenticatedSession(requestHeaders);
   if (!session?.user.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const contentLength = Number(request.headers.get("content-length") ?? 0);
   if (contentLength > BACKUP_MAX_BYTES + 1024 * 1024) return NextResponse.json({ error: "Keep backup files under 75 MB." }, { status: 413 });

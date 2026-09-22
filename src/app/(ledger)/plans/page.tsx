@@ -8,6 +8,7 @@ export default function PlansRoute() {
 
   return <PlanningPage
     month={month}
+    calendarSystem={ledger.profile.calendarSystem}
     currency={ledger.profile.currency}
     transactions={ledger.transactions}
     budgets={ledger.budgets}

@@ -9,7 +9,7 @@ import { useAuth } from "../context/AuthContext";
 import { useLedger } from "../context/LedgerContext";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { getCategory } from "../lib/categories";
-import { toDateInput } from "../lib/dates";
+import { toDateInput, todayInput } from "../lib/dates";
 import { monthlyReportNotice } from "../lib/monthly-report";
 import { recurrenceLabel } from "../lib/recurrence";
 import { markOnboardingStep } from "../lib/onboarding";
@@ -126,7 +126,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const openDuplicate = (transaction: LedgerTransaction) => {
     setEditing(null);
     setReusing(transaction);
-    setNewTransactionDate(toDateInput());
+    setNewTransactionDate(todayInput());
     setNewTransactionLocation(null);
     setFormOpen(true);
   };
@@ -250,6 +250,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         customSubcategories={ledger.customSubcategories}
         paymentAccounts={ledger.paymentAccounts}
         savedPlaces={ledger.savedPlaces}
+        learning={ledger.profile.learning}
         onClose={() => setFormOpen(false)}
         onSave={saveTransaction}
       />

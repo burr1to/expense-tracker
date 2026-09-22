@@ -1,4 +1,5 @@
 import { differenceInCalendarDays, format, parseISO } from "date-fns";
+import { todayInput } from "./dates";
 import type { DueItem } from "../types";
 
 export type DueUrgency = "overdue" | "today" | "later";
@@ -11,7 +12,7 @@ export function dueRemaining(item: DueItem) {
   return Math.max(0, item.amountMinor - duePaid(item));
 }
 
-export function actionableDues(items: readonly DueItem[], today = format(new Date(), "yyyy-MM-dd")) {
+export function actionableDues(items: readonly DueItem[], today = todayInput()) {
   return items
     .filter((item) =>
       item.status === "open"
@@ -21,19 +22,19 @@ export function actionableDues(items: readonly DueItem[], today = format(new Dat
     .sort((a, b) => a.dueOn.localeCompare(b.dueOn));
 }
 
-export function dueUrgency(item: DueItem, today = format(new Date(), "yyyy-MM-dd")): DueUrgency {
+export function dueUrgency(item: DueItem, today = todayInput()): DueUrgency {
   if (item.dueOn < today) return "overdue";
   if (item.dueOn === today) return "today";
   return "later";
 }
 
-export function groupActionableDues(items: readonly DueItem[], today = format(new Date(), "yyyy-MM-dd")) {
+export function groupActionableDues(items: readonly DueItem[], today = todayInput()) {
   const groups: Record<DueUrgency, DueItem[]> = { overdue: [], today: [], later: [] };
   for (const item of actionableDues(items, today)) groups[dueUrgency(item, today)].push(item);
   return groups;
 }
 
-export function urgentDueCount(items: readonly DueItem[], today = format(new Date(), "yyyy-MM-dd")) {
+export function urgentDueCount(items: readonly DueItem[], today = todayInput()) {
   return actionableDues(items, today).filter((item) => dueUrgency(item, today) !== "later").length;
 }
 

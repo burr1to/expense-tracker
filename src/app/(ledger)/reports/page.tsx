@@ -10,6 +10,7 @@ export default function ReportsRoute() {
 
   return <ReportsPage
     month={month}
+    calendarSystem={ledger.profile.calendarSystem}
     currency={ledger.profile.currency}
     transactions={ledger.transactions}
     customCategories={ledger.customCategories}

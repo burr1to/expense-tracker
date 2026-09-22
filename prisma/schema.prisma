@@ -17,6 +17,8 @@ model User {
   theme             String                    @default("system")
   hideAmounts       Boolean                   @default(false)
   autoLockMinutes   Int                       @default(0)
+  calendarSystem    String                    @default("AD")
+  safeToSpendBufferMinor Int                  @default(0)
   pinHash           String?
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
@@ -39,6 +41,21 @@ model User {
   savedPlaces       SavedPlace[]
   recovery          AccountRecovery?
   importJobs        ImportJob[]
+  learningProfile   LearningProfile?
+}
+
+model LearningProfile {
+  id                      String   @id @default(cuid())
+  userId                  String   @unique
+  enabled                 Boolean  @default(false)
+  suggestions             Json     @default("[]")
+  summary                 String[] @default([])
+  lastCreatedAt           DateTime?
+  lastTransactionId       String?
+  lastRunAt               DateTime?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Session {
@@ -246,6 +263,7 @@ model Budget {
   id          String   @id @default(cuid())
   userId      String
   monthKey    String
+  scope       String   @default("month")
   category    String
   amountMinor Int
   createdAt   DateTime @default(now())
@@ -350,6 +368,7 @@ model DueItem {
   snoozedUntil DateTime?          @db.Date
   note         String             @default("")
   status       String             @default("open")
+  annualRatePercent Float?
   completedOn  DateTime?          @db.Date
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt

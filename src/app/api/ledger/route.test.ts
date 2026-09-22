@@ -78,7 +78,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("next/headers", () => ({ headers: vi.fn(async () => new Headers()) }));
-vi.mock("../../../lib/auth", () => ({ getBetaSession: vi.fn(async () => ({ user: { id: "user-1" } })) }));
+vi.mock("../../../lib/auth", () => ({ getAuthenticatedSession: vi.fn(async () => ({ user: { id: "user-1" } })) }));
 vi.mock("../../../lib/prisma", () => ({ getPrisma: () => mocks.db }));
 vi.mock("../../../lib/receipt-storage", () => ({
   removeStoredReceipts: vi.fn(),
