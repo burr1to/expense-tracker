@@ -10,11 +10,12 @@ interface RecoverySetupModalProps {
   onClose: () => void;
   onSave: (setup: RecoverySetup) => Promise<void>;
   title?: string;
+  cancelLabel?: string;
 }
 
 const questionData = RECOVERY_QUESTION_OPTIONS.map((option) => ({ value: option.value, label: option.label }));
 
-export function RecoverySetupModal({ opened, onClose, onSave, title = "Set up password recovery" }: RecoverySetupModalProps) {
+export function RecoverySetupModal({ opened, onClose, onSave, title = "Set up password recovery", cancelLabel = "Not now" }: RecoverySetupModalProps) {
   const [questionOne, setQuestionOne] = useState<RecoveryQuestionKey>(RECOVERY_QUESTION_OPTIONS[0].value);
   const [answerOne, setAnswerOne] = useState("");
   const [questionTwo, setQuestionTwo] = useState<RecoveryQuestionKey>(RECOVERY_QUESTION_OPTIONS[1].value);
@@ -61,7 +62,7 @@ export function RecoverySetupModal({ opened, onClose, onSave, title = "Set up pa
       <div className="recovery-code-panel"><span>One-time recovery code</span><code>{recoveryCode}</code><small>Store this code outside the app. It will not be shown again.</small></div>
       <Checkbox label="I saved my recovery code" checked={savedCode} onChange={(event) => setSavedCode(event.currentTarget.checked)} disabled={submitting} />
       {error && <div className="form-error" role="alert">{error}</div>}
-      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>Not now</button><button className="primary-button" disabled={submitting || !answerOne.trim() || !answerTwo.trim() || !savedCode}>{submitting ? <><ButtonSpinner />Saving…</> : "Save recovery details"}</button></div>
+      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>{cancelLabel}</button><button className="primary-button" disabled={submitting || !answerOne.trim() || !answerTwo.trim() || !savedCode}>{submitting ? <><ButtonSpinner />Saving…</> : "Save recovery details"}</button></div>
     </form>
   </Modal>;
 }
