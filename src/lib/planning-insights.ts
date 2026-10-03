@@ -1,5 +1,6 @@
 import { addDays, compareAsc, endOfMonth, format, getDate, getDaysInMonth, isSameMonth, startOfMonth } from "date-fns";
 import { dueRemaining } from "./dues";
+import { transactionCountsTowardBudget } from "./household";
 import { isInMonth, monthKeyFor, todayInput } from "./dates";
 import { isSameMonthKey } from "./period";
 import { recurringOccurrencesBetween } from "./recurrence";
@@ -213,7 +214,7 @@ export function calculateBudgetPacing(
   return budgets
     .filter((budget) => isSameMonthKey(budget.monthKey, monthKeyFor(month)))
     .map((budget) => {
-      const spentMinor = sum(expenses.filter((item) => item.category === budget.category).map((item) => item.amountMinor));
+      const spentMinor = sum(expenses.filter((item) => item.category === budget.category && transactionCountsTowardBudget(item, budget)).map((item) => item.amountMinor));
       const upcomingRecurringMinor = sum(recurring.filter(({ entry }) => entry.category === budget.category).map(({ entry }) => entry.amountMinor));
       const upcomingDuesMinor = sum(dues.filter((item) => item.category === budget.category).map(dueRemaining));
       const upcomingMinor = upcomingRecurringMinor + upcomingDuesMinor;

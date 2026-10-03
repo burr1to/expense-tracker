@@ -9,6 +9,9 @@ export const DEMO_PROFILE: Profile = {
   autoLockMinutes: 0,
   calendarSystem: "AD",
   safeToSpendBufferMinor: 0,
+  emailReminders: false,
+  browserReminders: false,
+  household: null,
   hasPin: false,
   learning: { enabled: false, suggestions: [], summary: [], lastTransactionId: null, lastRunAt: null },
 };

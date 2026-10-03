@@ -33,7 +33,10 @@ const mocks = vi.hoisted(() => {
     recurringEntry: { findFirstOrThrow: recurringEntryFindFirstOrThrow, updateMany: recurringEntryUpdateMany },
   };
   const db = {
-    user: { findUniqueOrThrow: vi.fn() },
+    user: { findUniqueOrThrow: vi.fn(), findUnique: vi.fn(async () => ({ currency: "NPR" })) },
+    activityLog: {
+      createManyAndReturn: vi.fn(async ({ data }: { data: Record<string, unknown>[] }) => data.map((row, index) => ({ id: `log-${index + 1}`, entityId: null, subject: null, amountMinor: null, changes: null, meta: null, ...row }))),
+    },
     transaction: { findMany: vi.fn(), findFirstOrThrow: vi.fn(), update: vi.fn() },
     budget: { findMany: vi.fn() },
     recurringEntry: { findMany: vi.fn(), findFirstOrThrow: recurringEntryFindFirstOrThrow, create: recurringEntryCreate },
@@ -46,6 +49,7 @@ const mocks = vi.hoisted(() => {
     savedPlace: { findMany: vi.fn() },
     accountTransfer: { findMany: vi.fn() },
     dueItem: { findMany: vi.fn() },
+    householdMember: { findFirst: vi.fn(async () => null) },
     receiptScan: { count: vi.fn() },
     $transaction: vi.fn(async (callback: (client: typeof transactionClient) => unknown) => callback(transactionClient)),
   };
@@ -123,9 +127,16 @@ describe("saveReceiptSplit ledger action", () => {
     mocks.db.user.findUniqueOrThrow.mockResolvedValue({
       id: "user-1",
       name: "Test User",
+      email: "test@example.com",
       currency: "NPR",
       hideAmounts: false,
       autoLockMinutes: 0,
+      calendarSystem: "AD",
+      safeToSpendBufferMinor: 0,
+      emailReminders: false,
+      browserReminders: false,
+      learningProfile: null,
+      householdMembership: null,
       pinHash: null,
     });
     mocks.db.transaction.findMany.mockResolvedValue([]);
@@ -255,7 +266,10 @@ describe("saveReceiptSplit ledger action", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ job: { id: "import-1", status: "completed", totalRows: 1, processedRows: 1, error: null, createdAt: createdAt.toISOString(), completedAt: completed.completedAt.toISOString() } });
+    expect(await response.json()).toEqual({
+      job: { id: "import-1", status: "completed", totalRows: 1, processedRows: 1, error: null, createdAt: createdAt.toISOString(), completedAt: completed.completedAt.toISOString() },
+      activity: [expect.objectContaining({ action: "transactions.imported", area: "data", title: "Imported 1 transaction", entityId: "import-1" })],
+    });
     expect(mocks.transactionCreateMany).toHaveBeenCalledWith({ data: [expect.objectContaining({ importJobId: "import-1", category: "food" })] });
     expect(mocks.importJobUpdate).toHaveBeenCalledWith({ where: { id: "import-1" }, data: expect.objectContaining({ status: "completed", processedRows: 1 }) });
   });
@@ -276,9 +290,16 @@ describe("saveReceiptSplit ledger action", () => {
     mocks.db.user.findUniqueOrThrow.mockResolvedValue({
       id: "user-1",
       name: "Test User",
+      email: "test@example.com",
       currency: "NPR",
       hideAmounts: false,
       autoLockMinutes: 0,
+      calendarSystem: "AD",
+      safeToSpendBufferMinor: 0,
+      emailReminders: false,
+      browserReminders: false,
+      learningProfile: null,
+      householdMembership: null,
       pinHash: null,
     });
 
@@ -289,7 +310,7 @@ describe("saveReceiptSplit ledger action", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(mocks.resetAccountFindFirstOrThrow).toHaveBeenCalledWith({ where: { id: "account-1", userId: "user-1" }, select: { id: true, createdAt: true } });
+    expect(mocks.resetAccountFindFirstOrThrow).toHaveBeenCalledWith({ where: { id: "account-1", userId: "user-1" }, select: { id: true, createdAt: true, type: true, provider: true, label: true } });
     expect(mocks.resetReconciliationFindFirst).toHaveBeenCalledWith({
       where: { paymentAccountId: "account-1", userId: "user-1" },
       orderBy: [{ checkedOn: "asc" }, { approvedAt: "asc" }],
@@ -369,9 +390,16 @@ describe("transaction Undo ledger actions", () => {
     mocks.db.user.findUniqueOrThrow.mockResolvedValue({
       id: "user-1",
       name: "Test User",
+      email: "test@example.com",
       currency: "NPR",
       hideAmounts: false,
       autoLockMinutes: 0,
+      calendarSystem: "AD",
+      safeToSpendBufferMinor: 0,
+      emailReminders: false,
+      browserReminders: false,
+      learningProfile: null,
+      householdMembership: null,
       pinHash: null,
     });
     mocks.db.transaction.findMany.mockResolvedValue([]);
@@ -426,7 +454,7 @@ describe("transaction Undo ledger actions", () => {
 describe("recurring account ledger actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.db.user.findUniqueOrThrow.mockResolvedValue({ id: "user-1", name: "Test User", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, pinHash: null });
+    mocks.db.user.findUniqueOrThrow.mockResolvedValue({ id: "user-1", name: "Test User", email: "test@example.com", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, calendarSystem: "AD", safeToSpendBufferMinor: 0, emailReminders: false, browserReminders: false, learningProfile: null, householdMembership: null, pinHash: null });
     mocks.db.transaction.findMany.mockResolvedValue([]);
     mocks.db.budget.findMany.mockResolvedValue([]);
     mocks.db.recurringEntry.findMany.mockResolvedValue([]);
@@ -483,5 +511,85 @@ describe("recurring account ledger actions", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.recurringTransactionCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ paymentMode: "online", paymentAccountId: "account-1" }) });
+  });
+});
+
+describe("activity logging", () => {
+  const storedExpense = {
+    paymentAccountId: null,
+    occurredOn: new Date("2026-07-26T00:00:00.000Z"),
+    createdAt: new Date("2026-07-26T08:00:00.000Z"),
+    kind: "expense",
+    category: "food",
+    note: "Synthetic groceries",
+    amountMinor: 324000,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.db.user.findUniqueOrThrow.mockResolvedValue({ id: "user-1", name: "Test User", email: "test@example.com", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, calendarSystem: "AD", safeToSpendBufferMinor: 0, emailReminders: false, browserReminders: false, learningProfile: null, householdMembership: null, pinHash: null });
+    mocks.db.transaction.findMany.mockResolvedValue([]);
+    mocks.db.budget.findMany.mockResolvedValue([]);
+    mocks.db.recurringEntry.findMany.mockResolvedValue([]);
+    mocks.db.savingsGoal.findMany.mockResolvedValue([]);
+    mocks.db.customCategory.findMany.mockResolvedValue([]);
+    mocks.db.customSubcategory.findMany.mockResolvedValue([]);
+    mocks.db.paymentAccount.findMany.mockResolvedValue([]);
+    mocks.db.accountReconciliation.findMany.mockResolvedValue([]);
+    mocks.db.accountReconciliation.findFirst.mockResolvedValue(null);
+    mocks.db.savedPlace.findMany.mockResolvedValue([]);
+    mocks.db.accountTransfer.findMany.mockResolvedValue([]);
+    mocks.db.dueItem.findMany.mockResolvedValue([]);
+  });
+
+  it("records a deletion after it succeeds and returns the same entry for the toast", async () => {
+    mocks.db.transaction.findFirstOrThrow.mockResolvedValueOnce(storedExpense);
+
+    const response = await POST(transactionAction("deleteTransaction"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mocks.db.activityLog.createManyAndReturn).toHaveBeenCalledWith({ data: [expect.objectContaining({
+      userId: "user-1", action: "transaction.deleted", area: "transactions", entityId: "transaction-1", title: "Deleted an expense", subject: "Synthetic groceries", amountMinor: 324000, currency: "NPR",
+    })] });
+    expect(body.activity).toEqual([expect.objectContaining({ id: "log-1", action: "transaction.deleted", title: "Deleted an expense", amountMinor: 324000 })]);
+    expect(mocks.db.transaction.update.mock.invocationCallOrder[0]).toBeLessThan(mocks.db.activityLog.createManyAndReturn.mock.invocationCallOrder[0]);
+  });
+
+  it("does not record anything when the change itself is rejected", async () => {
+    mocks.db.transaction.findFirstOrThrow.mockResolvedValueOnce({ ...storedExpense, deletedAt: new Date(Date.now() - 31_000) });
+
+    const response = await POST(transactionAction("restoreTransaction"));
+
+    expect(response.status).toBe(400);
+    expect(mocks.db.activityLog.createManyAndReturn).not.toHaveBeenCalled();
+  });
+
+  it("keeps a successful change successful when the log cannot be written", async () => {
+    mocks.db.transaction.findFirstOrThrow.mockResolvedValueOnce(storedExpense);
+    mocks.db.activityLog.createManyAndReturn.mockRejectedValueOnce(new Error("log table unavailable"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await POST(transactionAction("deleteTransaction"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mocks.db.transaction.update).toHaveBeenCalled();
+    expect(body.activity).toEqual([expect.objectContaining({ action: "transaction.deleted", id: expect.stringMatching(/^unsaved-/) })]);
+    consoleError.mockRestore();
+  });
+
+  it("keeps a successful change successful when it cannot be described", async () => {
+    mocks.db.transaction.findFirstOrThrow.mockResolvedValueOnce({ ...storedExpense, note: 42 });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await POST(transactionAction("deleteTransaction"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mocks.db.transaction.update).toHaveBeenCalled();
+    expect(body.activity).toEqual([]);
+    expect(consoleError).toHaveBeenCalledWith("Could not describe a ledger change for Logs.", expect.any(TypeError));
+    consoleError.mockRestore();
   });
 });

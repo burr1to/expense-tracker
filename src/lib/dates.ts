@@ -1,8 +1,8 @@
-import { format, parseISO } from "date-fns";
+import { endOfMonth, format, parseISO, startOfMonth } from "date-fns";
 import { formatMonthKey, isInPeriod, todayInAppZone, toStorageKey, type CalendarSystem, type PeriodKey } from "./period";
 // Importing for the side effect registers the Bikram Sambat calendar with the
 // period layer, so a BS period key resolves anywhere in the app.
-import { adToBs, formatBs } from "./nepali-date";
+import { adToBs, formatBs, formatBsMonthSpan } from "./nepali-date";
 
 /**
  * A selected month is represented in the UI as a `Date` marker. Only its
@@ -60,6 +60,28 @@ export function formatLedgerDate(dateString: string, system: CalendarSystem = "A
   if (system !== "BS") return gregorian;
   try {
     return `${formatBs(adToBs(dateString), "short")} · ${gregorian}`;
+  } catch {
+    return gregorian;
+  }
+}
+
+/** Month heading. BS leads with the Nepali months that Gregorian month covers. */
+export function formatLedgerMonth(month: Date, system: CalendarSystem = "AD"): string {
+  const gregorian = format(month, "MMMM yyyy");
+  if (system !== "BS") return gregorian;
+  return formatBsMonthSpan(toDateInput(startOfMonth(month)), toDateInput(endOfMonth(month))) ?? gregorian;
+}
+
+/** Day heading. Weekday is shared by both calendars; BS still keeps a short AD date. */
+export function formatLedgerDay(value: string | Date, system: CalendarSystem = "AD", style: "weekday" | "date" = "weekday"): string {
+  const iso = typeof value === "string" ? value : toDateInput(value);
+  const [year, month, day] = iso.split("-").map(Number);
+  const local = new Date(year, month - 1, day);
+  const gregorian = format(local, style === "weekday" ? "EEEE, MMMM d" : "MMMM d, yyyy");
+  if (system !== "BS") return gregorian;
+  try {
+    const bs = formatBs(adToBs(iso), "long");
+    return style === "weekday" ? `${format(local, "EEEE")}, ${bs} · ${format(local, "MMM d")}` : `${bs} · ${format(local, "MMM d")}`;
   } catch {
     return gregorian;
   }

@@ -18,6 +18,7 @@ import type {
 import { AnimatedOverlay } from "./AnimatedOverlay";
 import { ButtonSpinner } from "./ButtonSpinner";
 import { LedgerDatePickerInput as DatePickerInput } from "./LedgerDatePickerInput";
+import { FormError } from "./FormError";
 
 interface SmsCaptureProps {
   currency: CurrencyCode;
@@ -203,7 +204,7 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
             minRows={4}
             maxRows={10}
           />
-          {error && <p className="form-error">{error}</p>}
+          <FormError message={error} />
           <button className="primary-button full-width" disabled={!message.trim() || stage === "parsing"} onClick={() => void read()}>
             {stage === "parsing" ? <><ButtonSpinner />Reading…</> : <><Sparkle size={17} />Read message</>}
           </button>
@@ -252,7 +253,7 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
 
           {!amountIsValid && <p className="receipt-total-error">Enter an amount greater than zero.</p>}
           {accountIsMissing && <p className="receipt-total-error">Choose the payment account used for this transaction.</p>}
-          {error && <p className="form-error">{error}</p>}
+          <FormError message={error} />
 
           <p className="sms-review-footnote">Nothing has been saved yet.</p>
           <div className="dialog-actions">

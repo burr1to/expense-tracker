@@ -1,7 +1,7 @@
 export type CurrencyCode = "NPR" | "USD" | "AUD";
 export type CalendarSystem = "AD" | "BS";
 export type TransactionKind = "income" | "expense";
-export type AppView = "home" | "plan" | "calculator" | "dues" | "reports" | "transactions" | "accounts" | "maps" | "settings";
+export type AppView = "home" | "plan" | "calculator" | "dues" | "reports" | "transactions" | "accounts" | "maps" | "logs" | "settings";
 export type TransactionCategory = string;
 export type PaymentMode = "cash" | "cheque" | "online";
 export type PaymentAccountType = "mobile_banking" | "esewa" | "khalti" | "connect_ips";
@@ -19,6 +19,22 @@ export interface ImportJob {
   completedAt: string | null;
 }
 
+export interface HouseholdMemberSummary {
+  email: string;
+  name: string;
+  role: "owner" | "member";
+  status: "active" | "invited";
+}
+
+export interface HouseholdSummary {
+  id: string;
+  name: string;
+  role: "owner" | "member";
+  status: "active" | "invited";
+  invitedBy: string | null;
+  members: HouseholdMemberSummary[];
+}
+
 export interface Profile {
   id: string;
   displayName: string;
@@ -27,6 +43,9 @@ export interface Profile {
   autoLockMinutes: number;
   calendarSystem: CalendarSystem;
   safeToSpendBufferMinor: number;
+  emailReminders: boolean;
+  browserReminders: boolean;
+  household: HouseholdSummary | null;
   hasPin: boolean;
   learning: LearningState;
 }
@@ -61,6 +80,7 @@ export interface LedgerTransaction {
   area: string | null;
   paymentMode: PaymentMode;
   paymentAccountId: string | null;
+  shared?: boolean;
   paymentAccount?: PaymentAccount | null;
   locationLabel: string | null;
   locationAddress: string | null;
@@ -84,6 +104,7 @@ export interface TransactionDraft {
   area: string;
   paymentMode: PaymentMode;
   paymentAccountId: string;
+  shared?: boolean;
   location?: TransactionLocationDraft | null;
   receipt?: ReceiptUpload;
   removeReceipt?: boolean;
@@ -133,6 +154,7 @@ export interface PaymentAccount {
   type: PaymentAccountType;
   provider: string;
   label: string;
+  shared?: boolean;
   balanceMinor: number;
   balanceAsOf: string;
   balanceRecordedAt: string;
@@ -177,6 +199,7 @@ export interface Budget {
   monthKey: string;
   category: TransactionCategory;
   amountMinor: number;
+  shared?: boolean;
 }
 
 export interface RecurringEntry {

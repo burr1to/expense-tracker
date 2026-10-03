@@ -80,6 +80,19 @@ export function isSupportedAdDate(iso: string): boolean {
   }
 }
 
+/** The BS months a Gregorian date range covers, such as `Bhadra–Ashwin 2083`. */
+export function formatBsMonthSpan(startIso: string, endIso: string): string | null {
+  try {
+    const first = adToBs(startIso);
+    const last = adToBs(endIso);
+    if (first.month === last.month && first.year === last.year) return `${bsMonthName(first.month)} ${first.year}`;
+    const yearLabel = first.year === last.year ? String(first.year) : `${first.year}/${String(last.year).slice(-2)}`;
+    return `${bsMonthName(first.month)}–${bsMonthName(last.month)} ${yearLabel}`;
+  } catch {
+    return null;
+  }
+}
+
 export function formatBs(parts: DateParts, style: "long" | "short" | "numeric" = "long"): string {
   if (style === "numeric") return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
   const name = style === "short" ? bsMonthName(parts.month).slice(0, 3) : bsMonthName(parts.month);

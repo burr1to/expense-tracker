@@ -4,6 +4,8 @@ import { z } from "zod";
 import { getAuthenticatedSession } from "../../../../lib/auth";
 import { getPrisma } from "../../../../lib/prisma";
 import { verifyPin } from "../../../../lib/pin";
+import { describeDevice } from "../../../../lib/activity-log";
+import { recordActivitySafely } from "../../../../lib/activity-recorder";
 
 const attempts = new Map<string, { failures: number; blockedUntil: number }>();
 const MAX_FAILURES = 5;
@@ -25,7 +27,9 @@ export async function POST(request: Request) {
     if (!user?.pinHash) return NextResponse.json({ error: "Set up a PIN in Settings before locking your ledger." }, { status: 409 });
     if (!await verifyPin(pin, user.pinHash)) {
       const failures = (state?.failures ?? 0) + 1;
-      attempts.set(session.user.id, { failures, blockedUntil: failures >= MAX_FAILURES ? Date.now() + BLOCK_MS : 0 });
+      const blocked = failures >= MAX_FAILURES;
+      attempts.set(session.user.id, { failures, blockedUntil: blocked ? Date.now() + BLOCK_MS : 0 });
+      await recordActivitySafely(session.user.id, { action: blocked ? "pin.locked_out" : "pin.failed", area: "security", title: blocked ? "PIN entry paused after repeated wrong PINs" : "Wrong PIN entered at the lock screen", subject: describeDevice(request.headers.get("user-agent")), meta: { failures } });
       return NextResponse.json({ error: "That PIN did not match." }, { status: 401 });
     }
     attempts.delete(session.user.id);

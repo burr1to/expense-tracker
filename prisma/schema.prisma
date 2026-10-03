@@ -19,6 +19,9 @@ model User {
   autoLockMinutes   Int                       @default(0)
   calendarSystem    String                    @default("AD")
   safeToSpendBufferMinor Int                  @default(0)
+  emailReminders    Boolean                   @default(false)
+  browserReminders  Boolean                   @default(false)
+  lastReminderEmailOn DateTime?               @db.Date
   pinHash           String?
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
@@ -42,6 +45,30 @@ model User {
   recovery          AccountRecovery?
   importJobs        ImportJob[]
   learningProfile   LearningProfile?
+  householdMembership HouseholdMember?
+  activityLogs      ActivityLog[]
+}
+
+model Household {
+  id        String            @id @default(cuid())
+  name      String
+  createdAt DateTime          @default(now())
+  members   HouseholdMember[]
+}
+
+model HouseholdMember {
+  id          String    @id @default(cuid())
+  householdId String
+  userId      String?   @unique
+  email       String    @unique
+  name        String    @default("")
+  role        String
+  status      String
+  createdAt   DateTime  @default(now())
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([householdId])
 }
 
 model LearningProfile {
@@ -138,6 +165,7 @@ model Transaction {
   savedPlaceId      String?
   receiptScanId     String?
   importJobId       String?
+  shared            Boolean            @default(false)
   deletedAt         DateTime?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
@@ -154,6 +182,26 @@ model Transaction {
   @@index([savedPlaceId])
   @@index([receiptScanId])
   @@index([importJobId])
+}
+
+/// Append-only record of what a user did. Written by the server after an action succeeds; never edited.
+model ActivityLog {
+  id          String   @id @default(cuid())
+  userId      String
+  action      String
+  area        String
+  entityId    String?
+  title       String
+  subject     String?
+  amountMinor Int?
+  currency    String   @default("NPR")
+  changes     Json?
+  meta        Json?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([userId, area, createdAt(sort: Desc)])
 }
 
 model ImportJob {
@@ -200,6 +248,7 @@ model PaymentAccount {
   type              String
   provider          String
   label             String            @default("")
+  shared            Boolean           @default(false)
   balanceMinor      Int               @default(0)
   balanceAsOf       DateTime          @default(now()) @db.Date
   balanceRecordedAt DateTime          @default(now())
@@ -266,6 +315,7 @@ model Budget {
   scope       String   @default("month")
   category    String
   amountMinor Int
+  shared      Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)

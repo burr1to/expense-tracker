@@ -22,6 +22,7 @@ export default function DashboardRoute() {
     focus={homeFocus}
     currency={ledger.profile.currency}
     transactions={ledger.transactions}
+    transfers={ledger.transfers}
     budgets={ledger.budgets}
     recurringEntries={ledger.recurringEntries}
     dueItems={ledger.dueItems}

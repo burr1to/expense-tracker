@@ -4,6 +4,7 @@ import { addDays, format, parseISO } from "date-fns";
 import { todayInput } from "../lib/dates";
 import { useEffect, useMemo, useState } from "react";
 import { ButtonSpinner } from "../components/ButtonSpinner";
+import { SlidingTabs } from "../components/SlidingTabs";
 import { EmptyState } from "../components/EmptyState";
 import { allCategoriesFor, getCategory } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
@@ -11,6 +12,7 @@ import { buildDebtPlan, isPlannableDebt, type PayoffStrategy } from "../lib/debt
 import { dueDateLabel, duePaid, dueRemaining } from "../lib/dues";
 import { discardReceipt, uploadReceipt } from "../lib/receipts";
 import type { CurrencyCode, CustomCategory, DueDraft, DueItem, DueKind, ReceiptUpload } from "../types";
+import { FormError } from "../components/FormError";
 
 type DuesTab = "upcoming" | "lent" | "borrowed" | "settled";
 const today = () => todayInput();
@@ -23,13 +25,10 @@ const labels: Record<DueKind, { title: string; amount: string }> = {
 };
 
 function DueKindToggle({ value, disabled, onChange }: { value: DueKind; disabled: boolean; onChange: (value: string) => void }) {
-  const options: { value: DueKind; label: string }[] = [
-    { value: "payment", label: "Pay" }, { value: "receivable", label: "Receive" },
-    { value: "lent", label: "Lent" }, { value: "borrowed", label: "Borrowed" },
-  ];
-  return <div className="due-kind-control" role="radiogroup" aria-label="Due type">
-    {options.map((option) => <button key={option.value} type="button" role="radio" aria-checked={value === option.value} className={value === option.value ? "active" : ""} disabled={disabled} onClick={() => onChange(option.value)}>{option.label}</button>)}
-  </div>;
+  return <div className="due-kind-control"><SlidingTabs<DueKind> label="Due type" value={value} disabled={disabled} onChange={onChange} options={[
+    { id: "payment", label: "Pay" }, { id: "receivable", label: "Receive" },
+    { id: "lent", label: "Lent" }, { id: "borrowed", label: "Borrowed" },
+  ]} /></div>;
 }
 
 interface Props {
@@ -46,7 +45,19 @@ export function DuesPage({ currency, items, customCategories, onSave, onDelete, 
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<DueItem | null>(null);
   const filtered = useMemo(() => items.filter((item) => tab === "settled" ? item.status === "completed" : item.status === "open" && (tab === "upcoming" ? item.kind === "payment" || item.kind === "receivable" : item.kind === tab)), [items, tab]);
-  const openCount = items.filter((item) => item.status === "open").length;
+  const openSummary = useMemo(() => {
+    let openCount = 0;
+    let toReceive = 0;
+    let toPay = 0;
+    for (const item of items) {
+      if (item.status !== "open") continue;
+      openCount += 1;
+      const remaining = dueRemaining(item);
+      if (item.kind === "receivable" || item.kind === "lent") toReceive += remaining;
+      else if (item.kind === "payment" || item.kind === "borrowed") toPay += remaining;
+    }
+    return { openCount, toReceive, toPay };
+  }, [items]);
   const focusedItem = items.find((item) => item.id === focusedId);
   useEffect(() => {
     if (!focusedItem) return;
@@ -68,8 +79,10 @@ export function DuesPage({ currency, items, customCategories, onSave, onDelete, 
   }, [focusedItem, tab]);
   return <div className="page dues-page">
     <header className="page-header"><div><span className="eyebrow">Promises your money needs to keep</span><h1>Dues</h1><p>Remember upcoming payments and keep track of money between people.</p></div><button className="primary-button" onClick={() => { setEditing(null); setShowForm((value) => !value); }}><Plus size={18} />Add due</button></header>
-    <section className="dues-summary"><div><span>Open items</span><strong>{openCount}</strong></div><div><span>To receive</span><strong className="income">{formatMoney(items.filter((item) => item.status === "open" && (item.kind === "receivable" || item.kind === "lent")).reduce((sum, item) => sum + dueRemaining(item), 0), currency)}</strong></div><div><span>To pay</span><strong className="expense">{formatMoney(items.filter((item) => item.status === "open" && (item.kind === "payment" || item.kind === "borrowed")).reduce((sum, item) => sum + dueRemaining(item), 0), currency)}</strong></div></section>
-    <nav className="section-tabs dues-tabs" aria-label="Due sections">{(["upcoming", "lent", "borrowed", "settled"] as DuesTab[]).map((id) => <button key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{id === "upcoming" ? "Upcoming" : id[0].toUpperCase() + id.slice(1)}</button>)}</nav>
+    <section className="dues-summary"><div><span>Open items</span><strong>{openSummary.openCount}</strong></div><div><span>To receive</span><strong className="income">{formatMoney(openSummary.toReceive, currency)}</strong></div><div><span>To pay</span><strong className="expense">{formatMoney(openSummary.toPay, currency)}</strong></div></section>
+    <div className="section-tabs-slot dues-tabs"><SlidingTabs<DuesTab> label="Due sections" value={tab} onChange={setTab} options={[
+      { id: "upcoming", label: "Upcoming" }, { id: "lent", label: "Lent" }, { id: "borrowed", label: "Borrowed" }, { id: "settled", label: "Settled" },
+    ]} /></div>
     <div className={showForm ? "dues-layout form-open" : "dues-layout"}>
       {showForm && <DueForm key={editing?.id ?? "new"} item={editing} currency={currency} customCategories={customCategories} onSave={async (draft) => { await onSave(draft, editing?.id); setShowForm(false); setEditing(null); }} onCancel={() => { setShowForm(false); setEditing(null); }} />}
       <section className="dues-content">
@@ -138,7 +151,7 @@ function DueForm({ item, currency, customCategories, onSave, onCancel }: { item:
     <Textarea label="Note" value={note} onChange={(event) => setNote(event.currentTarget.value)} maxLength={300} autosize minRows={2} />
     <div className="receipt-field" aria-busy={receiptUploading}><label className={receiptUploading ? "uploading" : undefined}>{receiptUploading ? <ButtonSpinner /> : <Paperclip size={17} />}<span>{receiptUploading ? "Uploading receipt…" : receipt?.name ?? "Attach receipt or document"}</span><input type="file" disabled={receiptUploading} accept="image/jpeg,image/png,image/webp,application/pdf" onChange={async (event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (!file) return; setError(null); setReceiptUploading(true); try { const value = await uploadReceipt(file); if (receipt) void discardReceipt(receipt); setReceipt(value); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not attach this file."); } finally { setReceiptUploading(false); } }} /></label>{receipt && <button type="button" className="text-button danger-text" disabled={receiptUploading} onClick={() => { void discardReceipt(receipt); setReceipt(undefined); }}>Remove</button>}</div>
     <p className="field-hint">Maximum file size: 3 MB.</p>
-    {error && <div className="form-error" role="alert">{error}</div>}
+    <FormError message={error} />
     <button className="primary-button" disabled={saving || receiptUploading || !title.trim() || !amount || !dueOn}>{saving ? <><ButtonSpinner />Saving…</> : receiptUploading ? <><ButtonSpinner />Uploading receipt…</> : "Save due"}</button><button type="button" className="secondary-button" onClick={cancel} disabled={saving || receiptUploading}>Cancel</button>
   </form></aside>;
 }
@@ -156,8 +169,8 @@ function DueCard({ item, currency, customCategories, focused, startRepayment, on
       {item.note && <p>{item.note}</p>}
       {item.receipt && <a className="receipt-link" href={`/api/receipts/${item.receipt.id}`} target="_blank" rel="noreferrer"><Paperclip size={14} />{item.receipt.name}<ArrowSquareOut size={13} /></a>}
       {item.status === "open" && <div className="due-actions">{isDebt ? <button className="primary-button small" onClick={() => setRepaying((value) => !value)}><HandCoins size={16} />Record repayment</button> : <><button className="primary-button small" disabled={busy} onClick={() => void complete(true)}>{busy ? <ButtonSpinner /> : <Check size={16} />}{item.kind === "payment" ? "Paid + add to ledger" : "Received + add to ledger"}</button><button className="secondary-button small" disabled={busy} onClick={() => void complete(false)}>Complete only</button></>}<button className="icon-button" disabled={busy} onClick={onEdit} aria-label={`Edit ${item.title}`}><PencilSimple size={16} /></button><button className="icon-button danger" disabled={busy} onClick={() => void remove()} aria-label={`Delete ${item.title}`}><Trash size={16} /></button></div>}
-      {repaying && <form className="repayment-form" onSubmit={record}><NumberInput label="Amount" value={amount} onChange={setAmount} min={0.01} max={remaining / 100} decimalScale={2} thousandSeparator="," required /><TextInput label="Date" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={date} onChange={(event) => setDate(event.currentTarget.value)} required /><TextInput label="Note" value={note} onChange={(event) => setNote(event.currentTarget.value)} placeholder="Optional" /><label className="ledger-checkbox"><input type="checkbox" checked={addToLedger} onChange={(event) => setAddToLedger(event.currentTarget.checked)} /><span>Add this cash movement to the ledger</span></label>{error && <div className="form-error" role="alert">{error}</div>}<button className="primary-button" disabled={busy}>{busy ? <><ButtonSpinner />Recording…</> : "Record repayment"}</button></form>}
-      {error && !repaying && <div className="form-error" role="alert">{error}</div>}
+      {repaying && <form className="repayment-form" onSubmit={record}><NumberInput label="Amount" value={amount} onChange={setAmount} min={0.01} max={remaining / 100} decimalScale={2} thousandSeparator="," required /><TextInput label="Date" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={date} onChange={(event) => setDate(event.currentTarget.value)} required /><TextInput label="Note" value={note} onChange={(event) => setNote(event.currentTarget.value)} placeholder="Optional" /><label className="ledger-checkbox"><input type="checkbox" checked={addToLedger} onChange={(event) => setAddToLedger(event.currentTarget.checked)} /><span>Add this cash movement to the ledger</span></label><FormError message={error} /><button className="primary-button" disabled={busy}>{busy ? <><ButtonSpinner />Recording…</> : "Record repayment"}</button></form>}
+      {!repaying && <FormError message={error} />}
     </div>
   </article>;
 }
