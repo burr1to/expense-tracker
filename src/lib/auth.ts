@@ -1,6 +1,8 @@
 import { prismaAdapter } from "better-auth/adapters/prisma";
 import { betterAuth } from "better-auth";
 import { nextCookies } from "better-auth/next-js";
+import { describeDevice, meaningfulIp } from "./activity-log";
+import { recordActivitySafely } from "./activity-recorder";
 import { getPrisma } from "./prisma";
 import { removeStoredReceipts } from "./receipt-storage";
 
@@ -44,6 +46,35 @@ export const auth = betterAuth({
     },
   },
   session: { expiresIn: 60 * 60 * 24 * 7, updateAge: 60 * 60 * 24 },
+  // Security events for Logs. Paths tell a deliberate sign-in or sign-out apart from session
+  // housekeeping (refreshes, revocations after a password change) that the user did not do directly.
+  databaseHooks: {
+    user: {
+      create: { after: async (user) => recordActivitySafely(user.id, { action: "account.signed_up", area: "security", title: "Created your account" }) },
+    },
+    session: {
+      create: {
+        after: async (session, context) => {
+          if (context?.path !== "/sign-in/email") return;
+          await recordActivitySafely(session.userId, { action: "session.signed_in", area: "security", title: "Signed in", subject: describeDevice(session.userAgent), meta: { ip: meaningfulIp(session.ipAddress) } });
+        },
+      },
+      delete: {
+        after: async (session, context) => {
+          if (context?.path !== "/sign-out") return;
+          await recordActivitySafely(session.userId, { action: "session.signed_out", area: "security", title: "Signed out", subject: describeDevice(session.userAgent) });
+        },
+      },
+    },
+    account: {
+      update: {
+        after: async (account, context) => {
+          if (context?.path === "/change-password") await recordActivitySafely(account.userId, { action: "password.changed", area: "security", title: "Changed your password", subject: "Other devices were signed out" });
+          else if (context?.path === "/reset-password") await recordActivitySafely(account.userId, { action: "password.reset", area: "security", title: "Reset your password", subject: "All devices were signed out" });
+        },
+      },
+    },
+  },
   plugins: [nextCookies()],
 });
 

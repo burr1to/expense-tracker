@@ -4,6 +4,7 @@ import { Modal, PasswordInput, Select, TextInput } from "@mantine/core";
 import { useEffect, useState } from "react";
 import { ButtonSpinner } from "./ButtonSpinner";
 import { RECOVERY_QUESTION_OPTIONS, type RecoveryQuestionKey, type RecoveryVerification } from "../lib/recovery";
+import { FormError } from "./FormError";
 
 interface RecoveryResetModalProps {
   opened: boolean;
@@ -73,13 +74,13 @@ export function RecoveryResetModal({ opened, onClose, onVerify, onReset, onCompl
       <Select label="Security question 2" value={questionTwo} onChange={(value) => value && setQuestionTwo(value as RecoveryQuestionKey)} data={questionData} allowDeselect={false} disabled={submitting} />
       <TextInput label="Your answer" value={answerTwo} onChange={(event) => setAnswerTwo(event.currentTarget.value)} autoComplete="off" required disabled={submitting} />
       <TextInput label="Recovery code" value={recoveryCode} onChange={(event) => setRecoveryCode(event.currentTarget.value)} autoComplete="one-time-code" required disabled={submitting} />
-      {error && <div className="form-error" role="alert">{error}</div>}
+      <FormError message={error} />
       <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>Cancel</button><button className="primary-button" disabled={submitting}>{submitting ? <><ButtonSpinner />Checking…</> : "Verify recovery details"}</button></div>
     </form> : <form className="recovery-form" onSubmit={reset} aria-busy={submitting}>
       <p className="field-hint">Step 2 of 2 · Your recovery details matched. Choose a new password for this account.</p>
       <PasswordInput label="New password" value={password} onChange={(event) => setPassword(event.currentTarget.value)} minLength={8} maxLength={128} autoComplete="new-password" required disabled={submitting} />
       <PasswordInput label="Confirm new password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.currentTarget.value)} minLength={8} maxLength={128} autoComplete="new-password" required disabled={submitting} />
-      {error && <div className="form-error" role="alert">{error}</div>}
+      <FormError message={error} />
       <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>Cancel</button><button className="primary-button" disabled={submitting || password.length < 8 || confirmPassword.length < 8}>{submitting ? <><ButtonSpinner />Updating…</> : "Update password"}</button></div>
     </form>}
   </Modal>;

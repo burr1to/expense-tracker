@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { NumberInput, SegmentedControl, Select, TextInput } from "@mantine/core";
+import { NumberInput, SegmentedControl, Select, Switch, TextInput } from "@mantine/core";
 import { Check, ClockCounterClockwise, Eye, MagnifyingGlass, MapPin, Microphone, Paperclip, Sparkle, StopCircle, WarningCircle, X } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -21,6 +21,7 @@ import { SubcategoryIcon } from "./SubcategoryIcon";
 import { ReceiptPreview } from "./ReceiptPreview";
 import { LocationPicker } from "./LocationPicker";
 import { AnimatedOverlay } from "./AnimatedOverlay";
+import { FormError } from "./FormError";
 
 const schema = z.object({
   kind: z.enum(["income", "expense"]),
@@ -32,6 +33,7 @@ const schema = z.object({
   area: z.string().max(120, "Keep the area under 120 characters"),
   paymentMode: z.enum(["cash", "cheque", "online"]),
   paymentAccountId: z.string(),
+  shared: z.boolean().optional(),
 }).superRefine((value, context) => {
   if (value.paymentMode === "online" && !value.paymentAccountId) context.addIssue({ code: "custom", path: ["paymentAccountId"], message: "Choose an online payment account" });
 });
@@ -49,6 +51,7 @@ interface TransactionFormProps {
   paymentAccounts: PaymentAccount[];
   savedPlaces: SavedPlace[];
   learning: LearningState;
+  shareWithHousehold?: boolean;
   onClose: () => void;
   onSave: (draft: TransactionDraft, id?: string) => Promise<void>;
 }
@@ -76,7 +79,7 @@ function locationFromTransaction(transaction?: LedgerTransaction | null): Transa
   } : null;
 }
 
-export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, initialLocation, transactions, customCategories, customSubcategories, paymentAccounts, savedPlaces, learning, onClose, onSave }: TransactionFormProps) {
+export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, initialLocation, transactions, customCategories, customSubcategories, paymentAccounts, savedPlaces, learning, shareWithHousehold = false, onClose, onSave }: TransactionFormProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ReceiptUpload | undefined>();
   const [removeReceipt, setRemoveReceipt] = useState(false);
@@ -115,6 +118,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
     area: source?.area ?? "",
     paymentMode: source?.paymentMode ?? "cash",
     paymentAccountId: source?.paymentAccountId ?? "",
+    shared: source?.shared ?? false,
   }; }, [initialOccurredOn, template, transaction]);
   const { register, control, handleSubmit, watch, reset, setValue, getValues, formState: { errors, isSubmitting } } = useForm<TransactionDraft>({ resolver: zodResolver(schema), defaultValues: defaults });
   const kind = watch("kind");
@@ -175,6 +179,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
       area: suggestion.area ?? "",
       paymentMode: canUseAccount ? suggestion.paymentMode : "cash",
       paymentAccountId: canUseAccount ? suggestion.paymentAccountId ?? "" : "",
+      shared: suggestion.shared ?? false,
     });
     setLocation(locationFromTransaction(suggestion));
     setAppliedSuggestionId(suggestion.id);
@@ -303,6 +308,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
             {paymentMode === "online" && <Controller control={control} name="paymentAccountId" render={({ field }) => <Select label="Account" placeholder={paymentAccounts.length ? "Choose an account" : "Add an account on the Accounts page first"} data={paymentAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))} value={field.value || null} onChange={(value) => field.onChange(value ?? "")} allowDeselect={false} rightSection={null} required error={errors.paymentAccountId?.message} disabled={!paymentAccounts.length} />} />}
             {paymentMode === "online" && !paymentAccounts.length && <p className="field-hint">Online accounts are managed on the Accounts page.</p>}
           </fieldset>
+          {shareWithHousehold && <Controller control={control} name="shared" render={({ field }) => <Switch label="Ours" description="Visible to your household. A shared online entry can use an account you both marked as shared." checked={field.value ?? false} onChange={(event) => field.onChange(event.currentTarget.checked)} />} />}
 
           <div className="field-row">
             <Controller control={control} name="occurredOn" render={({ field }) => <DatePickerInput label="Date" value={field.value} onChange={(value) => field.onChange(value ?? "")} valueFormat="MMM D, YYYY" firstDayOfWeek={0} required />} />
@@ -314,7 +320,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
           <p className="field-hint">Maximum file size: 3 MB.</p>
           {receiptError && <small className="field-error">{receiptError}</small>}
           {errors.note && <small className="field-error">{errors.note.message}</small>}
-          {submitError && <div className="form-error" role="alert">{submitError}</div>}
+          <FormError message={submitError} />
           <button className="primary-button full-width" type="submit" disabled={isSubmitting || receiptUploading}>{isSubmitting ? <><ButtonSpinner />Saving…</> : receiptUploading ? <><ButtonSpinner />Uploading receipt…</> : transaction ? "Save changes" : `Add ${kind}`}</button>
         </form>
       </section>

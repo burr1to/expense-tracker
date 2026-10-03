@@ -9,6 +9,7 @@ export const appRoutes: Record<AppView, string> = {
   transactions: "/transactions",
   accounts: "/accounts",
   maps: "/maps",
+  logs: "/logs",
   settings: "/profile",
 };
 
@@ -20,6 +21,7 @@ export function viewFromPathname(pathname: string): AppView {
   if (pathname.startsWith("/transactions")) return "transactions";
   if (pathname.startsWith("/accounts")) return "accounts";
   if (pathname.startsWith("/maps")) return "maps";
+  if (pathname.startsWith("/logs")) return "logs";
   if (pathname.startsWith("/profile")) return "settings";
   return "home";
 }

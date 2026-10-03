@@ -8,6 +8,7 @@ import { getPrisma } from "../../../lib/prisma";
 import { GEMINI_RECEIPT_MODEL, interactionOutputText } from "../../../lib/receipt-analysis";
 import { aggregateLearningTransactions, LEARNING_BATCH_SIZE, learningJsonSchema, learningPrompt, normalizeLearningOutput, type LearningCategory } from "../../../lib/learning";
 import type { LearningState, LearningSuggestion, LedgerTransaction } from "../../../types";
+import { recordActivity } from "../../../lib/activity-recorder";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -66,11 +67,14 @@ export async function POST(request: Request) {
     const db = getPrisma();
     if (input.action === "reset") {
       await db.learningProfile.deleteMany({ where: { userId } });
-      return NextResponse.json({ learning: serialize(null) }, { headers: { "Cache-Control": "private, no-store" } });
+      const activity = await recordActivity(userId, [{ action: "personalization.reset", area: "settings", title: "Reset personalization", subject: "Learned suggestions were cleared" }]);
+      return NextResponse.json({ learning: serialize(null), activity }, { headers: { "Cache-Control": "private, no-store" } });
     }
     if (input.action === "setEnabled") {
+      const before = await db.learningProfile.findUnique({ where: { userId }, select: { enabled: true } });
       const profile = await db.learningProfile.upsert({ where: { userId }, update: { enabled: input.enabled }, create: { userId, enabled: input.enabled } });
-      return NextResponse.json({ learning: serialize(profile) }, { headers: { "Cache-Control": "private, no-store" } });
+      const activity = (before?.enabled ?? false) !== input.enabled ? await recordActivity(userId, [{ action: input.enabled ? "personalization.enabled" : "personalization.disabled", area: "settings", title: input.enabled ? "Turned on personalization" : "Turned off personalization" }]) : [];
+      return NextResponse.json({ learning: serialize(profile), activity }, { headers: { "Cache-Control": "private, no-store" } });
     }
 
     checkRateLimit(userId);
@@ -137,7 +141,8 @@ export async function POST(request: Request) {
     });
     if (!updated.count) throw new LearningError("Personalization changed in another session. Run it again.", 409);
     const profile = await db.learningProfile.findUniqueOrThrow({ where: { userId } });
-    return NextResponse.json({ learning: serialize(profile), processed: transactions.length }, { headers: { "Cache-Control": "private, no-store" } });
+    const activity = await recordActivity(userId, [{ action: "personalization.refreshed", area: "settings", title: "Refreshed personalization", subject: `Learned from ${transactions.length} new transaction${transactions.length === 1 ? "" : "s"}`, meta: { processed: transactions.length } }]);
+    return NextResponse.json({ learning: serialize(profile), processed: transactions.length, activity }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof LearningError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { "Cache-Control": "private, no-store" } });
     if (error instanceof Error && error.name === "TimeoutError") return NextResponse.json({ error: "Personalization timed out. Try again." }, { status: 504, headers: { "Cache-Control": "private, no-store" } });

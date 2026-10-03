@@ -4,6 +4,7 @@ import { Checkbox, Modal, Select, TextInput } from "@mantine/core";
 import { useEffect, useState } from "react";
 import { ButtonSpinner } from "./ButtonSpinner";
 import { generateRecoveryCode, RECOVERY_QUESTION_OPTIONS, type RecoveryQuestionKey, type RecoverySetup } from "../lib/recovery";
+import { FormError } from "./FormError";
 
 interface RecoverySetupModalProps {
   opened: boolean;
@@ -61,7 +62,7 @@ export function RecoverySetupModal({ opened, onClose, onSave, title = "Set up pa
       <TextInput label="Your answer" value={answerTwo} onChange={(event) => setAnswerTwo(event.currentTarget.value)} minLength={2} maxLength={128} autoComplete="off" required disabled={submitting} />
       <div className="recovery-code-panel"><span>One-time recovery code</span><code>{recoveryCode}</code><small>Store this code outside the app. It will not be shown again.</small></div>
       <Checkbox label="I saved my recovery code" checked={savedCode} onChange={(event) => setSavedCode(event.currentTarget.checked)} disabled={submitting} />
-      {error && <div className="form-error" role="alert">{error}</div>}
+      <FormError message={error} />
       <div className="dialog-actions"><button type="button" className="secondary-button" onClick={onClose} disabled={submitting}>{cancelLabel}</button><button className="primary-button" disabled={submitting || !answerOne.trim() || !answerTwo.trim() || !savedCode}>{submitting ? <><ButtonSpinner />Saving…</> : "Save recovery details"}</button></div>
     </form>
   </Modal>;

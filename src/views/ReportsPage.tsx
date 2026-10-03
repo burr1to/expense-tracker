@@ -1,22 +1,19 @@
 import { Bank, CaretLeft, CaretRight, DownloadSimple, FlagBanner, Sparkle, TrendDown, TrendUp } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { EmptyState } from "../components/EmptyState";
 import { MonthPicker } from "../components/MonthPicker";
 import { formatMoney } from "../lib/currency";
-import { isInMonth, monthKey } from "../lib/dates";
+import { isInMonth, monthKey, todayInput } from "../lib/dates";
 import { monthlySeries, summarizeLedger } from "../lib/ledger";
 import { financialMilestones } from "../lib/milestones";
 import type { CalendarSystem, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount } from "../types";
 import { totalCurrentBalance } from "../lib/account-balances";
 import { isCompletedReportMonth } from "../lib/monthly-report";
 import { addFiscalYears, fiscalYearBounds, fiscalYearLabel, fiscalYearOf } from "../lib/fiscal-year";
-import { compareFestivalSpending, FESTIVALS, festivalMonthLabel } from "../lib/festivals";
-import { adToBs } from "../lib/nepali-date";
-import { todayInput } from "../lib/dates";
-import { periodBounds } from "../lib/period";
-
+import { compareFestivalSpending, FESTIVALS, festivalBounds, festivalMonthLabel, festivalPeriodKey } from "../lib/festivals";
+import { adToBs, BS_MIN_YEAR } from "../lib/nepali-date";
 const reportCategoryColors = ["#0072b2", "#e69f00", "#009e73", "#d55e00", "#cc79a7", "#56b4e9", "#f0e442", "#6f6f6f", "#332288", "#117733", "#cc6677", "#88ccee"] as const;
 
 interface ReportsPageProps {
@@ -34,11 +31,12 @@ interface ReportsPageProps {
 
 export function ReportsPage({ month, currency, transactions, customCategories, paymentAccounts, dueItems, onMonthChange, onAdd, allowPdfDownload = false, calendarSystem }: ReportsPageProps) {
   const [activeCategoryIndex, setActiveCategoryIndex] = useState<number | null>(null);
-  const current = transactions.filter((item) => isInMonth(item.occurredOn, month));
-  const summary = summarizeLedger(current, customCategories);
+  const current = useMemo(() => transactions.filter((item) => isInMonth(item.occurredOn, month)), [month, transactions]);
+  const summary = useMemo(() => summarizeLedger(current, customCategories), [current, customCategories]);
+  const expenseCount = useMemo(() => current.reduce((count, item) => count + (item.kind === "expense" ? 1 : 0), 0), [current]);
   const categoryData = summary.categories.map((item, index) => ({ ...item, color: reportCategoryColors[index % reportCategoryColors.length] }));
-  const history = monthlySeries(transactions);
-  const milestones = financialMilestones(transactions, dueItems);
+  const history = useMemo(() => monthlySeries(transactions), [transactions]);
+  const milestones = useMemo(() => financialMilestones(transactions, dueItems), [dueItems, transactions]);
   const activeCategory = activeCategoryIndex === null ? undefined : categoryData[activeCategoryIndex];
   const trackedBalance = totalCurrentBalance(paymentAccounts);
   const reportMonthKey = monthKey(month);
@@ -51,7 +49,7 @@ export function ReportsPage({ month, currency, transactions, customCategories, p
         <div><span>Savings rate</span><strong className={summary.savedPercentage < 0 ? "negative" : ""}>{summary.savedPercentage}%</strong><small>{summary.savedPercentage >= 0 ? <><TrendUp size={15} /> of income retained</> : <><TrendDown size={15} /> spending above income</>}</small></div>
         <div><span>Tracked balance</span><strong>{formatMoney(trackedBalance, currency)}</strong><small>{paymentAccounts.length} {paymentAccounts.length === 1 ? "account" : "accounts"} checked manually</small></div>
         <div><span>Largest category</span><strong>{summary.categories[0]?.label ?? "—"}</strong><small>{summary.categories[0] ? formatMoney(summary.categories[0].value, currency) : "No expenses"}</small></div>
-        <div><span>Average expense</span><strong>{formatMoney(summary.expenses / Math.max(1, current.filter((item) => item.kind === "expense").length), currency)}</strong><small>per expense entry</small></div>
+        <div><span>Average expense</span><strong>{formatMoney(summary.expenses / Math.max(1, expenseCount), currency)}</strong><small>per expense entry</small></div>
       </section>
       <NepaliYearSection transactions={transactions} currency={currency} />
       <section className="reports-grid">
@@ -84,20 +82,40 @@ function NepaliYearSection({ transactions, currency }: { transactions: LedgerTra
   const [fiscalKey, setFiscalKey] = useState(() => { try { return fiscalYearOf(today); } catch { return null; } });
   if (!fiscalKey) return null;
 
-  const spentIn = (start: string, endExclusive: string, kind: "income" | "expense") => transactions
-    .filter((item) => item.kind === kind && item.occurredOn >= start && item.occurredOn < endExclusive)
-    .reduce((sum, item) => sum + item.amountMinor, 0);
-
-  const bounds = fiscalYearBounds(fiscalKey);
-  const income = spentIn(bounds.start, bounds.endExclusive, "income");
-  const expenses = spentIn(bounds.start, bounds.endExclusive, "expense");
-  const net = income - expenses;
-  const entries = transactions.filter((item) => item.occurredOn >= bounds.start && item.occurredOn < bounds.endExclusive).length;
   const step = (delta: number) => { try { setFiscalKey(addFiscalYears(fiscalKey, delta)); } catch { /* at the edge of the supported range */ } };
-
   const bsYear = (() => { try { return adToBs(today).year; } catch { return null; } })();
-  const spentForPeriod = (periodKey: string) => { try { const range = periodBounds(periodKey); return spentIn(range.start, range.endExclusive, "expense"); } catch { return 0; } };
-  const festivals = bsYear ? FESTIVALS.map((festival) => compareFestivalSpending(festival, bsYear, spentForPeriod)) : [];
+  const picture = useMemo(() => {
+    const bounds = fiscalYearBounds(fiscalKey);
+    const ranges = bsYear === null ? [] : FESTIVALS.flatMap((festival) => [bsYear, bsYear - 1].flatMap((year) => {
+      if (year < BS_MIN_YEAR) return [];
+      const range = festivalBounds(festival, year);
+      return [{ key: festivalPeriodKey(festival, year), start: range.start, endExclusive: range.endExclusive }];
+    }));
+    const spent = new Map<string, number>();
+    let income = 0;
+    let expenses = 0;
+    let entries = 0;
+    for (const item of transactions) {
+      if (item.occurredOn >= bounds.start && item.occurredOn < bounds.endExclusive) {
+        entries += 1;
+        if (item.kind === "income") income += item.amountMinor;
+        else expenses += item.amountMinor;
+      }
+      if (item.kind !== "expense") continue;
+      for (const range of ranges) {
+        if (item.occurredOn >= range.start && item.occurredOn < range.endExclusive) spent.set(range.key, (spent.get(range.key) ?? 0) + item.amountMinor);
+      }
+    }
+    return {
+      bounds,
+      income,
+      expenses,
+      entries,
+      festivals: bsYear === null ? [] : FESTIVALS.map((festival) => compareFestivalSpending(festival, bsYear, (key) => spent.get(key) ?? 0)),
+    };
+  }, [bsYear, fiscalKey, transactions]);
+  const { bounds, income, expenses, entries, festivals } = picture;
+  const net = income - expenses;
 
   return <section className="nepali-year-section" aria-label="Nepali fiscal year and festivals">
     <div className="section-heading"><div><span className="section-label">Nepali year</span><h2>Fiscal year and festivals</h2></div>

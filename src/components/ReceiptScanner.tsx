@@ -12,6 +12,7 @@ import { ButtonSpinner } from "./ButtonSpinner";
 import { AnimatedOverlay } from "./AnimatedOverlay";
 import { LedgerDatePickerInput as DatePickerInput } from "./LedgerDatePickerInput";
 import { paymentAccountLabel } from "../lib/payment-accounts";
+import { FormError } from "./FormError";
 
 interface ReceiptScannerProps {
   currency: CurrencyCode;
@@ -184,7 +185,7 @@ export function ReceiptScanner({ currency, fallbackOccurredOn, customCategories,
           <div><strong>Photograph a clear, flat receipt</strong><p>Gemini will suggest the merchant, date, total and category splits. Nothing enters your ledger until you review and confirm it.</p></div>
           <div className="receipt-privacy-note"><WarningCircle size={18} /><span><strong>Use test receipts for now.</strong> Free-tier Gemini sends the image to Google and may use it to improve its products.</span></div>
           {previewUrl && <img className="receipt-capture-preview" src={previewUrl} alt="Receipt selected for analysis" />}
-          {error && <p className="form-error">{error}</p>}
+          <FormError message={error} />
           <input ref={fileRef} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={(event) => {
             const file = event.currentTarget.files?.[0];
             event.currentTarget.value = "";
@@ -228,7 +229,7 @@ export function ReceiptScanner({ currency, fallbackOccurredOn, customCategories,
           <button className="secondary-button add-receipt-split" disabled={drafts.length >= 20 || stage === "saving"} onClick={addSplit}><Plus size={17} />Add another split</button>
           {splitTotal !== analysis.totalMinor && <p className="receipt-total-error">Adjust the splits by {formatMoney(Math.abs(analysis.totalMinor - splitTotal), currency)} so they exactly match the receipt total.</p>}
           {drafts[0]?.paymentMode === "online" && !drafts[0]?.paymentAccountId && <p className="receipt-total-error">Choose the payment account used for this receipt.</p>}
-          {error && <p className="form-error">{error}</p>}
+          <FormError message={error} />
           <div className="dialog-actions">
             <button className="secondary-button" disabled={stage === "saving"} onClick={() => void close()}>Cancel</button>
             <button className="primary-button" disabled={!canSave || (drafts[0]?.paymentMode === "online" && !drafts[0]?.paymentAccountId)} onClick={() => void save()}>{stage === "saving" ? <><ButtonSpinner />Adding…</> : <><Sparkle size={17} />Add {drafts.length} {drafts.length === 1 ? "transaction" : "transactions"}</>}</button>

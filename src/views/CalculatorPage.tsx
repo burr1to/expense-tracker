@@ -11,6 +11,7 @@ import { formatMoney, majorToMinor } from "../lib/currency";
 import { monthKey, todayInput } from "../lib/dates";
 import { simulateWhatIf } from "../lib/what-if";
 import type { CurrencyCode, CustomCategory, LedgerTransaction, SavingsGoal } from "../types";
+import { FormError } from "../components/FormError";
 
 interface GoalDraft {
   name: string;
@@ -90,7 +91,7 @@ function ToolHeading({ step, title, description }: { step: string; title: string
 }
 
 function ToolMessage({ error, success }: { error: string | null; success: string | null }) {
-  return <>{error && <div className="form-error" role="alert">{error}</div>}{success && <div className="form-success" role="status"><CheckCircle size={17} />{success}</div>}</>;
+  return <><FormError message={error} />{success && <div className="form-success" role="status"><CheckCircle size={17} />{success}</div>}</>;
 }
 
 function SplitCalculator({ currency, onSaveGoal }: { currency: CurrencyCode; onSaveGoal: CalculatorPageProps["onSaveGoal"] }) {

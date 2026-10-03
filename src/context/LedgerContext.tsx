@@ -9,12 +9,15 @@ import { ASYNC_IMPORT_THRESHOLD, IMPORT_POLL_INTERVAL_MS } from "../lib/import-j
 import type { AccountReconciliation, AccountTransfer, Budget, CategoryIconName, CustomCategory, CustomSubcategory, DueDraft, DueItem, ImportJob, LearningState, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, ReceiptUpload, RecurringDraft, RecurringEntry, SavedPlace, SavedPlaceDraft, SavingsGoal, TransactionDraft, TransactionKind } from "../types";
 import type { CsvCategoryDraft, CsvSubcategoryDraft } from "../lib/csv";
 import { useAuth } from "./AuthContext";
+import { useToasts, type ToastInput } from "./ToastContext";
+import { activityToast } from "../components/ActivityIcon";
+import type { ActivityEntry } from "../lib/activity-log";
 
-interface BudgetDraft { category: string; amount: string; monthKey: string }
+interface BudgetDraft { category: string; amount: string; monthKey: string; shared?: boolean }
 interface GoalDraft { name: string; target: string; saved: string; targetDate: string }
 interface CategoryDraft { name: string; kind: TransactionKind | "both"; color: string; icon: CategoryIconName }
 interface SubcategoryDraft { categoryId: string; name: string; icon: CategoryIconName }
-interface PaymentAccountDraft { type: PaymentAccountType; provider: string; label: string; balance: string; balanceAsOf: string }
+interface PaymentAccountDraft { type: PaymentAccountType; provider: string; label: string; balance: string; balanceAsOf: string; shared?: boolean }
 interface AccountTransferDraft { fromAccountId: string; toAccountId: string; amount: string; occurredOn: string; note: string }
 interface LedgerData { profile: Profile; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; goals: SavingsGoal[]; customCategories: CustomCategory[]; customSubcategories: CustomSubcategory[]; paymentAccounts: PaymentAccount[]; reconciliations: AccountReconciliation[]; savedPlaces: SavedPlace[]; transfers: AccountTransfer[]; dueItems: DueItem[] }
 export interface BackupRestoreResult { restoredAt: string; exportedAt: string; counts: Record<string, number> }
@@ -27,7 +30,7 @@ interface LedgerContextValue extends LedgerData {
   saveGoal: (draft: GoalDraft, id?: string) => Promise<void>; contributeToGoal: (id: string, amount: string) => Promise<void>; deleteGoal: (id: string) => Promise<void>;
   saveCustomCategory: (draft: CategoryDraft) => Promise<void>; updateCustomCategoryIcon: (id: string, icon: CategoryIconName) => Promise<void>; deleteCustomCategory: (id: string) => Promise<void>;
   saveCustomSubcategory: (draft: SubcategoryDraft) => Promise<void>; deleteCustomSubcategory: (id: string) => Promise<void>;
-  savePaymentAccount: (draft: PaymentAccountDraft) => Promise<void>; updatePaymentAccountBalance: (id: string, balance: string, balanceAsOf: string) => Promise<void>; resetAccountReconciliation: (id: string) => Promise<void>; deletePaymentAccount: (id: string) => Promise<void>;
+  savePaymentAccount: (draft: PaymentAccountDraft) => Promise<void>; updatePaymentAccountBalance: (id: string, balance: string, balanceAsOf: string) => Promise<void>; setPaymentAccountShared: (id: string, shared: boolean) => Promise<void>; resetAccountReconciliation: (id: string) => Promise<void>; deletePaymentAccount: (id: string) => Promise<void>;
   approveAccountReconciliation: (paymentAccountId: string, monthKey: string, checkedOn: string, actualBalance: string, adjustmentNote: string) => Promise<void>;
   saveTransfer: (draft: AccountTransferDraft) => Promise<void>; deleteTransfer: (id: string) => Promise<void>;
   saveDueItem: (draft: DueDraft, id?: string) => Promise<void>; deleteDueItem: (id: string) => Promise<void>;
@@ -36,18 +39,24 @@ interface LedgerContextValue extends LedgerData {
   completeDueItem: (id: string, addToLedger: boolean) => Promise<void>;
   savePin: (pin: string, currentPin?: string) => Promise<void>; removePin: (currentPin: string) => Promise<void>; verifyPin: (pin: string) => Promise<void>;
   restoreBackup: (file: File, password: string) => Promise<BackupRestoreResult>;
-  updateProfile: (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes" | "calendarSystem" | "safeToSpendBufferMinor">>) => Promise<void>;
+  updateProfile: (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes" | "calendarSystem" | "safeToSpendBufferMinor" | "emailReminders" | "browserReminders">>) => Promise<void>;
+  inviteHousehold: (email: string) => Promise<void>; acceptHousehold: () => Promise<void>; removeHouseholdMember: (email: string) => Promise<void>; leaveHousehold: () => Promise<void>;
   setLearningEnabled: (enabled: boolean) => Promise<void>; runLearning: () => Promise<number>; resetLearning: () => Promise<void>;
   resetDemo: () => void;
+  /** Increases whenever the server reports new activity, so Logs can refresh. */
+  activityRevision: number;
 }
 
-const emptyProfile: Profile = { id: "", displayName: "Personal ledger", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, calendarSystem: "AD", safeToSpendBufferMinor: 0, hasPin: false, learning: { enabled: false, suggestions: [], summary: [], lastTransactionId: null, lastRunAt: null } };
+const emptyProfile: Profile = { id: "", displayName: "Personal ledger", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, calendarSystem: "AD", safeToSpendBufferMinor: 0, emailReminders: false, browserReminders: false, household: null, hasPin: false, learning: { enabled: false, suggestions: [], summary: [], lastTransactionId: null, lastRunAt: null } };
 const emptyData: LedgerData = { profile: emptyProfile, transactions: [], budgets: [], recurringEntries: [], goals: [], customCategories: [], customSubcategories: [], paymentAccounts: [], reconciliations: [], savedPlaces: [], transfers: [], dueItems: [] };
 const LedgerContext = createContext<LedgerContextValue | null>(null);
+type WithActivity<T> = T & { activity?: ActivityEntry[] };
 const splitTags = (value: string) => [...new Set(value.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean))].slice(0, 8);
 
 export function LedgerProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const { push: pushToast } = useToasts();
+  const [activityRevision, setActivityRevision] = useState(0);
   const [data, setData] = useState<LedgerData>(emptyData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +84,29 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     return body as unknown;
   }, []);
 
+  // Every confirmation toast comes from a log entry the server wrote, so toasts and Logs always agree.
+  const announceRef = useRef<(entries: ActivityEntry[] | undefined, fromUndo?: boolean) => void>(() => undefined);
+  const announce = useCallback((entries: ActivityEntry[] | undefined, fromUndo = false) => announceRef.current(entries, fromUndo), []);
+  useEffect(() => {
+    const runUndo = async (action: "deleteTransaction" | "restoreTransaction", transactionId: string) => {
+      const { activity, ...next } = await requestAction(action, undefined, transactionId) as WithActivity<LedgerData>;
+      setData(next);
+      announceRef.current(activity, true);
+    };
+    const undoFor = (entry: ActivityEntry): ToastInput["action"] => {
+      if (!entry.entityId) return undefined;
+      const transactionId = entry.entityId;
+      if (entry.action === "transaction.created") return { label: "Undo", run: () => runUndo("deleteTransaction", transactionId) };
+      if (entry.action === "transaction.deleted") return { label: "Undo", run: () => runUndo("restoreTransaction", transactionId) };
+      return undefined;
+    };
+    announceRef.current = (entries, fromUndo = false) => {
+      if (!entries?.length) return;
+      for (const entry of entries) pushToast(activityToast(entry, fromUndo ? undefined : undoFor(entry)));
+      setActivityRevision((revision) => revision + 1);
+    };
+  }, [pushToast, requestAction]);
+
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => { importJobsRef.current = importJobs; }, [importJobs]);
   useEffect(() => {
@@ -95,21 +127,23 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       importPollInFlight.current = true;
       void requestAction("processImportJob", { jobId: pending.id }).then(async (body) => {
         if (cancelled) return;
-        const job = (body as { job: ImportJob }).job;
+        const { job, activity } = body as { job: ImportJob; activity?: ActivityEntry[] };
         mergeJobs([job]);
+        announce(activity);
         if (job.status === "completed") await refresh(false);
       }).catch(() => undefined).finally(() => { importPollInFlight.current = false; });
     }, IMPORT_POLL_INTERVAL_MS);
     return () => { cancelled = true; window.clearInterval(interval); };
-  }, [refresh, requestAction, user]);
+  }, [announce, refresh, requestAction, user]);
 
   const mutate = useCallback(async (action: string, payload?: unknown, id?: string, onData?: (next: LedgerData) => void) => {
-    const next = await requestAction(action, payload, id) as LedgerData;
+    const { activity, ...next } = await requestAction(action, payload, id) as WithActivity<LedgerData>;
     setData(next);
     onData?.(next);
-  }, [requestAction]);
+    announce(activity);
+  }, [announce, requestAction]);
 
-  const transactionPayload = (draft: TransactionDraft) => ({ kind: draft.kind, category: draft.category, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn, note: draft.note.trim(), subcategory: draft.subcategory.trim() || null, area: draft.area.trim() || null, paymentMode: draft.paymentMode, paymentAccountId: draft.paymentMode === "online" ? draft.paymentAccountId || null : null, location: draft.location ?? null, receipt: draft.receipt, removeReceipt: draft.removeReceipt });
+  const transactionPayload = (draft: TransactionDraft) => ({ kind: draft.kind, category: draft.category, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn, note: draft.note.trim(), subcategory: draft.subcategory.trim() || null, area: draft.area.trim() || null, paymentMode: draft.paymentMode, paymentAccountId: draft.paymentMode === "online" ? draft.paymentAccountId || null : null, shared: draft.shared ?? false, location: draft.location ?? null, receipt: draft.receipt, removeReceipt: draft.removeReceipt });
   const saveTransaction = useCallback(async (draft: TransactionDraft, id?: string) => {
     let savedId = id;
     const previousIds = new Set(data.transactions.map((transaction) => transaction.id));
@@ -137,7 +171,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const restoreTransaction = useCallback(async (id: string) => mutate("restoreTransaction", undefined, id), [mutate]);
   const saveSavedPlace = useCallback(async (draft: SavedPlaceDraft, id?: string) => mutate("saveSavedPlace", draft, id), [mutate]);
   const deleteSavedPlace = useCallback(async (id: string) => mutate("deleteSavedPlace", undefined, id), [mutate]);
-  const saveBudget = useCallback(async (draft: BudgetDraft, id?: string) => mutate("saveBudget", { monthKey: draft.monthKey, category: draft.category, amountMinor: majorToMinor(draft.amount) }, id), [mutate]);
+  const saveBudget = useCallback(async (draft: BudgetDraft, id?: string) => mutate("saveBudget", { monthKey: draft.monthKey, category: draft.category, amountMinor: majorToMinor(draft.amount), shared: draft.shared ?? false }, id), [mutate]);
   const deleteBudget = useCallback(async (id: string) => mutate("deleteBudget", undefined, id), [mutate]);
   const saveRecurring = useCallback(async (draft: RecurringDraft, id?: string) => {
     await mutate("saveRecurring", {
@@ -162,7 +196,12 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const deleteCustomCategory = useCallback(async (id: string) => mutate("deleteCustomCategory", undefined, id), [mutate]);
   const saveCustomSubcategory = useCallback(async (draft: SubcategoryDraft) => mutate("saveCustomSubcategory", draft), [mutate]);
   const deleteCustomSubcategory = useCallback(async (id: string) => mutate("deleteCustomSubcategory", undefined, id), [mutate]);
-  const savePaymentAccount = useCallback(async (draft: PaymentAccountDraft) => mutate("savePaymentAccount", { type: draft.type, provider: draft.provider, label: draft.label, balanceMinor: majorToMinor(draft.balance), balanceAsOf: draft.balanceAsOf }), [mutate]);
+  const savePaymentAccount = useCallback(async (draft: PaymentAccountDraft) => mutate("savePaymentAccount", { type: draft.type, provider: draft.provider, label: draft.label, balanceMinor: majorToMinor(draft.balance), balanceAsOf: draft.balanceAsOf, shared: draft.shared ?? false }), [mutate]);
+  const setPaymentAccountShared = useCallback(async (id: string, shared: boolean) => mutate("setPaymentAccountShared", { shared }, id), [mutate]);
+  const inviteHousehold = useCallback(async (email: string) => mutate("inviteHousehold", { email }), [mutate]);
+  const acceptHousehold = useCallback(async () => mutate("acceptHousehold"), [mutate]);
+  const removeHouseholdMember = useCallback(async (email: string) => mutate("removeHouseholdMember", { email }), [mutate]);
+  const leaveHousehold = useCallback(async () => mutate("leaveHousehold"), [mutate]);
   const updatePaymentAccountBalance = useCallback(async (id: string, balance: string, balanceAsOf: string) => mutate("updatePaymentAccountBalance", { balanceMinor: majorToMinor(balance), balanceAsOf }, id), [mutate]);
   const approveAccountReconciliation = useCallback(async (paymentAccountId: string, monthKey: string, checkedOn: string, actualBalance: string, adjustmentNote: string) => mutate("approveAccountReconciliation", { paymentAccountId, monthKey, checkedOn, actualBalanceMinor: majorToMinor(actualBalance), adjustmentNote: adjustmentNote.trim() }), [mutate]);
   const resetAccountReconciliation = useCallback(async (id: string) => mutate("resetAccountReconciliation", { confirmation: "RESET" }, id), [mutate]);
@@ -186,25 +225,27 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     form.append("backup", file);
     form.append("password", password);
     const response = await fetch("/api/backup", { method: "POST", body: form });
-    const body = await response.json() as BackupRestoreResult & { error?: string };
+    const { activity, ...body } = await response.json() as WithActivity<BackupRestoreResult & { error?: string }>;
     if (!response.ok) throw new Error(body.error ?? "Could not restore this backup.");
     await refresh();
+    announce(activity);
     return body;
-  }, [refresh]);
-  const updateProfile = useCallback(async (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes" | "calendarSystem" | "safeToSpendBufferMinor">>) => mutate("updateProfile", { ...data.profile, ...changes }), [data.profile, mutate]);
+  }, [announce, refresh]);
+  const updateProfile = useCallback(async (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes" | "calendarSystem" | "safeToSpendBufferMinor" | "emailReminders" | "browserReminders">>) => mutate("updateProfile", { ...data.profile, ...changes }), [data.profile, mutate]);
   const learningAction = useCallback(async (payload: { action: "setEnabled"; enabled: boolean } | { action: "run" } | { action: "reset" }) => {
     const response = await fetch("/api/learning", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    const body = await response.json() as { learning?: LearningState; processed?: number; error?: string };
+    const body = await response.json() as WithActivity<{ learning?: LearningState; processed?: number; error?: string }>;
     if (!response.ok || !body.learning) throw new Error(body.error ?? "Could not update personalization.");
     setData((current) => ({ ...current, profile: { ...current.profile, learning: body.learning! } }));
+    announce(body.activity);
     return body.processed ?? 0;
-  }, []);
+  }, [announce]);
   const setLearningEnabled = useCallback(async (enabled: boolean) => { await learningAction({ action: "setEnabled", enabled }); }, [learningAction]);
   const runLearning = useCallback(() => learningAction({ action: "run" }), [learningAction]);
   const resetLearning = useCallback(async () => { await learningAction({ action: "reset" }); }, [learningAction]);
   const resetDemo = useCallback(() => undefined, []);
 
-  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, setLearningEnabled, runLearning, resetLearning, resetDemo }), [data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, setLearningEnabled, runLearning, resetLearning, resetDemo]);
+  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, setPaymentAccountShared, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, inviteHousehold, acceptHousehold, removeHouseholdMember, leaveHousehold, setLearningEnabled, runLearning, resetLearning, resetDemo, activityRevision }), [activityRevision, data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, setPaymentAccountShared, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, inviteHousehold, acceptHousehold, removeHouseholdMember, leaveHousehold, setLearningEnabled, runLearning, resetLearning, resetDemo]);
   return <LedgerContext.Provider value={value}>{children}</LedgerContext.Provider>;
 }
 

@@ -1,15 +1,16 @@
 "use client";
 
 import { PasswordInput } from "@mantine/core";
-import { ArrowCounterClockwise, CheckCircle, Eye, EyeSlash, LockKey, Trash, X } from "@phosphor-icons/react";
+import { Eye, EyeSlash, LockKey, MagnifyingGlass } from "@phosphor-icons/react";
 import { parseISO } from "date-fns";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useLedger } from "../context/LedgerContext";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { getCategory } from "../lib/categories";
 import { toDateInput, todayInput } from "../lib/dates";
+import { buildReminderDigest } from "../lib/reminder-digest";
 import { monthlyReportNotice } from "../lib/monthly-report";
 import { recurrenceLabel } from "../lib/recurrence";
 import { markOnboardingStep } from "../lib/onboarding";
@@ -19,18 +20,24 @@ import { AuthPage } from "../views/AuthPage";
 import { AppShell } from "./AppShell";
 import { BrandIcon } from "./BrandIcon";
 import { ButtonSpinner } from "./ButtonSpinner";
+import { LedgerSearch } from "./LedgerSearch";
 import { ReminderBell } from "./ReminderBell";
 import { TransactionForm } from "./TransactionForm";
 import { OnboardingGuide } from "./OnboardingGuide";
 import type { OnboardingStepId } from "../lib/onboarding";
+import { FormError } from "./FormError";
 
-const UNDO_NOTICE_MS = 8_000;
-
-interface TransactionNotice {
-  id: string;
-  action: "created" | "deleted";
-  label: string;
-  expiresAt: number;
+function RoutePanel({ pathname, children }: { pathname: string; children: ReactNode }) {
+  const [open, setOpen] = useState(true);
+  const previousPath = useRef(pathname);
+  useLayoutEffect(() => {
+    if (previousPath.current === pathname) return;
+    previousPath.current = pathname;
+    setOpen(false);
+    const frame = window.requestAnimationFrame(() => setOpen(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, [pathname]);
+  return <div className="route-transition t-panel-slide" data-open={open ? "true" : "false"}>{children}</div>;
 }
 
 export function LedgerAppLayout({ children }: { children: ReactNode }) {
@@ -51,9 +58,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const [locked, setLocked] = useState(false);
   const [amountsHidden, setAmountsHidden] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
-  const [transactionNotice, setTransactionNotice] = useState<TransactionNotice | null>(null);
-  const [undoPending, setUndoPending] = useState(false);
-  const [undoError, setUndoError] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const reportNotice = user && !isDemo ? monthlyReportNotice() : null;
 
   useEffect(() => { setAmountsHidden(ledger.profile.hideAmounts); }, [ledger.profile.hideAmounts]);
@@ -65,10 +70,49 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(timeout);
   }, [recentlyAddedTransactionId]);
   useEffect(() => {
-    if (!transactionNotice) return;
-    const timeout = window.setTimeout(() => setTransactionNotice(null), Math.max(0, transactionNotice.expiresAt - Date.now()));
-    return () => window.clearTimeout(timeout);
-  }, [transactionNotice]);
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  useEffect(() => {
+    if (!user || isDemo || ledger.loading || ledger.error || !ledger.profile.browserReminders) return;
+    if (typeof Notification === "undefined") return;
+    const key = `syr-reminder-${user.id}-${todayInput()}`;
+    if (window.localStorage.getItem(key)) return;
+    const notices = buildReminderDigest({
+      dues: ledger.dueItems,
+      recurring: ledger.recurringEntries,
+      today: todayInput(),
+      categoryLabel: (category) => getCategory(category, ledger.customCategories).label,
+    });
+    if (!notices.length) return;
+    const notify = () => {
+      const body = notices.slice(0, 3).map((notice) => `${notice.title}: ${notice.body}`).join("\n");
+      new Notification("SaveYoRupee reminders", { body });
+      window.localStorage.setItem(key, "1");
+    };
+    if (Notification.permission === "granted") notify();
+    else if (Notification.permission === "default" && !window.localStorage.getItem(`${key}:asked`)) {
+      window.localStorage.setItem(`${key}:asked`, "1");
+      void Notification.requestPermission().then((result) => { if (result === "granted") notify(); });
+    }
+  }, [isDemo, ledger.customCategories, ledger.dueItems, ledger.error, ledger.loading, ledger.profile.browserReminders, ledger.recurringEntries, user]);
+  useEffect(() => {
+    if (!user || isDemo || ledger.loading || ledger.error || !ledger.profile.emailReminders) return;
+    const key = `syr-email-reminder-${user.id}-${todayInput()}`;
+    if (window.sessionStorage.getItem(key)) return;
+    window.sessionStorage.setItem(key, "1");
+    void fetch("/api/ledger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "sendDueReminders" }),
+    }).then((response) => { if (!response.ok) window.sessionStorage.removeItem(key); }).catch(() => window.sessionStorage.removeItem(key));
+  }, [isDemo, ledger.error, ledger.loading, ledger.profile.emailReminders, user]);
   useEffect(() => {
     if (!ledger.profile.hasPin || !ledger.profile.autoLockMinutes || locked || (!user && !isDemo)) return;
     let timer = window.setTimeout(() => setLocked(true), ledger.profile.autoLockMinutes * 60_000);
@@ -142,8 +186,6 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     if (!id && savedId) {
       completeOnboardingStep("transaction");
       setRecentlyAddedTransactionId(savedId);
-      setUndoError(null);
-      setTransactionNotice({ id: savedId, action: "created", label: draft.note.trim() || (draft.kind === "income" ? "Income" : "Expense"), expiresAt: Date.now() + UNDO_NOTICE_MS });
     }
     if (!id && view === "home") {
       setMonth(parseISO(draft.occurredOn));
@@ -152,26 +194,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   };
   const removeTransaction = async (transaction: LedgerTransaction) => {
     const label = transaction.note || (transaction.kind === "income" ? "Income" : "Expense");
-    if (window.confirm(`Delete “${label}”? You can undo this for a few seconds.`)) {
-      await ledger.deleteTransaction(transaction.id);
-      setUndoError(null);
-      setTransactionNotice({ id: transaction.id, action: "deleted", label, expiresAt: Date.now() + UNDO_NOTICE_MS });
-    }
-  };
-  const undoTransaction = async () => {
-    if (!transactionNotice || undoPending) return;
-    setUndoPending(true);
-    setUndoError(null);
-    try {
-      if (transactionNotice.action === "created") await ledger.deleteTransaction(transactionNotice.id);
-      else await ledger.restoreTransaction(transactionNotice.id);
-      setTransactionNotice(null);
-    } catch (caught) {
-      setUndoError(caught instanceof Error ? caught.message : "Could not undo that change.");
-      setTransactionNotice((current) => current ? { ...current, expiresAt: Date.now() + UNDO_NOTICE_MS } : null);
-    } finally {
-      setUndoPending(false);
-    }
+    if (window.confirm(`Delete “${label}”? You can undo this for a few seconds.`)) await ledger.deleteTransaction(transaction.id);
   };
   const logOut = async () => {
     if (signingOut) return;
@@ -223,7 +246,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
             onAction={runOnboardingAction}
           />
         )}
-        <div key={pathname} className="route-transition">{content}</div>
+        <RoutePanel pathname={pathname}>{content}</RoutePanel>
       </AppShell>
       <ReminderBell
         items={ledger.dueItems}
@@ -235,9 +258,24 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         onSnooze={ledger.snoozeDueItem}
         onConfirmRecurring={ledger.confirmRecurring}
       />
-      <button className="privacy-toggle" onClick={() => setAmountsHidden((hidden) => !hidden)} aria-label={amountsHidden ? "Reveal amounts" : "Hide amounts"}>
-        {amountsHidden ? <Eye size={19} /> : <EyeSlash size={19} />}
+      <button className="ledger-search" onClick={() => setSearchOpen(true)} aria-label="Search the ledger" title="Search (Ctrl+K)"><MagnifyingGlass size={18} /></button>
+      <button className="privacy-toggle" onClick={() => setAmountsHidden((hidden) => !hidden)} aria-label={amountsHidden ? "Reveal amounts" : "Hide amounts"} aria-pressed={amountsHidden}>
+        <span className="t-icon-swap" data-state={amountsHidden ? "a" : "b"} aria-hidden="true">
+          <span className="t-icon" data-icon="a"><Eye size={19} /></span>
+          <span className="t-icon" data-icon="b"><EyeSlash size={19} /></span>
+        </span>
       </button>
+      <LedgerSearch
+        open={searchOpen}
+        currency={ledger.profile.currency}
+        transactions={ledger.transactions}
+        transfers={ledger.transfers}
+        dues={ledger.dueItems}
+        places={ledger.savedPlaces}
+        accounts={ledger.paymentAccounts}
+        customCategories={ledger.customCategories}
+        onClose={() => setSearchOpen(false)}
+      />
       <TransactionForm
         open={formOpen}
         currency={ledger.profile.currency}
@@ -251,26 +289,10 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         paymentAccounts={ledger.paymentAccounts}
         savedPlaces={ledger.savedPlaces}
         learning={ledger.profile.learning}
+        shareWithHousehold={ledger.profile.household?.status === "active"}
         onClose={() => setFormOpen(false)}
         onSave={saveTransaction}
       />
-      {transactionNotice && (
-        <aside className={`transaction-undo-notice ${undoError ? "has-error" : ""}`} role="status" aria-live="polite">
-          <span className="transaction-undo-icon" aria-hidden="true">
-            {transactionNotice.action === "created" ? <CheckCircle size={22} weight="fill" /> : <Trash size={21} />}
-          </span>
-          <span className="transaction-undo-copy">
-            <strong>{transactionNotice.action === "created" ? "Transaction added" : "Transaction deleted"}</strong>
-            <small>{undoError ?? `“${transactionNotice.label}” ${transactionNotice.action === "created" ? "is now in your ledger." : "was removed."}`}</small>
-          </span>
-          <button type="button" className="transaction-undo-action" disabled={undoPending} onClick={() => void undoTransaction()}>
-            {undoPending ? <ButtonSpinner /> : <ArrowCounterClockwise size={17} />}
-            Undo
-          </button>
-          <button type="button" className="transaction-undo-close" disabled={undoPending} onClick={() => setTransactionNotice(null)} aria-label="Dismiss Undo message"><X size={16} /></button>
-          <i key={transactionNotice.expiresAt} className="transaction-undo-progress" aria-hidden="true" />
-        </aside>
-      )}
       {locked && ledger.profile.hasPin && (
         <PrivacyLock onUnlock={async (pin) => {
           await ledger.verifyPin(pin);
@@ -399,7 +421,7 @@ function AppLoader({ className, message }: { className: "boot-screen" | "page-lo
           </svg>
         </div>
       </div>
-      <div className="loader-status"><i aria-hidden="true" /><span>{message}</span></div>
+      <div className="loader-status"><i aria-hidden="true" /><span className="t-shimmer" data-text={message}>{message}</span></div>
     </div>
   </div>;
 }
@@ -421,5 +443,5 @@ function PrivacyLock({ onUnlock }: { onUnlock: (pin: string) => Promise<void> })
       setBusy(false);
     }
   };
-  return <div className="privacy-lock"><div className="lock-card"><span className="lock-icon"><LockKey size={28} weight="duotone" /></span><div className="brand-mark"><BrandIcon size={32} /><span>SaveYoRupee</span></div><h2>Your ledger is locked</h2><p>Enter your ledger PIN to continue.</p><form onSubmit={submit} aria-busy={busy}><PasswordInput value={pin} disabled={busy} onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="4–6 digit PIN" inputMode="numeric" autoComplete="current-password" autoFocus minLength={4} maxLength={6} required />{error && <div className="form-error" role="alert">{error}</div>}<button className="primary-button full-width" disabled={busy || pin.length < 4}>{busy ? <><ButtonSpinner />Checking…</> : "Unlock ledger"}</button></form></div></div>;
+  return <div className="privacy-lock"><div className="lock-card"><span className="lock-icon"><LockKey size={28} weight="duotone" /></span><div className="brand-mark"><BrandIcon size={32} /><span>SaveYoRupee</span></div><h2>Your ledger is locked</h2><p>Enter your ledger PIN to continue.</p><form onSubmit={submit} aria-busy={busy}><PasswordInput value={pin} disabled={busy} onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="4–6 digit PIN" inputMode="numeric" autoComplete="current-password" autoFocus minLength={4} maxLength={6} required /><FormError message={error} /><button className="primary-button full-width" disabled={busy || pin.length < 4}>{busy ? <><ButtonSpinner />Checking…</> : "Unlock ledger"}</button></form></div></div>;
 }

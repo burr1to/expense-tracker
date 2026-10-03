@@ -2,30 +2,35 @@ import { CaretDown, CheckCircle, DownloadSimple, FileText, FunnelSimple, Magnify
 import { NumberInput, Popover, Select, TextInput } from "@mantine/core";
 import { DatePicker } from "@mantine/dates";
 import { format, isSameMonth, parseISO, startOfMonth } from "date-fns";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState } from "../components/EmptyState";
+import { SlidingTabs } from "../components/SlidingTabs";
 import { AnimatedOverlay } from "../components/AnimatedOverlay";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { LedgerDatePickerInput as DatePickerInput } from "../components/LedgerDatePickerInput";
 import { MonthPicker } from "../components/MonthPicker";
 import { TransactionRow } from "../components/TransactionRow";
+import { TransferRow } from "../components/TransferRow";
 import { ReceiptScanner } from "../components/ReceiptScanner";
 import { SmsCapture } from "../components/SmsCapture";
 import { CategoryIconPicker } from "../components/CategoryIconPicker";
 import { isFullBackupCsv } from "../lib/backup";
 import { allCategoriesFor, CATEGORIES, getCategory } from "../lib/categories";
 import { parseTransactionCsv, TRANSACTION_CSV_TEMPLATE, type CsvCategoryDraft, type CsvSubcategoryDraft } from "../lib/csv";
-import { todayInput } from "../lib/dates";
-import { filterTransactionHistory, type TransactionHistoryScope } from "../lib/transaction-history";
+import { formatLedgerDay, todayInput } from "../lib/dates";
+import { listLedgerActivity, transferAccountLabel, type TransactionHistoryScope } from "../lib/transaction-history";
 import { analyzeStatementFile } from "../lib/statement-import";
 import { countImportDuplicates } from "../lib/transaction-intelligence";
-import type { CalendarSystem, CurrencyCode, CustomCategory, CustomSubcategory, ImportJob, LearningState, LedgerTransaction, PaymentAccount, PaymentMode, ReceiptUpload, TransactionDraft, TransactionKind } from "../types";
+import type { AccountTransfer, CalendarSystem, CurrencyCode, CustomCategory, CustomSubcategory, ImportJob, LearningState, LedgerTransaction, PaymentAccount, PaymentMode, ReceiptUpload, TransactionDraft, TransactionKind } from "../types";
+
+type LedgerKindFilter = TransactionKind | "transfer" | "all";
 
 interface TransactionsPageProps {
   month: Date;
-  currency: CurrencyCode; transactions: LedgerTransaction[]; customCategories: CustomCategory[]; customSubcategories: CustomSubcategory[]; paymentAccounts: PaymentAccount[];
+  currency: CurrencyCode; transactions: LedgerTransaction[]; transfers: AccountTransfer[]; customCategories: CustomCategory[]; customSubcategories: CustomSubcategory[]; paymentAccounts: PaymentAccount[];
   onMonthChange: (date: Date) => void;
-  onAdd: (occurredOn: string) => void; onDuplicate: (transaction: LedgerTransaction) => void; onEdit: (transaction: LedgerTransaction) => void; onDelete: (transaction: LedgerTransaction) => Promise<void>;
+  onAdd: (occurredOn: string) => void; onDuplicate: (transaction: LedgerTransaction) => void; onEdit: (transaction: LedgerTransaction) => void; onDelete: (transaction: LedgerTransaction) => Promise<void>; onDeleteTransfer: (id: string) => Promise<void>;
   onImport: (drafts: TransactionDraft[], newCategories?: CsvCategoryDraft[], newSubcategories?: CsvSubcategoryDraft[]) => Promise<ImportJob | null>;
   importJobs: ImportJob[];
   onDismissImportJob: (id: string) => void;
@@ -35,8 +40,9 @@ interface TransactionsPageProps {
   onSaveTransaction: (draft: TransactionDraft) => Promise<string | undefined>;
 }
 
-export function TransactionsPage({ month, currency, transactions, customCategories, customSubcategories, paymentAccounts, importJobs, onMonthChange, onAdd, onDuplicate, onEdit, onDelete, onImport, onDismissImportJob, onSaveReceiptSplit, learning, onSaveTransaction, calendarSystem }: TransactionsPageProps) {
-  const [query, setQuery] = useState(""); const [kind, setKind] = useState<TransactionKind | "all">("all");
+export function TransactionsPage({ month, currency, transactions, transfers, customCategories, customSubcategories, paymentAccounts, importJobs, onMonthChange, onAdd, onDuplicate, onEdit, onDelete, onDeleteTransfer, onImport, onDismissImportJob, onSaveReceiptSplit, learning, onSaveTransaction, calendarSystem }: TransactionsPageProps) {
+  const searchParams = useSearchParams();
+  const [query, setQuery] = useState(""); const [kind, setKind] = useState<LedgerKindFilter>("all");
   const [category, setCategory] = useState("all"); const [from, setFrom] = useState(""); const [to, setTo] = useState(""); const [min, setMin] = useState(""); const [max, setMax] = useState(""); const [paymentMode, setPaymentMode] = useState<PaymentMode | "all">("all");
   const [preview, setPreview] = useState<TransactionDraft[] | null>(null); const [importDialogOpen, setImportDialogOpen] = useState(false); const [importErrors, setImportErrors] = useState<string[]>([]); const [importing, setImporting] = useState(false); const fileRef = useRef<HTMLInputElement>(null);
   const [analyzingImport, setAnalyzingImport] = useState(false); const [importWarnings, setImportWarnings] = useState<string[]>([]); const [importSource, setImportSource] = useState<{ name: string; kind: "csv" | "statement" } | null>(null); const [importAccountId, setImportAccountId] = useState("");
@@ -49,13 +55,20 @@ export function TransactionsPage({ month, currency, transactions, customCategori
   const [visibleCount, setVisibleCount] = useState(50);
   const selectedDayKey = format(selectedDay, "yyyy-MM-dd");
   const activeOccurredOn = scope === "day" ? selectedDayKey : todayInput();
-  const filterCategories = useMemo(() => kind === "all" ? [...CATEGORIES, ...customCategories] : [...allCategoriesFor(kind, customCategories)], [kind, customCategories]);
+  const filterCategories = useMemo(() => kind === "all" || kind === "transfer" ? [...CATEGORIES, ...customCategories] : [...allCategoriesFor(kind, customCategories)], [kind, customCategories]);
   useEffect(() => { if (category !== "all" && !filterCategories.some((item) => item.id === category)) setCategory("all"); }, [category, filterCategories]);
-  const sorted = useMemo(() => filterTransactionHistory(transactions, customCategories, {
+  useEffect(() => {
+    const nextQuery = searchParams.get("q");
+    if (nextQuery) {
+      setQuery(nextQuery);
+      setScope("history");
+    }
+  }, [searchParams]);
+  const sorted = useMemo(() => listLedgerActivity(transactions, transfers, paymentAccounts, customCategories, {
     scope, selectedDayKey, kind, category, from, to,
     minMinor: min ? Number(min) * 100 : null, maxMinor: max ? Number(max) * 100 : null,
     paymentMode, query,
-  }), [transactions, customCategories, scope, selectedDayKey, kind, category, from, to, min, max, paymentMode, query]);
+  }), [transactions, transfers, paymentAccounts, customCategories, scope, selectedDayKey, kind, category, from, to, min, max, paymentMode, query]);
   useEffect(() => { setVisibleCount(50); }, [scope, selectedDayKey, kind, category, from, to, min, max, paymentMode, query]);
   const visibleTransactions = sorted.slice(0, visibleCount);
   const possibleImportDuplicates = useMemo(() => countImportDuplicates(preview ?? [], transactions), [preview, transactions]);
@@ -105,6 +118,7 @@ export function TransactionsPage({ month, currency, transactions, customCategori
   const chooseImportAccount = (accountId: string | null) => { const next = accountId ?? ""; setImportAccountId(next); setPreview((current) => current?.map((row) => ({ ...row, paymentMode: next ? "online" : "cash", paymentAccountId: next })) ?? null); };
   const updatePreviewRow = (index: number, changes: Partial<TransactionDraft>) => setPreview((current) => current?.map((row, rowIndex) => rowIndex === index ? { ...row, ...changes } : row) ?? null);
   const remove = async (transaction: LedgerTransaction) => { if (deletingId) return; setDeletingId(transaction.id); try { await onDelete(transaction); } finally { setDeletingId(null); } };
+  const removeTransfer = async (id: string) => { if (deletingId || !window.confirm("Delete this transfer? Account balances will be recalculated.")) return; setDeletingId(`transfer:${id}`); try { await onDeleteTransfer(id); } finally { setDeletingId(null); } };
   const clearFilters = () => { setCategory("all"); setFrom(""); setTo(""); setMin(""); setMax(""); setPaymentMode("all"); };
   const hasActiveFilters = category !== "all" || Boolean(from || to || min || max) || paymentMode !== "all";
   const changeMonth = (nextMonth: Date) => {
@@ -119,7 +133,7 @@ export function TransactionsPage({ month, currency, transactions, customCategori
   };
 
   return <div className="page list-page">
-    <header className="page-header"><div><span className="eyebrow">Your ledger</span><h1>Transactions</h1><p>Every income and expense entry, in one clear timeline.</p></div><div className="transaction-actions"><div className="header-actions"><input ref={fileRef} className="visually-hidden" type="file" accept=".csv,.txt,.pdf,text/csv,text/plain,application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ""; if (file) void readFile(file); }} /><ReceiptScanner currency={currency} fallbackOccurredOn={activeOccurredOn} customCategories={customCategories} customSubcategories={customSubcategories} paymentAccounts={paymentAccounts} onSave={onSaveReceiptSplit} /><SmsCapture currency={currency} transactions={transactions} customCategories={customCategories} customSubcategories={customSubcategories} paymentAccounts={paymentAccounts} learning={learning} onSave={onSaveTransaction} /><button id="csv-import-trigger" className="secondary-button csv-import-trigger" disabled={analyzingImport} onClick={() => fileRef.current?.click()}>{analyzingImport ? <ButtonSpinner /> : <UploadSimple size={18} />}{analyzingImport ? "Reading statement…" : "Import statement"}</button><button className="primary-button" onClick={() => onAdd(activeOccurredOn)}><Plus size={18} />Add transaction</button></div><div className="csv-template-help"><span>CSV, PDF, image, or text · always review before import</span><a href={templateHref} download="transaction-import-template.csv"><DownloadSimple size={14} />Download CSV template</a></div></div></header>
+    <header className="page-header"><div><span className="eyebrow">Your ledger</span><h1>Transactions</h1><p>Income, expenses, and transfers between your accounts, in one timeline.</p></div><div className="transaction-actions"><div className="header-actions"><input ref={fileRef} className="visually-hidden" type="file" accept=".csv,.txt,.pdf,text/csv,text/plain,application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ""; if (file) void readFile(file); }} /><ReceiptScanner currency={currency} fallbackOccurredOn={activeOccurredOn} customCategories={customCategories} customSubcategories={customSubcategories} paymentAccounts={paymentAccounts} onSave={onSaveReceiptSplit} /><SmsCapture currency={currency} transactions={transactions} customCategories={customCategories} customSubcategories={customSubcategories} paymentAccounts={paymentAccounts} learning={learning} onSave={onSaveTransaction} /><button id="csv-import-trigger" className="secondary-button csv-import-trigger" disabled={analyzingImport} onClick={() => fileRef.current?.click()}>{analyzingImport ? <ButtonSpinner /> : <UploadSimple size={18} />}{analyzingImport ? "Reading statement…" : "Import statement"}</button><button className="primary-button" onClick={() => onAdd(activeOccurredOn)}><Plus size={18} />Add transaction</button></div><div className="csv-template-help"><span>CSV, PDF, image, or text · always review before import</span><a href={templateHref} download="transaction-import-template.csv"><DownloadSimple size={14} />Download CSV template</a></div></div></header>
     {importJobs.length > 0 && <section className="import-progress-stack" aria-label="CSV import progress" aria-live="polite">{importJobs.map((job) => {
       const percent = job.totalRows ? Math.round(job.processedRows / job.totalRows * 100) : 0;
       const completed = job.status === "completed";
@@ -132,21 +146,21 @@ export function TransactionsPage({ month, currency, transactions, customCategori
     })}</section>}
     <section className="transaction-scope">
       <div className={scope === "history" ? "transaction-scope-title is-history" : "transaction-scope-title"}>{scope === "day"
-        ? <><span className="section-label">Viewing month</span><MonthPicker calendarSystem={calendarSystem} month={month} onChange={changeMonth} /><Popover position="bottom-start" shadow="md" withArrow><Popover.Target><button className="current-date" aria-label={`Choose day. Selected ${format(selectedDay, "EEEE, MMMM d, yyyy")}`}>{format(selectedDay, "EEEE, MMMM d")} <CaretDown size={13} weight="bold" /></button></Popover.Target><Popover.Dropdown className="day-picker-popover"><DatePicker value={selectedDayKey} onChange={selectDay} firstDayOfWeek={0} /></Popover.Dropdown></Popover></>
+        ? <><span className="section-label">Viewing month</span><MonthPicker calendarSystem={calendarSystem} month={month} onChange={changeMonth} /><Popover position="bottom-start" shadow="md" withArrow><Popover.Target><button className="current-date" aria-label={`Choose day. Selected ${formatLedgerDay(selectedDay, calendarSystem)}`}>{formatLedgerDay(selectedDay, calendarSystem)} <CaretDown size={13} weight="bold" /></button></Popover.Target><Popover.Dropdown className="day-picker-popover"><DatePicker value={selectedDayKey} onChange={selectDay} firstDayOfWeek={0} /></Popover.Dropdown></Popover></>
         : <><span className="section-label">Viewing</span><strong className="month-label">All history</strong><span className="current-date as-text">Every transaction you have recorded</span></>}</div>
-      <div className="transaction-scope-controls"><nav className="filter-tabs transaction-history-scope" aria-label="Transaction scope">{(["history", "day"] as const).map((value) => <button key={value} className={scope === value ? "active" : ""} aria-pressed={scope === value} onClick={() => setScope(value)}>{value === "history" ? "All history" : "By day"}</button>)}</nav><nav className="filter-tabs" aria-label="Transaction type">{(["all", "expense", "income"] as const).map((value) => <button key={value} className={kind === value ? "active" : ""} aria-pressed={kind === value} onClick={() => setKind(value)}>{value[0].toUpperCase() + value.slice(1)}</button>)}</nav></div>
+      <div className="transaction-scope-controls"><SlidingTabs<TransactionHistoryScope> className="transaction-history-scope" label="Transaction scope" value={scope} onChange={setScope} options={[{ id: "history", label: "All history" }, { id: "day", label: "By day" }]} /><SlidingTabs<LedgerKindFilter> className="transaction-kind-tabs" label="Transaction type" value={kind} onChange={setKind} options={[{ id: "all", label: "All" }, { id: "expense", label: "Expense" }, { id: "income", label: "Income" }, { id: "transfer", label: "Transfer" }]} /></div>
     </section>
     <section className="toolbar"><TextInput className="search-field" aria-label={scope === "history" ? "Search all transactions" : "Search transactions on selected day"} leftSection={<MagnifyingGlass size={19} />} rightSection={query ? <button onClick={() => setQuery("")} aria-label="Clear search"><X size={17} /></button> : null} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={scope === "history" ? "Search all transactions" : `Search ${format(selectedDay, "MMMM d")} transactions`} /></section>
     <section className="advanced-filters" aria-label="Transaction filters">
       <div className="filter-panel-heading"><span><FunnelSimple size={18} /><strong>Filters</strong></span><button className="text-button clear-filter-button" disabled={!hasActiveFilters} onClick={clearFilters}>Clear filters</button></div>
-      <Select label={kind === "all" ? "Category" : `${kind === "expense" ? "Expense" : "Income"} category`} value={category} onChange={(value) => value && setCategory(value)} data={[{ value: "all", label: "All categories" }, ...filterCategories.map((item) => ({ value: item.id, label: item.label }))]} searchable allowDeselect={false} />
+      <Select label={kind === "all" || kind === "transfer" ? "Category" : `${kind === "expense" ? "Expense" : "Income"} category`} value={category} onChange={(value) => value && setCategory(value)} data={[{ value: "all", label: "All categories" }, ...filterCategories.map((item) => ({ value: item.id, label: item.label }))]} searchable allowDeselect={false} disabled={kind === "transfer"} />
       <DatePickerInput label="From date" value={from || null} onChange={(value) => setFrom(value ?? "")} clearable valueFormat="MMM D, YYYY" firstDayOfWeek={0} />
       <DatePickerInput label="To date" value={to || null} onChange={(value) => setTo(value ?? "")} clearable valueFormat="MMM D, YYYY" firstDayOfWeek={0} />
       <NumberInput label="Min amount" aria-label={`Minimum amount in ${currency}`} leftSection={<span className="currency-prefix">{currency}</span>} leftSectionWidth={52} value={min} onChange={(value) => setMin(String(value))} min={0} thousandSeparator="," decimalScale={2} />
       <NumberInput label="Max amount" aria-label={`Maximum amount in ${currency}`} leftSection={<span className="currency-prefix">{currency}</span>} leftSectionWidth={52} value={max} onChange={(value) => setMax(String(value))} min={0} thousandSeparator="," decimalScale={2} />
-      <Select label="Payment mode" value={paymentMode} onChange={(value) => value && setPaymentMode(value as PaymentMode | "all")} data={[{ value: "all", label: "All payment modes" }, { value: "cash", label: "Cash" }, { value: "cheque", label: "Cheque" }, { value: "online", label: "Online payment" }]} allowDeselect={false} />
+      <Select label="Payment mode" value={paymentMode} onChange={(value) => value && setPaymentMode(value as PaymentMode | "all")} data={[{ value: "all", label: "All payment modes" }, { value: "cash", label: "Cash" }, { value: "cheque", label: "Cheque" }, { value: "online", label: "Online payment" }]} allowDeselect={false} disabled={kind === "transfer"} />
     </section>
-    <section className="ledger-list"><div className="ledger-list-heading"><span>{sorted.length} {sorted.length === 1 ? "entry" : "entries"}{scope === "day" ? ` on ${format(selectedDay, "MMMM d, yyyy")}` : ""}</span><span>Newest first</span></div>{visibleTransactions.map((transaction) => <TransactionRow key={transaction.id} transaction={transaction} currency={currency} customCategories={customCategories} onDuplicate={onDuplicate} onEdit={onEdit} onDelete={(item) => void remove(item)} deletePending={deletingId === transaction.id} />)}{!sorted.length && <EmptyState title={scope === "history" ? "No matching transactions" : `No ${kind === "all" ? "" : `${kind} `}entries on ${format(selectedDay, "MMMM d")}`} message={scope === "history" ? "Try changing your search or filters, or add a transaction." : "Try another day or filter, or add a new transaction."} action={<button className="primary-button small" onClick={() => onAdd(activeOccurredOn)}><Plus size={17} />Add transaction</button>} />}{visibleTransactions.length < sorted.length && <nav className="transaction-history-pagination" aria-label="More transactions"><span aria-live="polite">Showing {visibleTransactions.length} of {sorted.length}</span><button className="secondary-button small" onClick={() => setVisibleCount((count) => count + 50)}>Load 50 more</button></nav>}</section>
+    <section className="ledger-list"><div className="ledger-list-heading"><span>{sorted.length} {sorted.length === 1 ? "entry" : "entries"}{scope === "day" ? ` on ${formatLedgerDay(selectedDay, calendarSystem, "date")}` : ""}</span><span>Newest first</span></div>{visibleTransactions.map((entry) => entry.type === "transaction" ? <TransactionRow key={`transaction-${entry.transaction.id}`} transaction={entry.transaction} currency={currency} customCategories={customCategories} onDuplicate={onDuplicate} onEdit={onEdit} onDelete={(item) => void remove(item)} deletePending={deletingId === entry.transaction.id} /> : <TransferRow key={`transfer-${entry.transfer.id}`} transfer={entry.transfer} fromLabel={transferAccountLabel(paymentAccounts, entry.transfer.fromAccountId)} toLabel={transferAccountLabel(paymentAccounts, entry.transfer.toAccountId)} currency={currency} onDelete={() => void removeTransfer(entry.transfer.id)} deletePending={deletingId === `transfer:${entry.transfer.id}`} />)}{!sorted.length && <EmptyState title={scope === "history" ? "No matching entries" : `No ${kind === "all" ? "" : `${kind} `}entries on ${format(selectedDay, "MMMM d")}`} message={scope === "history" ? "Try changing your search or filters, or add a transaction." : "Try another day or filter, or add a new transaction."} action={kind === "transfer" ? undefined : <button className="primary-button small" onClick={() => onAdd(activeOccurredOn)}><Plus size={17} />Add transaction</button>} />}{visibleTransactions.length < sorted.length && <nav className="transaction-history-pagination" aria-label="More transactions"><span aria-live="polite">Showing {visibleTransactions.length} of {sorted.length}</span><button className="secondary-button small" onClick={() => setVisibleCount((count) => count + 50)}>Load 50 more</button></nav>}</section>
     <AnimatedOverlay open={importDialogOpen} dismissOnBackdrop onClose={closeImportDialog} onExited={() => { if (!importDialogOpen) { setPreview(null); setImportErrors([]); setNewImportCategories([]); setNewImportSubcategories([]); } }}>
         {preview && <section className="import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-title" aria-busy={importing}>
         <header><div><span className="eyebrow">{importSource?.kind === "statement" ? "AI statement import" : "CSV import"}</span><h2 id="import-title">Review before importing</h2><small className="import-source-name"><FileText size={14} />{importSource?.name}</small></div><button className="icon-button" disabled={importing} onClick={closeImportDialog} aria-label="Close"><X size={20} /></button></header>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { adToBs, bsDaysInMonth, bsToAd, BS_MAX_YEAR, BS_MIN_YEAR, formatBs, isSupportedAdDate } from "./nepali-date";
+import { adToBs, bsDaysInMonth, bsToAd, BS_MAX_YEAR, BS_MIN_YEAR, formatBs, formatBsMonthSpan, isSupportedAdDate } from "./nepali-date";
+import { formatLedgerDay, formatLedgerMonth } from "./dates";
 import { addMonthsToKey, daysInPeriod, monthBounds, monthKeyOf, monthLabel } from "./period";
 
 /**
@@ -85,6 +86,13 @@ describe("range guards", () => {
 });
 
 describe("formatting", () => {
+  it("names the Bikram Sambat months inside a Gregorian month", () => {
+    expect(formatBsMonthSpan("2026-09-01", "2026-09-30")).toBe("Bhadra–Ashwin 2083");
+    expect(formatLedgerMonth(new Date(2026, 8, 1), "BS")).toBe("Bhadra–Ashwin 2083");
+    expect(formatLedgerMonth(new Date(2026, 8, 1), "AD")).toBe("September 2026");
+    expect(formatLedgerDay("2026-09-25", "BS", "date")).toBe("Ashwin 9, 2083 · Sep 25");
+  });
+
   it("renders long, short and numeric styles", () => {
     const parts = { year: 2083, month: 4, day: 27 };
     expect(formatBs(parts)).toBe("Shrawan 27, 2083");

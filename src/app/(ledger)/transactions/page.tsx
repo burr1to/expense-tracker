@@ -36,6 +36,7 @@ export default function TransactionsRoute() {
     calendarSystem={ledger.profile.calendarSystem}
     currency={ledger.profile.currency}
     transactions={ledger.transactions}
+    transfers={ledger.transfers}
     customCategories={ledger.customCategories}
     customSubcategories={ledger.customSubcategories}
     paymentAccounts={ledger.paymentAccounts}
@@ -44,6 +45,7 @@ export default function TransactionsRoute() {
     onDuplicate={openDuplicate}
     onEdit={openEdit}
     onDelete={removeTransaction}
+    onDeleteTransfer={ledger.deleteTransfer}
     onImport={importPastTransactions}
     importJobs={ledger.importJobs}
     onDismissImportJob={ledger.dismissImportJob}

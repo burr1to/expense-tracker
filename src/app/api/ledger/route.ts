@@ -5,16 +5,23 @@ import type { Prisma } from "../../../generated/prisma/client";
 import { getAuthenticatedSession } from "../../../lib/auth";
 import { getPrisma } from "../../../lib/prisma";
 import { hashPin, verifyPin } from "../../../lib/pin";
-import { NEPAL_MOBILE_BANKS } from "../../../lib/payment-accounts";
+import { NEPAL_MOBILE_BANKS, paymentAccountLabel } from "../../../lib/payment-accounts";
+import { diffFields, DUE_KIND_LABELS, periodText, type ActivityChange, type ActivityDraft } from "../../../lib/activity-log";
+import { purgeExpiredActivity, recordActivity } from "../../../lib/activity-recorder";
 import { STORAGE_PERIOD_KEY } from "../../../lib/period";
 import { removeStoredReceipts, verifyStoredReceipt } from "../../../lib/receipt-storage";
 import { KATHMANDU_BOUNDS } from "../../../lib/kathmandu-locations";
-import { expectedAccountBalanceThrough, withCurrentAccountBalance } from "../../../lib/account-balances";
+import { expectedAccountBalanceThrough } from "../../../lib/account-balances";
+import { asDate, dateOnly, loadLedger, purgeExpiredDeletedTransactions, serialize } from "../../../lib/ledger-snapshot";
 import { CATEGORIES, importedCategoryColor, SUBCATEGORIES } from "../../../lib/categories";
 import { CATEGORY_ICON_NAMES } from "../../../lib/category-icons";
 import { IMPORT_BATCH_SIZE } from "../../../lib/import-job";
-import { dateOnlyInTimeZone, firstRecurringOccurrence, nextRecurringOccurrence } from "../../../lib/recurrence";
-import type { AccountReconciliation, AccountTransfer, CategoryIconName, LearningSuggestion, LedgerTransaction, PaymentAccount, RecurrenceUnit } from "../../../types";
+import { todayInput } from "../../../lib/dates";
+import { canPostOnAccount } from "../../../lib/household";
+import { escapeHtml, sendLedgerEmail } from "../../../lib/outbound-mail";
+import { buildReminderDigest } from "../../../lib/reminder-digest";
+import { dateOnlyInTimeZone, firstRecurringOccurrence, nextRecurringOccurrence, recurrenceLabel } from "../../../lib/recurrence";
+import type { CategoryIconName, DueItem, LedgerTransaction, PaymentAccount, RecurrenceUnit } from "../../../types";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +45,7 @@ const transactionSchema = z.object({
   kind: z.enum(["income", "expense"]), category: z.string().min(1).max(80), amountMinor: z.number().int().positive(),
   occurredOn: z.string().date(), note: z.string().max(240), subcategory: z.string().trim().max(80).nullable(),
   area: z.string().trim().max(120).nullable(), paymentMode: z.enum(["cash", "cheque", "online"]), paymentAccountId: z.string().nullable(),
+  shared: z.boolean().optional(),
   location: locationSchema.optional(),
 }).superRefine((value, context) => {
   if (value.paymentMode === "online" && !value.paymentAccountId) context.addIssue({ code: "custom", path: ["paymentAccountId"], message: "Choose an online payment account." });
@@ -51,7 +59,7 @@ const receiptSplitSchema = z.object({
   totalMinor: z.number().int().positive(),
   transactions: z.array(receiptSplitTransactionSchema).min(1).max(20),
 });
-const budgetSchema = z.object({ monthKey: z.string().regex(STORAGE_PERIOD_KEY), category: z.string().min(1).max(80), amountMinor: z.number().int().positive() });
+const budgetSchema = z.object({ monthKey: z.string().regex(STORAGE_PERIOD_KEY), category: z.string().min(1).max(80), amountMinor: z.number().int().positive(), shared: z.boolean().optional() });
 const recurringSchema = z.object({
   kind: z.enum(["income", "expense"]),
   category: z.string().min(1).max(80),
@@ -97,7 +105,7 @@ type ParsedTransactionImport = {
   newCategories: z.infer<typeof importedCategorySchema>[];
   newSubcategories: z.infer<typeof importedSubcategorySchema>[];
 };
-const paymentAccountSchema = z.object({ type: z.enum(["mobile_banking", "esewa", "khalti", "connect_ips"]), provider: z.string().trim().min(1).max(100), label: z.string().trim().max(60), balanceMinor: z.number().int(), balanceAsOf: z.string().date() });
+const paymentAccountSchema = z.object({ type: z.enum(["mobile_banking", "esewa", "khalti", "connect_ips"]), provider: z.string().trim().min(1).max(100), label: z.string().trim().max(60), balanceMinor: z.number().int(), balanceAsOf: z.string().date(), shared: z.boolean().optional() });
 const accountBalanceSchema = z.object({ balanceMinor: z.number().int(), balanceAsOf: z.string().date() });
 const accountReconciliationSchema = z.object({
   paymentAccountId: z.string().min(1),
@@ -110,16 +118,13 @@ const resetReconciliationSchema = z.object({ confirmation: z.literal("RESET") })
 const transferSchema = z.object({ fromAccountId: z.string().min(1), toAccountId: z.string().min(1), amountMinor: z.number().int().positive(), occurredOn: z.string().date(), note: z.string().trim().max(240) }).superRefine((value, context) => {
   if (value.fromAccountId === value.toAccountId) context.addIssue({ code: "custom", path: ["toAccountId"], message: "Choose two different accounts." });
 });
-const profileSchema = z.object({ displayName: z.string().trim().min(1).max(50), currency: z.enum(["NPR", "USD", "AUD"]), hideAmounts: z.boolean(), autoLockMinutes: z.number().int().min(0).max(120), calendarSystem: z.enum(["AD", "BS"]), safeToSpendBufferMinor: z.number().int().min(0).max(1_000_000_000) });
+const profileSchema = z.object({ displayName: z.string().trim().min(1).max(50), currency: z.enum(["NPR", "USD", "AUD"]), hideAmounts: z.boolean(), autoLockMinutes: z.number().int().min(0).max(120), calendarSystem: z.enum(["AD", "BS"]), safeToSpendBufferMinor: z.number().int().min(0).max(1_000_000_000), emailReminders: z.boolean(), browserReminders: z.boolean() });
 const dueSchema = z.object({ kind: z.enum(["payment", "receivable", "lent", "borrowed"]), title: z.string().trim().min(1).max(100), person: z.string().trim().max(80), amountMinor: z.number().int().positive(), category: z.string().min(1).max(80), occurredOn: z.string().date().nullable(), dueOn: z.string().date(), remindOn: z.string().date().nullable(), note: z.string().trim().max(300), annualRatePercent: z.number().min(0).max(200).nullable().optional(), receipt: receiptSchema.optional() });
 const duePaymentSchema = z.object({ amountMinor: z.number().int().positive(), occurredOn: z.string().date(), note: z.string().trim().max(240), addToLedger: z.boolean() });
 const pinSchema = z.string().regex(/^\d{4,6}$/, "PIN must contain 4 to 6 digits.");
 const requestSchema = z.object({ action: z.string(), id: z.string().optional(), payload: z.unknown().optional() });
 
-const asDate = (value: string) => new Date(`${value}T00:00:00.000Z`);
-const dateOnly = (value: Date | null) => value ? value.toISOString().slice(0, 10) : null;
 const TRANSACTION_UNDO_WINDOW_MS = 30_000;
-const DELETED_TRANSACTION_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 function serializeImportJob(job: { id: string; status: string; totalRows: number; processedRows: number; error: string | null; createdAt: Date; completedAt: Date | null }) {
   return { id: job.id, status: job.status, totalRows: job.totalRows, processedRows: job.processedRows, error: job.error, createdAt: job.createdAt.toISOString(), completedAt: job.completedAt?.toISOString() ?? null };
@@ -128,120 +133,38 @@ const receiptData = async (receipt: z.infer<typeof receiptSchema>, id: string) =
   await verifyStoredReceipt(receipt.storagePath, id, receipt.mimeType, receipt.size);
   return { name: receipt.name, mimeType: receipt.mimeType, size: receipt.size, storagePath: receipt.storagePath, data: null };
 };
-const receiptSelect = { id: true, name: true, mimeType: true, size: true } as const;
 
 async function userId() {
   const session = await getAuthenticatedSession(await headers());
   return session?.user.id ?? null;
 }
 
-function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
-  const transactions: LedgerTransaction[] = data.transactions.map((item) => {
-    const { deletedAt, receiptScan, importJobId, ...transaction } = item;
-    void deletedAt;
-    void importJobId;
-    return { ...transaction, receipt: transaction.receipt ?? receiptScan, kind: item.kind as LedgerTransaction["kind"], paymentMode: item.paymentMode as LedgerTransaction["paymentMode"], locationSource: item.locationSource as LedgerTransaction["locationSource"], occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString(), paymentAccount: null };
-  });
-  const transfers: AccountTransfer[] = data.transfers.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString() }));
-  const paymentAccounts: PaymentAccount[] = data.paymentAccounts.map((item) => serializeAccount(item, transactions, transfers));
-  const accountById = new Map(paymentAccounts.map((item) => [item.id, item]));
-  for (const transaction of transactions) if (transaction.paymentAccountId) transaction.paymentAccount = accountById.get(transaction.paymentAccountId) ?? null;
-  return {
-    profile: {
-      id: data.user.id,
-      displayName: data.user.name,
-      currency: data.user.currency,
-      hideAmounts: data.user.hideAmounts,
-      autoLockMinutes: data.user.autoLockMinutes,
-      calendarSystem: data.user.calendarSystem as "AD" | "BS",
-      safeToSpendBufferMinor: data.user.safeToSpendBufferMinor,
-      hasPin: Boolean(data.user.pinHash),
-      learning: {
-        enabled: data.user.learningProfile?.enabled ?? false,
-        suggestions: (data.user.learningProfile?.suggestions ?? []) as unknown as LearningSuggestion[],
-        summary: data.user.learningProfile?.summary ?? [],
-        lastTransactionId: data.user.learningProfile?.lastTransactionId ?? null,
-        lastRunAt: data.user.learningProfile?.lastRunAt?.toISOString() ?? null,
-      },
-    },
-    transactions,
-    budgets: data.budgets,
-    recurringEntries: data.recurring.map((item) => ({
-      ...item,
-      recurrenceUnit: item.recurrenceUnit as RecurrenceUnit,
-      anchorDate: dateOnly(item.anchorDate),
-      nextDueOn: dateOnly(item.nextDueOn),
-    })),
-    goals: data.goals.map((item) => ({
-      ...item,
-      targetDate: dateOnly(item.targetDate),
-      contributions: item.contributions.map((contribution) => ({ ...contribution, createdAt: contribution.createdAt.toISOString() })),
-    })),
-    customCategories: data.categories.map((item) => ({ ...item, label: item.name, custom: true })),
-    customSubcategories: data.subcategories.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })),
-    paymentAccounts,
-    reconciliations: data.reconciliations.map((item): AccountReconciliation => ({
-      ...item,
-      checkedOn: dateOnly(item.checkedOn)!,
-      startingBalanceAsOf: dateOnly(item.startingBalanceAsOf)!,
-      approvedAt: item.approvedAt.toISOString(),
-      createdAt: item.createdAt.toISOString(),
-    })),
-    savedPlaces: data.savedPlaces.map((item) => ({ ...item, createdAt: item.createdAt.toISOString(), lastUsedAt: item.lastUsedAt.toISOString() })),
-    transfers,
-    dueItems: data.dueItems.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn), dueOn: dateOnly(item.dueOn), remindOn: dateOnly(item.remindOn), snoozedUntil: dateOnly(item.snoozedUntil), completedOn: dateOnly(item.completedOn), createdAt: item.createdAt.toISOString(), payments: item.payments.map((payment) => ({ ...payment, occurredOn: dateOnly(payment.occurredOn), createdAt: payment.createdAt.toISOString() })) })),
-  };
-}
-
-function serializeAccount(item: Awaited<ReturnType<typeof loadLedger>>["paymentAccounts"][number], transactions: readonly LedgerTransaction[], transfers: readonly AccountTransfer[]): PaymentAccount {
-  const account: PaymentAccount = { id: item.id, importId: item.importId, userId: item.userId, type: item.type as PaymentAccount["type"], provider: item.provider, label: item.label, balanceMinor: item.balanceMinor, balanceAsOf: dateOnly(item.balanceAsOf)!, balanceRecordedAt: item.balanceRecordedAt.toISOString(), currentBalanceMinor: 0, createdAt: item.createdAt.toISOString() };
-  return withCurrentAccountBalance(account, transactions, transfers);
-}
-
-async function loadLedger(id: string) {
+async function assertHouseholdAccount(actorId: string, paymentAccountId: string | null, shared: boolean) {
+  if (!paymentAccountId) return;
   const db = getPrisma();
-  const [user, transactions, budgets, recurring, goals, categories, subcategories, paymentAccounts, reconciliations, savedPlaces, transfers, dueItems] = await Promise.all([
-    db.user.findUniqueOrThrow({ where: { id }, select: { id: true, name: true, currency: true, hideAmounts: true, autoLockMinutes: true, calendarSystem: true, safeToSpendBufferMinor: true, pinHash: true, learningProfile: true } }),
-    db.transaction.findMany({ where: { userId: id, deletedAt: null }, orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }], include: { receipt: { select: receiptSelect }, receiptScan: { select: receiptSelect }, paymentAccount: true } }),
-    db.budget.findMany({ where: { userId: id }, orderBy: { monthKey: "desc" } }),
-    db.recurringEntry.findMany({ where: { userId: id }, orderBy: { nextDueOn: "asc" } }),
-    db.savingsGoal.findMany({ where: { userId: id }, orderBy: { createdAt: "asc" }, include: { contributions: { orderBy: { createdAt: "desc" } } } }),
-    db.customCategory.findMany({ where: { userId: id }, orderBy: { name: "asc" } }),
-    db.customSubcategory.findMany({ where: { userId: id }, orderBy: [{ categoryId: "asc" }, { name: "asc" }] }),
-    db.paymentAccount.findMany({ where: { userId: id }, orderBy: { createdAt: "asc" } }),
-    db.accountReconciliation.findMany({ where: { userId: id }, orderBy: [{ checkedOn: "desc" }, { approvedAt: "desc" }] }),
-    db.savedPlace.findMany({ where: { userId: id }, orderBy: { lastUsedAt: "desc" } }),
-    db.accountTransfer.findMany({ where: { userId: id }, orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }] }),
-    db.dueItem.findMany({ where: { userId: id }, orderBy: [{ status: "asc" }, { dueOn: "asc" }], include: { payments: { orderBy: { occurredOn: "desc" } }, receipt: { select: receiptSelect } } }),
-  ]);
-  return { user, transactions, budgets, recurring, goals, categories, subcategories, paymentAccounts, reconciliations, savedPlaces, transfers, dueItems };
-}
-
-async function purgeExpiredDeletedTransactions(id: string) {
-  const db = getPrisma();
-  const expired = await db.transaction.findMany({
-    where: { userId: id, deletedAt: { lt: new Date(Date.now() - DELETED_TRANSACTION_RETENTION_MS) } },
-    select: { id: true, receiptScanId: true, receipt: { select: { storagePath: true } } },
+  const account = await db.paymentAccount.findFirst({ where: { id: paymentAccountId }, select: { userId: true, shared: true } });
+  if (!account) throw new Error("Choose an online payment account.");
+  if (account.userId === actorId) return;
+  const actor = await db.householdMember.findFirst({
+    where: { userId: actorId, status: "active" },
+    select: { household: { select: { members: { where: { status: "active" }, select: { userId: true } } } } },
   });
-  if (!expired.length) return;
-
-  await db.transaction.deleteMany({ where: { userId: id, id: { in: expired.map((item) => item.id) } } });
-  const paths = expired.flatMap((item) => item.receipt?.storagePath ? [item.receipt.storagePath] : []);
-  for (const receiptScanId of new Set(expired.flatMap((item) => item.receiptScanId ? [item.receiptScanId] : []))) {
-    if (await db.transaction.count({ where: { receiptScanId } })) continue;
-    const scan = await db.receiptScan.findFirst({ where: { id: receiptScanId, userId: id }, select: { storagePath: true } });
-    await db.receiptScan.deleteMany({ where: { id: receiptScanId, userId: id } });
-    if (scan?.storagePath) paths.push(scan.storagePath);
-  }
-  await removeStoredReceipts(paths);
+  const peerIds = actor?.household.members.flatMap((member) => member.userId && member.userId !== actorId ? [member.userId] : []) ?? [];
+  if (!canPostOnAccount(actorId, account, shared, peerIds)) throw new Error("A shared entry can only use an account both of you have marked as shared.");
 }
+
 
 export async function GET() {
   const id = await userId();
   if (!id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  await purgeExpiredDeletedTransactions(id).catch((error) => console.warn("Could not purge expired deleted transactions.", error));
-  return NextResponse.json(serialize(await loadLedger(id)));
+  const [ledger] = await Promise.all([
+    loadLedger(id),
+    purgeExpiredDeletedTransactions(id).catch((error) => console.warn("Could not purge expired deleted transactions.", error)),
+    purgeExpiredActivity(id).catch((error) => console.warn("Could not purge expired activity.", error)),
+  ]);
+  return NextResponse.json(serialize(ledger));
 }
+
 
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
@@ -252,12 +175,45 @@ export async function POST(request: Request) {
     const input = requestSchema.parse(await request.json());
     const db = getPrisma();
     const recordId = input.id;
+    // Each successful action reports what it did; the entries are written after the change and returned for toasts.
+    // Descriptions run after the change has committed; one that fails is reported and skipped, never surfaced as a failed change.
+    // A description may return null when the save changed nothing worth recording.
+    const pendingActivity: (() => Promise<ActivityDraft | null>)[] = [];
+    const log = (describe: () => Promise<ActivityDraft | null>) => { pendingActivity.push(describe); };
+    const flushActivity = async () => {
+      const drafts = await Promise.all(pendingActivity.splice(0).map(async (describe) => {
+        try { return await describe(); }
+        catch (error) { console.error("Could not describe a ledger change for Logs.", error); return null; }
+      }));
+      return recordActivity(id, drafts.filter((draft): draft is ActivityDraft => draft !== null));
+    };
+    let customCategoryNames: Map<string, string> | null = null;
+    // Label lookups fall back instead of throwing, so describing a change can never fail a change that already happened.
+    const categoryLabel = async (categoryId: string) => {
+      const builtIn = CATEGORIES.find((category) => category.id === categoryId);
+      if (builtIn) return builtIn.label;
+      try {
+        customCategoryNames ??= new Map((await db.customCategory.findMany({ where: { userId: id }, select: { id: true, name: true } })).map((category) => [category.id, category.name]));
+      } catch { customCategoryNames = new Map(); }
+      return customCategoryNames.get(categoryId) ?? "Uncategorised";
+    };
+    const accountName = async (accountId: string | null) => {
+      if (!accountId) return null;
+      try {
+        const account = await db.paymentAccount.findFirst({ where: { id: accountId }, select: { type: true, provider: true, label: true } });
+        return account ? accountLabelOf(account) : "Removed account";
+      } catch { return "Account"; }
+    };
+    const accountLabelOf = (account: { type: string; provider: string; label: string }) => paymentAccountLabel(account as unknown as PaymentAccount);
+    const paymentText = async (mode: string, accountId: string | null) => mode === "online" ? await accountName(accountId) ?? "Online" : mode === "cheque" ? "Cheque" : "Cash";
+    const entryLabel = async (entry: { note: string | null; category: string }) => entry.note?.trim() || await categoryLabel(entry.category);
+    const kindNoun = (kind: string) => kind === "income" ? "income" : "an expense";
     const assertAccountDatesAreOpen = async (entries: readonly { paymentAccountId: string | null; occurredOn: string; createdAt?: string }[]) => {
       const now = new Date();
       const unique = [...new Map(entries.filter((entry) => entry.paymentAccountId).map((entry) => [`${entry.paymentAccountId}:${entry.occurredOn}:${entry.createdAt ?? "new"}`, entry])).values()];
       const accountIds = [...new Set(unique.map((entry) => entry.paymentAccountId!))];
       if (!accountIds.length) return;
-      const reconciliations = await db.accountReconciliation.findMany({ where: { userId: id, paymentAccountId: { in: accountIds } }, orderBy: { checkedOn: "desc" }, select: { paymentAccountId: true, checkedOn: true, approvedAt: true } });
+      const reconciliations = await db.accountReconciliation.findMany({ where: { paymentAccountId: { in: accountIds } }, orderBy: { checkedOn: "desc" }, select: { paymentAccountId: true, checkedOn: true, approvedAt: true } });
       const firstLocked = unique.map((entry) => reconciliations.find((reconciliation) => reconciliation.paymentAccountId === entry.paymentAccountId && (reconciliation.checkedOn > asDate(entry.occurredOn) || (reconciliation.checkedOn.getTime() === asDate(entry.occurredOn).getTime() && reconciliation.approvedAt >= (entry.createdAt ? new Date(entry.createdAt) : now))))).find(Boolean);
       if (firstLocked) throw new Error(`This activity belongs to an approved reconciliation through ${dateOnly(firstLocked!.checkedOn)}. Add a current transaction or reconcile a later period instead of changing audited history.`);
     };
@@ -382,6 +338,7 @@ export async function POST(request: Request) {
         const created = await writeImportBatch({ ...payload, transactions: batch }, job.id);
         const processedRows = job.processedRows + batch.length;
         const complete = processedRows >= job.totalRows;
+        if (complete) log(async () => ({ action: "transactions.imported", area: "data", entityId: job.id, title: `Imported ${job.totalRows.toLocaleString("en")} transaction${job.totalRows === 1 ? "" : "s"}`, meta: { count: job.totalRows, newCategories: job.createdCategoryIds.length + created.createdCategoryIds.length } }));
         const updated = await db.importJob.update({ where: { id: job.id }, data: {
           status: complete ? "completed" : "queued",
           processedRows,
@@ -392,7 +349,10 @@ export async function POST(request: Request) {
         } });
         return serializeImportJob(updated);
       } catch (error) {
-        return rollbackImportJob(job.id, error instanceof Error ? error.message : "The import could not be completed.");
+        const message = error instanceof Error ? error.message : "The import could not be completed.";
+        const failed = await rollbackImportJob(job.id, message);
+        log(async () => ({ action: "transactions.import_failed", area: "data", entityId: job.id, title: "Import failed and was undone", subject: message, meta: { count: job.totalRows } }));
+        return failed;
       }
     };
     switch (input.action) {
@@ -400,11 +360,9 @@ export async function POST(request: Request) {
         const value = savedTransactionSchema.parse(input.payload);
         const { receipt, removeReceipt, location, ...entry } = value;
         await assertAccountDatesAreOpen([{ paymentAccountId: entry.paymentAccountId, occurredOn: entry.occurredOn }]);
-        if (recordId) {
-          const existing = await db.transaction.findFirstOrThrow({ where: { id: recordId, userId: id, deletedAt: null }, select: { paymentAccountId: true, occurredOn: true, createdAt: true } });
-          await assertAccountDatesAreOpen([{ paymentAccountId: existing.paymentAccountId, occurredOn: dateOnly(existing.occurredOn)!, createdAt: existing.createdAt.toISOString() }]);
-        }
-        if (entry.paymentAccountId) await db.paymentAccount.findFirstOrThrow({ where: { id: entry.paymentAccountId, userId: id } });
+        const previous = recordId ? await db.transaction.findFirstOrThrow({ where: { id: recordId, userId: id, deletedAt: null }, select: { paymentAccountId: true, occurredOn: true, createdAt: true, kind: true, category: true, amountMinor: true, note: true, subcategory: true, paymentMode: true, shared: true, locationLabel: true, receiptScanId: true, receipt: { select: { id: true } } } }) : null;
+        if (previous) await assertAccountDatesAreOpen([{ paymentAccountId: previous.paymentAccountId, occurredOn: dateOnly(previous.occurredOn)!, createdAt: previous.createdAt.toISOString() }]);
+        await assertHouseholdAccount(id, entry.paymentAccountId, entry.shared ?? false);
         const savedPlaceId = location?.savedPlaceId ?? null;
         if (savedPlaceId) {
           const savedPlace = await db.savedPlace.findFirstOrThrow({ where: { id: savedPlaceId, userId: id } });
@@ -422,6 +380,7 @@ export async function POST(request: Request) {
           savedPlaceId,
         };
         const storedReceipt = receipt ? await receiptData(receipt, id) : null;
+        let savedTransactionId = recordId;
         const pathsToRemove = await db.$transaction(async (transaction) => {
           let transactionId = recordId;
           let detachedScanPath: string | null = null;
@@ -438,12 +397,37 @@ export async function POST(request: Request) {
             }
           } else transactionId = (await transaction.transaction.create({ data: { ...data, userId: id } })).id;
           if (!transactionId) throw new Error("Could not identify the saved transaction.");
+          savedTransactionId = transactionId;
           const oldReceipt = removeReceipt || receipt ? await transaction.receiptAttachment.findFirst({ where: { transactionId, userId: id }, select: { storagePath: true } }) : null;
           if (removeReceipt && !receipt) await transaction.receiptAttachment.deleteMany({ where: { transactionId, userId: id } });
           if (storedReceipt) await transaction.receiptAttachment.upsert({ where: { transactionId }, update: storedReceipt, create: { ...storedReceipt, userId: id, transactionId } });
           return [oldReceipt?.storagePath && oldReceipt.storagePath !== receipt?.storagePath ? oldReceipt.storagePath : null, detachedScanPath];
         });
         await removeStoredReceipts(pathsToRemove);
+        log(async (): Promise<ActivityDraft | null> => {
+          const subject = await entryLabel(entry);
+          if (!previous) return { action: "transaction.created", area: "transactions", entityId: savedTransactionId, title: `Added ${kindNoun(entry.kind)}`, subject, amountMinor: entry.amountMinor, meta: { kind: entry.kind, receipt: Boolean(receipt) } };
+          const describe = async (item: { kind: string; category: string; amountMinor: number; occurredOn: Date; note: string; subcategory: string | null; paymentMode: string; paymentAccountId: string | null; shared: boolean; locationLabel: string | null }) => ({
+            kind: item.kind === "income" ? "Income" : "Expense",
+            category: await categoryLabel(item.category),
+            amountMinor: item.amountMinor,
+            occurredOn: item.occurredOn,
+            note: item.note.trim(),
+            subcategory: item.subcategory,
+            payment: await paymentText(item.paymentMode, item.paymentAccountId),
+            place: item.locationLabel,
+            shared: item.shared,
+          });
+          const hadReceipt = Boolean(previous.receipt || previous.receiptScanId);
+          const changes: ActivityChange[] = diffFields(await describe(previous), await describe({ ...data, shared: data.shared ?? false }), [
+            { key: "kind", label: "Type" }, { key: "category", label: "Category" }, { key: "amountMinor", label: "Amount", kind: "money" },
+            { key: "occurredOn", label: "Date", kind: "date" }, { key: "note", label: "Note" }, { key: "subcategory", label: "Subcategory" },
+            { key: "payment", label: "Paid with" }, { key: "place", label: "Place" }, { key: "shared", label: "Shared", kind: "flag" },
+          ]);
+          if (receipt) changes.push({ field: "Receipt", from: hadReceipt ? "Attached" : null, to: hadReceipt ? "Replaced" : "Attached" });
+          else if (removeReceipt && hadReceipt) changes.push({ field: "Receipt", from: "Attached", to: null });
+          return changes.length ? { action: "transaction.edited", area: "transactions", entityId: recordId, title: "Edited a transaction", subject, amountMinor: entry.amountMinor, changes, meta: { kind: entry.kind } } : null;
+        });
         break;
       }
       case "listImportJobs": {
@@ -459,12 +443,15 @@ export async function POST(request: Request) {
       }
       case "processImportJob": {
         const { jobId } = z.object({ jobId: z.string().min(1) }).parse(input.payload);
-        return NextResponse.json({ job: await processImportJob(jobId) });
+        const job = await processImportJob(jobId);
+        return NextResponse.json({ job, activity: await flushActivity() });
       }
       case "importTransactions": {
         const value = transactionImportSchema.parse(input.payload) as ParsedTransactionImport;
         if (!value.transactions.length) throw new Error("There are no valid rows to import.");
-        await writeImportBatch(value);
+        const created = await writeImportBatch(value);
+        const count = value.transactions.length;
+        log(async () => ({ action: "transactions.imported", area: "data", title: `Imported ${count.toLocaleString("en")} transaction${count === 1 ? "" : "s"}`, meta: { count, newCategories: created.createdCategoryIds.length } }));
         break;
       }
       case "saveReceiptSplit": {
@@ -481,6 +468,7 @@ export async function POST(request: Request) {
           if (ownedAccounts !== accountIds.length) throw new Error("One or more online payment accounts are invalid.");
         }
         await receiptData(value.receipt, id);
+        let splitCreated = true;
         try {
           await db.$transaction(async (transaction) => {
             const scan = await transaction.receiptScan.create({ data: {
@@ -508,42 +496,77 @@ export async function POST(request: Request) {
           const alreadySaved = typeof error === "object" && error !== null && "code" in error && error.code === "P2002"
             && await db.receiptScan.count({ where: { userId: id, storagePath: value.receipt.storagePath } });
           if (!alreadySaved) throw error;
+          splitCreated = false;
         }
+        const count = value.transactions.length;
+        if (splitCreated) log(async () => ({ action: "transactions.receipt_split", area: "transactions", title: count === 1 ? "Added an expense from a receipt" : `Added ${count} expenses from a receipt`, subject: value.receipt.name, amountMinor: value.totalMinor, meta: { count } }));
         break;
       }
       case "deleteTransaction": {
         if (!recordId) throw new Error("Missing transaction id.");
-        const existing = await db.transaction.findFirstOrThrow({ where: { id: recordId, userId: id, deletedAt: null }, select: { paymentAccountId: true, occurredOn: true, createdAt: true } });
+        const existing = await db.transaction.findFirstOrThrow({ where: { id: recordId, userId: id, deletedAt: null }, select: { paymentAccountId: true, occurredOn: true, createdAt: true, kind: true, category: true, note: true, amountMinor: true } });
         await assertAccountDatesAreOpen([{ paymentAccountId: existing.paymentAccountId, occurredOn: dateOnly(existing.occurredOn)!, createdAt: existing.createdAt.toISOString() }]);
         await db.transaction.update({ where: { id: recordId }, data: { deletedAt: new Date() } });
+        log(async () => ({ action: "transaction.deleted", area: "transactions", entityId: recordId, title: `Deleted ${kindNoun(existing.kind)}`, subject: await entryLabel(existing), amountMinor: existing.amountMinor, meta: { kind: existing.kind } }));
         break;
       }
       case "restoreTransaction": {
         if (!recordId) throw new Error("Missing transaction id.");
-        const existing = await db.transaction.findFirstOrThrow({ where: { id: recordId, userId: id, deletedAt: { not: null } }, select: { paymentAccountId: true, occurredOn: true, createdAt: true, deletedAt: true } });
+        const existing = await db.transaction.findFirstOrThrow({ where: { id: recordId, userId: id, deletedAt: { not: null } }, select: { paymentAccountId: true, occurredOn: true, createdAt: true, deletedAt: true, kind: true, category: true, note: true, amountMinor: true } });
         if (!existing.deletedAt || Date.now() - existing.deletedAt.getTime() > TRANSACTION_UNDO_WINDOW_MS) throw new Error("The Undo window for this transaction has expired.");
         await assertAccountDatesAreOpen([{ paymentAccountId: existing.paymentAccountId, occurredOn: dateOnly(existing.occurredOn)!, createdAt: existing.createdAt.toISOString() }]);
         await db.transaction.update({ where: { id: recordId }, data: { deletedAt: null } });
+        log(async () => ({ action: "transaction.restored", area: "transactions", entityId: recordId, title: `Restored ${kindNoun(existing.kind)}`, subject: await entryLabel(existing), amountMinor: existing.amountMinor, meta: { kind: existing.kind } }));
         break;
       }
       case "saveSavedPlace": {
         const value = savedPlaceSchema.parse(input.payload);
-        if (recordId) await db.savedPlace.updateMany({ where: { id: recordId, userId: id }, data: value });
-        else await db.savedPlace.create({ data: { ...value, userId: id } });
+        if (recordId) {
+          const before = await db.savedPlace.findFirstOrThrow({ where: { id: recordId, userId: id }, select: { name: true, icon: true, address: true, latitude: true, longitude: true } });
+          await db.savedPlace.updateMany({ where: { id: recordId, userId: id }, data: value });
+          const changes = diffFields({ ...before, pin: `${before.latitude},${before.longitude}` }, { ...value, pin: `${value.latitude},${value.longitude}` }, [{ key: "name", label: "Name" }, { key: "icon", label: "Icon" }, { key: "address", label: "Address" }]);
+          if (before.latitude !== value.latitude || before.longitude !== value.longitude) changes.push({ field: "Map pin", from: "Previous spot", to: "Moved" });
+          if (changes.length) log(async () => ({ action: "place.edited", area: "categories", entityId: recordId, title: "Edited a saved place", subject: value.name, changes }));
+        } else {
+          const place = await db.savedPlace.create({ data: { ...value, userId: id } });
+          log(async () => ({ action: "place.created", area: "categories", entityId: place.id, title: "Saved a place", subject: value.name }));
+        }
         break;
       }
       case "deleteSavedPlace": {
         if (!recordId) throw new Error("Missing saved place id.");
-        await db.savedPlace.deleteMany({ where: { id: recordId, userId: id } });
+        const place = await db.savedPlace.findFirst({ where: { id: recordId, userId: id }, select: { name: true } });
+        const removed = await db.savedPlace.deleteMany({ where: { id: recordId, userId: id } });
+        if (removed.count) log(async () => ({ action: "place.deleted", area: "categories", entityId: recordId, title: "Removed a saved place", subject: place?.name }));
         break;
       }
       case "saveBudget": {
         const value = budgetSchema.parse(input.payload);
-        if (recordId) await db.budget.updateMany({ where: { id: recordId, userId: id }, data: value });
-        else await db.budget.upsert({ where: { userId_monthKey_category: { userId: id, monthKey: value.monthKey, category: value.category } }, update: value, create: { ...value, userId: id } });
+        const data = { monthKey: value.monthKey, category: value.category, amountMinor: value.amountMinor, ...(value.shared === undefined ? {} : { shared: value.shared }) };
+        const before = recordId
+          ? await db.budget.findFirst({ where: { id: recordId, userId: id }, select: { id: true, monthKey: true, category: true, amountMinor: true, shared: true } })
+          : await db.budget.findUnique({ where: { userId_monthKey_category: { userId: id, monthKey: value.monthKey, category: value.category } }, select: { id: true, monthKey: true, category: true, amountMinor: true, shared: true } });
+        let budgetId = before?.id ?? null;
+        if (recordId) await db.budget.updateMany({ where: { id: recordId, userId: id }, data });
+        else budgetId = (await db.budget.upsert({ where: { userId_monthKey_category: { userId: id, monthKey: value.monthKey, category: value.category } }, update: data, create: { ...data, userId: id } })).id;
+        log(async (): Promise<ActivityDraft | null> => {
+          const subject = `${await categoryLabel(value.category)} · ${periodText(value.monthKey)}`;
+          if (!before) return { action: "budget.created", area: "planning", entityId: budgetId, title: "Set a budget", subject, amountMinor: value.amountMinor };
+          const after = { ...before, ...data, shared: data.shared ?? before.shared };
+          const changes = diffFields({ ...before, category: await categoryLabel(before.category), monthKey: periodText(before.monthKey) }, { ...after, category: await categoryLabel(after.category), monthKey: periodText(after.monthKey) }, [
+            { key: "category", label: "Category" }, { key: "monthKey", label: "Period" }, { key: "amountMinor", label: "Limit", kind: "money" }, { key: "shared", label: "Shared", kind: "flag" },
+          ]);
+          return changes.length ? { action: "budget.edited", area: "planning", entityId: budgetId, title: "Changed a budget", subject, amountMinor: value.amountMinor, changes } : null;
+        });
         break;
       }
-      case "deleteBudget": await db.budget.deleteMany({ where: { id: recordId, userId: id } }); break;
+      case "deleteBudget": {
+        if (!recordId) throw new Error("Missing budget id.");
+        const budget = await db.budget.findFirst({ where: { id: recordId, userId: id }, select: { category: true, monthKey: true, amountMinor: true } });
+        const removed = await db.budget.deleteMany({ where: { id: recordId, userId: id } });
+        if (removed.count && budget) log(async () => ({ action: "budget.deleted", area: "planning", entityId: recordId, title: "Removed a budget", subject: `${await categoryLabel(budget.category)} · ${periodText(budget.monthKey)}`, amountMinor: budget.amountMinor }));
+        break;
+      }
       case "saveRecurring": {
         const value = recurringSchema.parse(input.payload);
         if (value.paymentAccountId) await db.paymentAccount.findFirstOrThrow({ where: { id: value.paymentAccountId, userId: id } });
@@ -569,14 +592,40 @@ export async function POST(request: Request) {
           dayOfMonth: value.recurrenceUnit === "day" || value.recurrenceUnit === "week" ? null : Number(value.startOn.slice(8, 10)),
           nextDueOn: asDate(nextDueOn),
         };
-        if (recordId) await db.recurringEntry.updateMany({ where: { id: recordId, userId: id }, data });
-        else await db.recurringEntry.create({ data: { ...data, userId: id } });
+        if (recordId && existing) {
+          await db.recurringEntry.updateMany({ where: { id: recordId, userId: id }, data });
+          log(async (): Promise<ActivityDraft | null> => {
+            const describe = async (item: { kind: string; category: string; amountMinor: number; note: string; paymentAccountId: string | null; recurrenceUnit: string; recurrenceInterval: number; anchorDate: Date }) => ({
+              kind: item.kind === "income" ? "Income" : "Expense",
+              category: await categoryLabel(item.category),
+              amountMinor: item.amountMinor,
+              note: item.note.trim(),
+              account: await accountName(item.paymentAccountId) ?? "Cash",
+              schedule: recurrenceLabel({ recurrenceUnit: item.recurrenceUnit as RecurrenceUnit, recurrenceInterval: item.recurrenceInterval }),
+              startsOn: item.anchorDate,
+          });
+          const changes = diffFields(await describe(existing), await describe(data), [
+            { key: "kind", label: "Type" }, { key: "category", label: "Category" }, { key: "amountMinor", label: "Amount", kind: "money" }, { key: "note", label: "Note" },
+            { key: "account", label: "Paid with" }, { key: "schedule", label: "Repeats" }, { key: "startsOn", label: "Starts", kind: "date" },
+          ]);
+          return changes.length ? { action: "recurring.edited", area: "planning", entityId: recordId, title: "Edited a recurring entry", subject: await entryLabel(value), amountMinor: value.amountMinor, changes } : null;
+          });
+        } else {
+          const created = await db.recurringEntry.create({ data: { ...data, userId: id } });
+          log(async () => ({ action: "recurring.created", area: "planning", entityId: created.id, title: "Added a recurring entry", subject: await entryLabel(value), amountMinor: value.amountMinor, meta: { kind: value.kind, repeats: recurrenceLabel(value) } }));
+        }
         break;
       }
-      case "deleteRecurring": await db.recurringEntry.deleteMany({ where: { id: recordId, userId: id } }); break;
+      case "deleteRecurring": {
+        if (!recordId) throw new Error("Missing recurring entry id.");
+        const recurring = await db.recurringEntry.findFirst({ where: { id: recordId, userId: id }, select: { note: true, category: true, amountMinor: true } });
+        const removed = await db.recurringEntry.deleteMany({ where: { id: recordId, userId: id } });
+        if (removed.count && recurring) log(async () => ({ action: "recurring.deleted", area: "planning", entityId: recordId, title: "Removed a recurring entry", subject: await entryLabel(recurring), amountMinor: recurring.amountMinor }));
+        break;
+      }
       case "confirmRecurring": {
         if (!recordId) throw new Error("Missing recurring entry id.");
-        await db.$transaction(async (transaction) => {
+        const confirmed = await db.$transaction(async (transaction) => {
           const recurring = await transaction.recurringEntry.findFirstOrThrow({ where: { id: recordId, userId: id } });
           const scheduledOn = dateOnly(recurring.nextDueOn)!;
           if (!recurring.active) throw new Error("This recurring entry is paused.");
@@ -593,8 +642,10 @@ export async function POST(request: Request) {
             data: { nextDueOn: asDate(nextDueOn) },
           });
           if (!updated.count) throw new Error("This recurring entry was already confirmed.");
-          await transaction.transaction.create({ data: { userId: id, kind: recurring.kind, category: recurring.category, amountMinor: recurring.amountMinor, occurredOn: recurring.nextDueOn, note: recurring.note, paymentMode: recurring.paymentAccountId ? "online" : "cash", paymentAccountId: recurring.paymentAccountId } });
+          const created = await transaction.transaction.create({ data: { userId: id, kind: recurring.kind, category: recurring.category, amountMinor: recurring.amountMinor, occurredOn: recurring.nextDueOn, note: recurring.note, paymentMode: recurring.paymentAccountId ? "online" : "cash", paymentAccountId: recurring.paymentAccountId } });
+          return { recurring, transactionId: created?.id ?? null };
         });
+        log(async () => ({ action: "recurring.recorded", area: "transactions", entityId: confirmed.transactionId, title: `Recorded scheduled ${confirmed.recurring.kind === "income" ? "income" : "expense"}`, subject: await entryLabel(confirmed.recurring), amountMinor: confirmed.recurring.amountMinor, meta: { kind: confirmed.recurring.kind } }));
         break;
       }
       case "saveGoal": {
@@ -602,22 +653,26 @@ export async function POST(request: Request) {
         const data = { ...value, savedMinor: Math.min(value.savedMinor, value.targetMinor), targetDate: value.targetDate ? asDate(value.targetDate) : null };
         if (recordId) {
           const details = { name: data.name, targetMinor: data.targetMinor, targetDate: data.targetDate };
+          const before = await db.savingsGoal.findFirstOrThrow({ where: { id: recordId, userId: id }, select: { name: true, targetMinor: true, targetDate: true } });
           await db.savingsGoal.updateMany({ where: { id: recordId, userId: id }, data: details });
+          const changes = diffFields(before, details, [{ key: "name", label: "Name" }, { key: "targetMinor", label: "Target", kind: "money" }, { key: "targetDate", label: "Target date", kind: "date" }]);
+          if (changes.length) log(async () => ({ action: "goal.edited", area: "planning", entityId: recordId, title: "Edited a savings goal", subject: data.name, amountMinor: data.targetMinor, changes }));
         } else {
-          await db.savingsGoal.create({
+          const goal = await db.savingsGoal.create({
             data: {
               ...data,
               userId: id,
               contributions: data.savedMinor > 0 ? { create: { userId: id, amountMinor: data.savedMinor, isOpeningBalance: true } } : undefined,
             },
           });
+          log(async () => ({ action: "goal.created", area: "planning", entityId: goal.id, title: "Created a savings goal", subject: data.name, amountMinor: data.targetMinor, meta: { savedMinor: data.savedMinor } }));
         }
         break;
       }
       case "contributeToGoal": {
         if (!recordId) throw new Error("Missing goal id.");
         const amountMinor = z.object({ amountMinor: z.number().int().positive() }).parse(input.payload).amountMinor;
-        await db.$transaction(async (transaction) => {
+        const contribution = await db.$transaction(async (transaction) => {
           const goal = await transaction.savingsGoal.findFirstOrThrow({ where: { id: recordId, userId: id } });
           const addedMinor = Math.min(amountMinor, goal.targetMinor - goal.savedMinor);
           if (addedMinor <= 0) throw new Error("This goal is already complete.");
@@ -627,16 +682,30 @@ export async function POST(request: Request) {
           });
           if (!updated.count) throw new Error("The goal changed while this contribution was being added. Please try again.");
           await transaction.savingsGoalContribution.create({ data: { userId: id, goalId: goal.id, amountMinor: addedMinor } });
+          return { name: goal.name, addedMinor, completed: goal.savedMinor + addedMinor >= goal.targetMinor };
         });
+        log(async () => ({ action: "goal.contributed", area: "planning", entityId: recordId, title: contribution.completed ? "Reached a savings goal" : "Added to a savings goal", subject: contribution.name, amountMinor: contribution.addedMinor, meta: { completed: contribution.completed } }));
         break;
       }
-      case "deleteGoal": await db.savingsGoal.deleteMany({ where: { id: recordId, userId: id } }); break;
-      case "saveCustomCategory": await db.customCategory.create({ data: { ...categorySchema.parse(input.payload), userId: id } }); break;
+      case "deleteGoal": {
+        if (!recordId) throw new Error("Missing goal id.");
+        const goal = await db.savingsGoal.findFirst({ where: { id: recordId, userId: id }, select: { name: true, savedMinor: true } });
+        const removed = await db.savingsGoal.deleteMany({ where: { id: recordId, userId: id } });
+        if (removed.count && goal) log(async () => ({ action: "goal.deleted", area: "planning", entityId: recordId, title: "Deleted a savings goal", subject: goal.name, amountMinor: goal.savedMinor }));
+        break;
+      }
+      case "saveCustomCategory": {
+        const category = await db.customCategory.create({ data: { ...categorySchema.parse(input.payload), userId: id } });
+        log(async () => ({ action: "category.created", area: "categories", entityId: category.id, title: "Created a category", subject: category.name }));
+        break;
+      }
       case "updateCustomCategoryIcon": {
         if (!recordId) throw new Error("Missing category id.");
         const icon = z.object({ icon: categoryIconSchema }).parse(input.payload).icon;
+        const before = await db.customCategory.findFirst({ where: { id: recordId, userId: id }, select: { name: true, icon: true } });
         const updated = await db.customCategory.updateMany({ where: { id: recordId, userId: id }, data: { icon } });
         if (!updated.count) throw new Error("Category not found.");
+        if (before && before.icon !== icon) log(async () => ({ action: "category.icon_changed", area: "categories", entityId: recordId, title: "Changed a category icon", subject: before.name, changes: [{ field: "Icon", from: before.icon, to: icon }] }));
         break;
       }
       case "deleteCustomCategory": {
@@ -651,6 +720,7 @@ export async function POST(request: Request) {
           db.customSubcategory.deleteMany({ where: { userId: id, categoryId: category.id } }),
           db.customCategory.delete({ where: { id: category.id } }),
         ]);
+        log(async () => ({ action: "category.deleted", area: "categories", entityId: category.id, title: "Deleted a category", subject: category.name }));
         break;
       }
       case "saveCustomSubcategory": {
@@ -660,12 +730,15 @@ export async function POST(request: Request) {
         if (SUBCATEGORIES[value.categoryId]?.options.some((name) => name.toLowerCase() === value.name.toLowerCase())) throw new Error("That subcategory already exists.");
         const duplicate = await db.customSubcategory.findFirst({ where: { userId: id, categoryId: value.categoryId, name: { equals: value.name, mode: "insensitive" } }, select: { id: true } });
         if (duplicate) throw new Error("That subcategory already exists.");
-        await db.customSubcategory.create({ data: { ...value, userId: id } });
+        const subcategory = await db.customSubcategory.create({ data: { ...value, userId: id } });
+        log(async () => ({ action: "subcategory.created", area: "categories", entityId: subcategory.id, title: "Created a subcategory", subject: `${await categoryLabel(value.categoryId)} › ${value.name}` }));
         break;
       }
       case "deleteCustomSubcategory": {
         if (!recordId) throw new Error("Missing subcategory id.");
-        await db.customSubcategory.deleteMany({ where: { id: recordId, userId: id } });
+        const subcategory = await db.customSubcategory.findFirst({ where: { id: recordId, userId: id }, select: { name: true, categoryId: true } });
+        const removed = await db.customSubcategory.deleteMany({ where: { id: recordId, userId: id } });
+        if (removed.count && subcategory) log(async () => ({ action: "subcategory.deleted", area: "categories", entityId: recordId, title: "Deleted a subcategory", subject: `${await categoryLabel(subcategory.categoryId)} › ${subcategory.name}` }));
         break;
       }
       case "savePaymentAccount": {
@@ -674,7 +747,8 @@ export async function POST(request: Request) {
         const value = paymentAccountSchema.parse(input.payload);
         if (value.type !== "mobile_banking" && value.provider !== value.type) throw new Error("The payment provider does not match the account type.");
         if (value.type === "mobile_banking" && !NEPAL_MOBILE_BANKS.includes(value.provider as typeof NEPAL_MOBILE_BANKS[number])) throw new Error("Choose a bank from the supported Nepal bank list.");
-        await db.paymentAccount.create({ data: { ...value, balanceAsOf: asDate(value.balanceAsOf), balanceRecordedAt: new Date(), userId: id } });
+        const account = await db.paymentAccount.create({ data: { ...value, shared: value.shared ?? false, balanceAsOf: asDate(value.balanceAsOf), balanceRecordedAt: new Date(), userId: id } });
+        log(async () => ({ action: "account.created", area: "accounts", entityId: account.id, title: "Added an account", subject: accountLabelOf(account), amountMinor: value.balanceMinor, meta: { balanceAsOf: value.balanceAsOf } }));
         break;
       }
       case "updatePaymentAccountBalance": {
@@ -682,7 +756,10 @@ export async function POST(request: Request) {
         const value = accountBalanceSchema.parse(input.payload);
         const reconciled = await db.accountReconciliation.count({ where: { paymentAccountId: recordId, userId: id } });
         if (reconciled) return NextResponse.json({ error: "This account has an audit history. Use monthly reconciliation to update its balance." }, { status: 409 });
+        const before = await db.paymentAccount.findFirstOrThrow({ where: { id: recordId, userId: id }, select: { type: true, provider: true, label: true, balanceMinor: true, balanceAsOf: true } });
         await db.paymentAccount.updateMany({ where: { id: recordId, userId: id }, data: { balanceMinor: value.balanceMinor, balanceAsOf: asDate(value.balanceAsOf), balanceRecordedAt: new Date() } });
+        const changes = diffFields(before, { ...before, balanceMinor: value.balanceMinor, balanceAsOf: asDate(value.balanceAsOf) }, [{ key: "balanceMinor", label: "Balance", kind: "money" }, { key: "balanceAsOf", label: "As of", kind: "date" }]);
+        if (changes.length) log(async () => ({ action: "account.balance_updated", area: "accounts", entityId: recordId, title: "Updated an account balance", subject: accountLabelOf(before), amountMinor: value.balanceMinor, changes }));
         break;
       }
       case "approveAccountReconciliation": {
@@ -690,7 +767,7 @@ export async function POST(request: Request) {
         if (!value.checkedOn.startsWith(`${value.monthKey}-`)) throw new Error("The checked date must be inside the selected month.");
         const today = dateOnlyInTimeZone("Asia/Kathmandu");
         if (value.checkedOn > today) throw new Error("A reconciliation cannot be approved for a future date.");
-        await db.$transaction(async (transaction) => {
+        const reconciliation = await db.$transaction(async (transaction) => {
           const account = await transaction.paymentAccount.findFirstOrThrow({ where: { id: value.paymentAccountId, userId: id } });
           if (dateOnly(account.balanceAsOf)! > value.checkedOn) throw new Error(`This account is already checked through ${dateOnly(account.balanceAsOf)}.`);
           const duplicate = await transaction.accountReconciliation.count({ where: { paymentAccountId: account.id, monthKey: value.monthKey } });
@@ -754,14 +831,25 @@ export async function POST(request: Request) {
             where: { id: account.id },
             data: { balanceMinor: value.actualBalanceMinor, balanceAsOf: asDate(value.checkedOn), balanceRecordedAt: approvedAt },
           });
+          return { account, expectedBalanceMinor: preview.expectedBalanceMinor, adjustmentMinor };
         }, { isolationLevel: "Serializable" });
+        log(async () => ({
+          action: "account.reconciled",
+          area: "accounts",
+          entityId: value.paymentAccountId,
+          title: "Reconciled an account",
+          subject: `${accountLabelOf(reconciliation.account)} · ${periodText(value.monthKey)}`,
+          amountMinor: value.actualBalanceMinor,
+          changes: reconciliation.adjustmentMinor ? [{ field: "Balance", from: { money: reconciliation.expectedBalanceMinor }, to: { money: value.actualBalanceMinor } }] : [],
+          meta: { adjustmentMinor: reconciliation.adjustmentMinor, note: value.adjustmentNote || null, checkedOn: value.checkedOn },
+        }));
         break;
       }
       case "resetAccountReconciliation": {
         if (!recordId) throw new Error("Missing payment account id.");
         resetReconciliationSchema.parse(input.payload);
-        await db.$transaction(async (transaction) => {
-          const account = await transaction.paymentAccount.findFirstOrThrow({ where: { id: recordId, userId: id }, select: { id: true, createdAt: true } });
+        const reset = await db.$transaction(async (transaction) => {
+          const account = await transaction.paymentAccount.findFirstOrThrow({ where: { id: recordId, userId: id }, select: { id: true, createdAt: true, type: true, provider: true, label: true } });
           const earliest = await transaction.accountReconciliation.findFirst({
             where: { paymentAccountId: account.id, userId: id },
             orderBy: [{ checkedOn: "asc" }, { approvedAt: "asc" }],
@@ -772,15 +860,19 @@ export async function POST(request: Request) {
             where: { id: account.id },
             data: { balanceMinor: earliest.startingBalanceMinor, balanceAsOf: earliest.startingBalanceAsOf, balanceRecordedAt: account.createdAt },
           });
-          await transaction.accountReconciliation.deleteMany({ where: { paymentAccountId: account.id, userId: id } });
+          const removed = await transaction.accountReconciliation.deleteMany({ where: { paymentAccountId: account.id, userId: id } });
+          return { account, removed: removed?.count ?? 0 };
         }, { isolationLevel: "Serializable" });
+        log(async () => ({ action: "account.reconciliation_reset", area: "accounts", entityId: recordId, title: "Reset an account's reconciliations", subject: accountLabelOf(reset.account), meta: { removed: reset.removed } }));
         break;
       }
       case "deletePaymentAccount": {
         if (!recordId) throw new Error("Missing payment account id.");
         const reconciled = await db.accountReconciliation.count({ where: { paymentAccountId: recordId, userId: id } });
         if (reconciled) return NextResponse.json({ error: "A reconciled account cannot be removed because that would erase its audit history." }, { status: 409 });
-        await db.paymentAccount.deleteMany({ where: { id: recordId, userId: id } });
+        const account = await db.paymentAccount.findFirst({ where: { id: recordId, userId: id }, select: { type: true, provider: true, label: true, balanceMinor: true } });
+        const removed = await db.paymentAccount.deleteMany({ where: { id: recordId, userId: id } });
+        if (removed.count && account) log(async () => ({ action: "account.deleted", area: "accounts", entityId: recordId, title: "Removed an account", subject: accountLabelOf(account) }));
         break;
       }
       case "saveTransfer": {
@@ -791,7 +883,8 @@ export async function POST(request: Request) {
         ]);
         const owned = await db.paymentAccount.findMany({ where: { userId: id, id: { in: [value.fromAccountId, value.toAccountId] } }, select: { id: true } });
         if (owned.length !== 2) throw new Error("Both transfer accounts must belong to you.");
-        await db.accountTransfer.create({ data: { ...value, occurredOn: asDate(value.occurredOn), userId: id } });
+        const transfer = await db.accountTransfer.create({ data: { ...value, occurredOn: asDate(value.occurredOn), userId: id } });
+        log(async () => ({ action: "transfer.created", area: "accounts", entityId: transfer.id, title: "Moved money between accounts", subject: `${await accountName(value.fromAccountId)} → ${await accountName(value.toAccountId)}`, amountMinor: value.amountMinor }));
         break;
       }
       case "deleteTransfer": {
@@ -802,6 +895,7 @@ export async function POST(request: Request) {
           { paymentAccountId: existing.toAccountId, occurredOn: dateOnly(existing.occurredOn)!, createdAt: existing.createdAt.toISOString() },
         ]);
         await db.accountTransfer.deleteMany({ where: { id: recordId, userId: id } });
+        log(async () => ({ action: "transfer.deleted", area: "accounts", entityId: recordId, title: "Deleted a transfer", subject: `${await accountName(existing.fromAccountId)} → ${await accountName(existing.toAccountId)}`, amountMinor: existing.amountMinor }));
         break;
       }
       case "saveDueItem": {
@@ -816,8 +910,21 @@ export async function POST(request: Request) {
           if (paid && existing.kind !== value.kind) throw new Error("The due type cannot change after a repayment is recorded.");
           if (value.amountMinor < paid) throw new Error("The total amount cannot be less than the repayments already recorded.");
           await db.dueItem.update({ where: { id: existing.id }, data });
+          log(async (): Promise<ActivityDraft | null> => {
+            const describe = async (item: { kind: string; title: string; person: string; amountMinor: number; category: string; dueOn: Date; remindOn: Date | null; note: string; annualRatePercent?: number | null }) => ({
+              ...item, kind: DUE_KIND_LABELS[item.kind] ?? item.kind, category: await categoryLabel(item.category), rate: item.annualRatePercent == null ? null : `${item.annualRatePercent}% a year`,
+          });
+          const changes = diffFields(await describe(existing), await describe(data), [
+            { key: "kind", label: "Type" }, { key: "title", label: "Title" }, { key: "person", label: "Person" }, { key: "amountMinor", label: "Amount", kind: "money" },
+            { key: "category", label: "Category" }, { key: "dueOn", label: "Due", kind: "date" }, { key: "remindOn", label: "Reminder", kind: "date" }, { key: "note", label: "Note" }, { key: "rate", label: "Interest" },
+          ]);
+          if (receipt) changes.push({ field: "Receipt", from: null, to: "Attached" });
+          return changes.length ? { action: "due.edited", area: "dues", entityId: recordId, title: "Edited a due", subject: value.title, amountMinor: value.amountMinor, changes } : null;
+          });
+        } else {
+          dueItemId = (await db.dueItem.create({ data: { ...data, userId: id } })).id;
+          log(async () => ({ action: "due.created", area: "dues", entityId: dueItemId, title: "Added a due", subject: value.title, amountMinor: value.amountMinor, meta: { kind: value.kind, type: DUE_KIND_LABELS[value.kind] ?? value.kind, dueOn: value.dueOn } }));
         }
-        else dueItemId = (await db.dueItem.create({ data: { ...data, userId: id } })).id;
         if (receipt && dueItemId) {
           const oldReceipt = await db.receiptAttachment.findFirst({ where: { dueItemId, userId: id }, select: { storagePath: true } });
           const stored = await receiptData(receipt, id);
@@ -829,8 +936,10 @@ export async function POST(request: Request) {
       case "deleteDueItem": {
         if (!recordId) throw new Error("Missing due item id.");
         const receipt = await db.receiptAttachment.findFirst({ where: { dueItemId: recordId, userId: id }, select: { storagePath: true } });
-        await db.dueItem.deleteMany({ where: { id: recordId, userId: id } });
+        const due = await db.dueItem.findFirst({ where: { id: recordId, userId: id }, select: { title: true, amountMinor: true } });
+        const removed = await db.dueItem.deleteMany({ where: { id: recordId, userId: id } });
         await removeStoredReceipts([receipt?.storagePath]);
+        if (removed.count && due) log(async () => ({ action: "due.deleted", area: "dues", entityId: recordId, title: "Deleted a due", subject: due.title, amountMinor: due.amountMinor }));
         break;
       }
       case "snoozeDueItem": {
@@ -839,6 +948,7 @@ export async function POST(request: Request) {
         const due = await db.dueItem.findFirstOrThrow({ where: { id: recordId, userId: id } });
         if (due.status !== "open") throw new Error("This item is already settled.");
         await db.dueItem.update({ where: { id: due.id }, data: { snoozedUntil: asDate(until) } });
+        log(async () => ({ action: "due.snoozed", area: "dues", entityId: due.id, title: "Snoozed a reminder", subject: due.title, changes: [{ field: "Remind again", from: null, to: { date: until } }] }));
         break;
       }
       case "recordDuePayment": {
@@ -858,6 +968,8 @@ export async function POST(request: Request) {
           await tx.duePayment.create({ data: { userId: id, dueItemId: due.id, amountMinor, occurredOn: asDate(value.occurredOn), note: value.note, transactionId } });
           if (paid + amountMinor >= due.amountMinor) await tx.dueItem.update({ where: { id: due.id }, data: { status: "completed", completedOn: asDate(value.occurredOn) } });
         });
+        const settled = paid + amountMinor >= due.amountMinor;
+        log(async () => ({ action: settled ? "due.settled" : "due.payment_recorded", area: "dues", entityId: due.id, title: settled ? "Settled a due" : "Recorded a repayment", subject: due.title, amountMinor, meta: { addedToLedger: value.addToLedger, remainingMinor: Math.max(0, due.amountMinor - paid - amountMinor) } }));
         break;
       }
       case "completeDueItem": {
@@ -878,12 +990,25 @@ export async function POST(request: Request) {
           await tx.duePayment.create({ data: { userId: id, dueItemId: due.id, amountMinor: remaining, occurredOn, note: "Marked complete", transactionId } });
           await tx.dueItem.update({ where: { id: due.id }, data: { status: "completed", completedOn: occurredOn } });
         });
+        log(async () => ({ action: "due.settled", area: "dues", entityId: due.id, title: "Settled a due", subject: due.title, amountMinor: remaining, meta: { addedToLedger: addToLedger, remainingMinor: 0 } }));
         break;
       }
       case "updateProfile": {
         const value = profileSchema.parse(input.payload);
-        const pin = await db.user.findUniqueOrThrow({ where: { id }, select: { pinHash: true } });
-        await db.user.update({ where: { id }, data: { name: value.displayName, currency: value.currency, hideAmounts: value.hideAmounts, autoLockMinutes: pin.pinHash ? value.autoLockMinutes : 0, calendarSystem: value.calendarSystem, safeToSpendBufferMinor: value.safeToSpendBufferMinor } });
+        const before = await db.user.findUniqueOrThrow({ where: { id }, select: { pinHash: true, name: true, currency: true, hideAmounts: true, autoLockMinutes: true, calendarSystem: true, safeToSpendBufferMinor: true, emailReminders: true, browserReminders: true } });
+        const after = { name: value.displayName, currency: value.currency, hideAmounts: value.hideAmounts, autoLockMinutes: before.pinHash ? value.autoLockMinutes : 0, calendarSystem: value.calendarSystem, safeToSpendBufferMinor: value.safeToSpendBufferMinor, emailReminders: value.emailReminders, browserReminders: value.browserReminders };
+        await db.user.update({ where: { id }, data: after });
+        const settingsView = (item: Omit<typeof after, "currency" | "calendarSystem"> & { currency: string; calendarSystem: string }) => ({
+          ...item,
+          autoLockMinutes: item.autoLockMinutes ? `After ${item.autoLockMinutes} minute${item.autoLockMinutes === 1 ? "" : "s"}` : "Off",
+          calendarSystem: item.calendarSystem === "BS" ? "Bikram Sambat" : "Gregorian",
+        });
+        const changes = diffFields(settingsView(before), settingsView(after), [
+          { key: "name", label: "Display name" }, { key: "currency", label: "Currency" }, { key: "hideAmounts", label: "Hide amounts", kind: "flag" },
+          { key: "autoLockMinutes", label: "Auto-lock" }, { key: "calendarSystem", label: "Calendar" }, { key: "safeToSpendBufferMinor", label: "Safe-to-spend buffer", kind: "money" },
+          { key: "emailReminders", label: "Email reminders", kind: "flag" }, { key: "browserReminders", label: "Browser reminders", kind: "flag" },
+        ]);
+        if (changes.length) log(async () => ({ action: "settings.updated", area: "settings", title: changes.length === 1 ? `Changed ${changes[0].field.toLowerCase()}` : `Changed ${changes.length} settings`, changes }));
         break;
       }
       case "savePin": {
@@ -891,6 +1016,7 @@ export async function POST(request: Request) {
         const user = await db.user.findUniqueOrThrow({ where: { id }, select: { pinHash: true } });
         if (user.pinHash && (!value.currentPin || !await verifyPin(value.currentPin, user.pinHash))) return NextResponse.json({ error: "Current PIN did not match." }, { status: 401 });
         await db.user.update({ where: { id }, data: { pinHash: await hashPin(value.pin) } });
+        log(async () => ({ action: user.pinHash ? "pin.changed" : "pin.set", area: "security", title: user.pinHash ? "Changed your ledger PIN" : "Set a ledger PIN" }));
         break;
       }
       case "removePin": {
@@ -898,11 +1024,122 @@ export async function POST(request: Request) {
         const user = await db.user.findUniqueOrThrow({ where: { id }, select: { pinHash: true } });
         if (!user.pinHash || !await verifyPin(value.currentPin, user.pinHash)) return NextResponse.json({ error: "Current PIN did not match." }, { status: 401 });
         await db.user.update({ where: { id }, data: { pinHash: null, autoLockMinutes: 0 } });
+        log(async () => ({ action: "pin.removed", area: "security", title: "Removed your ledger PIN" }));
+        break;
+      }
+      case "sendDueReminders": {
+        const today = todayInput();
+        const me = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true, emailReminders: true, lastReminderEmailOn: true } });
+        if (!me.emailReminders || dateOnly(me.lastReminderEmailOn) === today) return NextResponse.json({ ok: true });
+        const [dues, recurring] = await Promise.all([
+          db.dueItem.findMany({ where: { userId: id, status: "open" }, include: { payments: { select: { amountMinor: true } } } }),
+          db.recurringEntry.findMany({ where: { userId: id, active: true } }),
+        ]);
+        const notices = buildReminderDigest({
+          today,
+          dues: dues.map((item) => ({
+            id: item.id,
+            userId: id,
+            kind: item.kind as DueItem["kind"],
+            title: item.title,
+            person: item.person,
+            amountMinor: item.amountMinor,
+            category: item.category,
+            occurredOn: dateOnly(item.occurredOn),
+            dueOn: dateOnly(item.dueOn)!,
+            remindOn: dateOnly(item.remindOn),
+            snoozedUntil: dateOnly(item.snoozedUntil),
+            note: item.note,
+            status: item.status as DueItem["status"],
+            annualRatePercent: item.annualRatePercent,
+            completedOn: dateOnly(item.completedOn),
+            createdAt: item.createdAt.toISOString(),
+            payments: item.payments.map((payment, index) => ({ id: `${item.id}-${index}`, userId: id, dueItemId: item.id, amountMinor: payment.amountMinor, occurredOn: today, note: "", transactionId: null, createdAt: item.createdAt.toISOString() })),
+          })),
+          recurring: recurring.flatMap((item) => {
+            const nextDueOn = dateOnly(item.nextDueOn);
+            if (!nextDueOn) return [];
+            return [{ id: item.id, active: item.active, kind: item.kind as "income" | "expense", note: item.note, category: item.category, amountMinor: item.amountMinor, nextDueOn }];
+          }),
+        });
+        await db.user.update({ where: { id }, data: { lastReminderEmailOn: asDate(today) } });
+        if (notices.length) {
+          const html = `<p>Here is what is due today or tomorrow in SaveYoRupee.</p><ul>${notices.map((notice) => `<li><strong>${escapeHtml(notice.title)}</strong> — ${escapeHtml(notice.body)}</li>`).join("")}</ul>`;
+          try { await sendLedgerEmail(me.email, "SaveYoRupee reminders", html); }
+          catch (error) { console.warn("Could not send reminder email.", error); }
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "inviteHousehold": {
+        const email = z.object({ email: z.string().trim().email().max(120) }).parse(input.payload).email.toLowerCase();
+        const me = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true, name: true } });
+        if (email === me.email.toLowerCase()) throw new Error("Invite the other person's email.");
+        const taken = await db.householdMember.findUnique({ where: { email } });
+        if (taken) throw new Error("That email already belongs to a household.");
+        const existing = await db.householdMember.findFirst({ where: { userId: id, status: "active" }, include: { household: { include: { members: true } } } });
+        let householdId = existing?.householdId;
+        if (existing) {
+          if (existing.role !== "owner") throw new Error("Only the person who started the household can invite someone.");
+          if (existing.household.members.length >= 2) throw new Error("A household ledger is for two people.");
+        } else {
+          const created = await db.household.create({ data: { name: "Shared ledger", members: { create: { userId: id, email: me.email.toLowerCase(), name: me.name, role: "owner", status: "active" } } } });
+          householdId = created.id;
+        }
+        await db.householdMember.create({ data: { householdId: householdId!, email, name: "", role: "member", status: "invited" } });
+        const origin = new URL(request.url).origin;
+        try {
+          await sendLedgerEmail(email, "Join a SaveYoRupee household", `<p>${escapeHtml(me.name)} invited you to a shared ledger.</p><p><a href="${origin}/profile">Open SaveYoRupee</a> and accept while signed in as ${escapeHtml(email)}.</p>`);
+        } catch (error) {
+          console.warn("Household invite email failed.", error);
+        }
+        log(async () => ({ action: "household.invited", area: "household", title: "Invited someone to your household", subject: email }));
+        break;
+      }
+      case "acceptHousehold": {
+        const me = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true, name: true } });
+        const invite = await db.householdMember.findFirst({ where: { email: me.email.toLowerCase(), status: "invited" } });
+        if (!invite) throw new Error("There is no household invite for this email.");
+        const already = await db.householdMember.findFirst({ where: { userId: id, status: "active" } });
+        if (already) throw new Error("You already belong to a household.");
+        await db.householdMember.update({ where: { id: invite.id }, data: { userId: id, status: "active", name: me.name } });
+        log(async () => ({ action: "household.joined", area: "household", entityId: invite.householdId, title: "Joined a household" }));
+        break;
+      }
+      case "removeHouseholdMember": {
+        const email = z.object({ email: z.string().trim().email() }).parse(input.payload).email.toLowerCase();
+        const mine = await db.householdMember.findFirst({ where: { userId: id, status: "active", role: "owner" } });
+        if (!mine) throw new Error("Only the person who started the household can remove someone.");
+        const removed = await db.householdMember.deleteMany({ where: { householdId: mine.householdId, email, role: "member" } });
+        if (!removed.count) throw new Error("That person is not in your household.");
+        log(async () => ({ action: "household.member_removed", area: "household", entityId: mine.householdId, title: "Removed someone from your household", subject: email }));
+        break;
+      }
+      case "leaveHousehold": {
+        const mine = await db.householdMember.findFirst({ where: { userId: id, status: "active" }, include: { household: { include: { members: true } } } });
+        if (!mine) throw new Error("You are not in a household.");
+        if (mine.role === "owner") {
+          if (mine.household.members.length > 1) throw new Error("Remove the other person before closing the household.");
+          await db.household.delete({ where: { id: mine.householdId } });
+          log(async () => ({ action: "household.closed", area: "household", entityId: mine.householdId, title: "Closed your household" }));
+        } else {
+          await db.householdMember.delete({ where: { id: mine.id } });
+          log(async () => ({ action: "household.left", area: "household", entityId: mine.householdId, title: "Left a household" }));
+        }
+        break;
+      }
+      case "setPaymentAccountShared": {
+        if (!recordId) throw new Error("Missing payment account id.");
+        const value = z.object({ shared: z.boolean() }).parse(input.payload);
+        const before = await db.paymentAccount.findFirst({ where: { id: recordId, userId: id }, select: { type: true, provider: true, label: true, shared: true } });
+        const updated = await db.paymentAccount.updateMany({ where: { id: recordId, userId: id }, data: { shared: value.shared } });
+        if (!updated.count) throw new Error("That account is not yours to share.");
+        if (before && before.shared !== value.shared) log(async () => ({ action: value.shared ? "account.shared" : "account.unshared", area: "household", entityId: recordId, title: value.shared ? "Shared an account with your household" : "Stopped sharing an account", subject: accountLabelOf(before) }));
         break;
       }
       default: return NextResponse.json({ error: "Unknown ledger action." }, { status: 400 });
     }
-    return NextResponse.json(serialize(await loadLedger(id)));
+    const entries = await flushActivity();
+    return NextResponse.json({ ...serialize(await loadLedger(id)), activity: entries });
   } catch (error) {
     const message = error instanceof z.ZodError ? error.issues[0]?.message : error instanceof Error ? error.message : "Request failed.";
     return NextResponse.json({ error: message }, { status: 400 });

@@ -5,6 +5,7 @@ import { dueDateLabel, dueRemaining, groupActionableDues, urgentDueCount, type D
 import { formatMoney } from "../lib/currency";
 import type { CurrencyCode, DueItem, TransactionKind } from "../types";
 import { ButtonSpinner } from "./ButtonSpinner";
+import { FormError } from "./FormError";
 
 type ReminderAction = "complete" | "snooze" | "confirmRecurring";
 
@@ -47,8 +48,13 @@ function groupRecurringReminders(items: readonly RecurringReminder[], today: str
   return groups;
 }
 
+function dropdownCloseMs() {
+  const value = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--dropdown-close-dur"));
+  return Number.isFinite(value) ? value : 150;
+}
+
 export function ReminderBell({ items, currency, recurringEntries, monthlyReport, onOpenDue, onComplete, onSnooze, onConfirmRecurring }: ReminderBellProps) {
-  const [open, setOpen] = useState(false);
+  const [phase, setPhase] = useState<"closed" | "pre" | "open" | "closing">("closed");
   const [pending, setPending] = useState<{ id: string; action: ReminderAction } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -63,14 +69,26 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
   const totalUrgentCount = urgentCount + recurringUrgentCount;
   const notificationCount = reminders.length + recurringReminderCount + (monthlyReport ? 1 : 0);
 
+  const closeTimer = useRef<number | null>(null);
+  const openPanel = () => {
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    setPhase("pre");
+    window.requestAnimationFrame(() => setPhase("open"));
+  };
   const closePanel = (restoreFocus = false) => {
-    setOpen(false);
+    setPhase("closing");
     setError(null);
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => setPhase("closed"), dropdownCloseMs());
     if (restoreFocus) window.requestAnimationFrame(() => triggerRef.current?.focus());
   };
 
+  useEffect(() => () => {
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+  }, []);
+
   useEffect(() => {
-    if (!open) return;
+    if (phase !== "open") return;
     closeRef.current?.focus();
     const onPointerDown = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) closePanel();
@@ -87,10 +105,10 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
       window.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [open]);
+  }, [phase]);
 
   const openDue = (id?: string, action?: "repay") => {
-    setOpen(false);
+    closePanel();
     onOpenDue(id, action);
   };
 
@@ -124,22 +142,23 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
       ref={triggerRef}
       id="money-reminders-trigger"
       className="reminder-trigger"
-      onClick={() => setOpen((value) => !value)}
+      onClick={() => (phase === "open" || phase === "pre" ? closePanel() : openPanel())}
       aria-label={`${totalUrgentCount} urgent, ${notificationCount} total notifications`}
-      aria-expanded={open}
+      aria-expanded={phase === "open" || phase === "pre"}
       aria-controls="money-reminders-panel"
       aria-haspopup="dialog"
     >
       <Bell size={20} weight={notificationCount ? "fill" : "regular"} />
-      {totalUrgentCount > 0
-        ? <span>{totalUrgentCount > 9 ? "9+" : totalUrgentCount}</span>
-        : notificationCount > 0 && <i aria-hidden="true" />}
+      <span className="t-badge" data-open={notificationCount > 0 ? "true" : "false"}>
+        <span className="t-badge-dot">{totalUrgentCount > 0 ? (totalUrgentCount > 9 ? "9+" : totalUrgentCount) : null}</span>
+      </span>
     </button>
     <span className="sr-only" aria-live="polite">{totalUrgentCount} urgent money reminders</span>
 
-    {open && <section
+    {phase !== "closed" && <section
       id="money-reminders-panel"
-      className="reminder-panel"
+      className={`reminder-panel t-dropdown${phase === "open" ? " is-open" : phase === "closing" ? " is-closing" : ""}`}
+      data-origin="top-right"
       role="dialog"
       aria-modal="false"
       aria-labelledby="money-reminders-title"
@@ -230,7 +249,7 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
           <strong>No money tasks need attention</strong>
           <p>New reminders will appear here when their reminder date arrives.</p>
         </div>}
-        {error && <div className="reminder-error" role="alert">{error}</div>}
+        <FormError message={error} />
       </div>
 
       <button className="reminder-view-all" onClick={() => openDue()}>View all dues</button>

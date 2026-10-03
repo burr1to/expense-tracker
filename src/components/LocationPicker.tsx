@@ -8,6 +8,7 @@ import { savedPlaceIconOptions } from "../lib/saved-places";
 import type { SavedPlace, SavedPlaceDraft, SavedPlaceIconName, TransactionLocationDraft } from "../types";
 import { SavedPlaceIcon } from "./SavedPlaceIcon";
 import { AnimatedOverlay } from "./AnimatedOverlay";
+import { FormError } from "./FormError";
 
 interface LocationPickerProps {
   open: boolean;
@@ -256,7 +257,7 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
     onClose();
   };
 
-  return <AnimatedOverlay open={open} className="location-picker-backdrop">
+  return <AnimatedOverlay open={open} className="location-picker-backdrop" onClose={onClose}>
     <section className="location-picker-dialog" role="dialog" aria-modal="true" aria-labelledby="location-picker-title">
       <header>
         <div><span className="eyebrow">Kathmandu only</span><h2 id="location-picker-title">{mode === "saved-place" ? "Save a place" : "Choose transaction location"}</h2><p>{mode === "saved-place" ? "Choose the exact spot, then give it a name and icon." : "Search an area, use your device, or click the exact spot on the map."}</p></div>
@@ -265,7 +266,7 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
       <div className="location-picker-body">
         <aside className="location-picker-panel">
           <button type="button" className="secondary-button full-width" disabled={locating} onClick={useCurrentLocation}><Crosshair size={18} />{locating ? "Finding your location…" : "Use current location"}</button>
-          {locationError && <div className="form-error" role="alert">{locationError}</div>}
+          <FormError message={locationError} />
           <TextInput value={query} onChange={(event) => setQuery(event.target.value)} leftSection={<MagnifyingGlass size={17} />} rightSection={searching ? <Loader size={15} /> : undefined} label="Search Kathmandu" placeholder="Place, landmark, or address…" />
           {!query.trim() && visibleLocations.length > 0 && <span className="field-label"><ClockCounterClockwise size={15} />{mode === "saved-place" ? "Previously selected" : "Saved and previously selected"}</span>}
           <div className="location-results">
@@ -288,7 +289,7 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
         <div className="selected-location">
           {candidate ? <><MapPin size={20} weight="fill" /><div><TextInput aria-label="Location label" value={candidate.label} onChange={(event) => { const next = { ...candidate, label: event.target.value }; candidateRef.current = next; setCandidate(next); }} /><small>{candidate.address}</small></div></> : <><MapPin size={20} /><div><strong>No location selected</strong><small>Click anywhere inside the Kathmandu map.</small></div></>}
         </div>
-        {mode === "saved-place" && <div className="location-picker-actions"><TextInput label="Place name" aria-label="Saved place name" value={savedPlaceName} onChange={(event) => setSavedPlaceName(event.currentTarget.value)} placeholder="e.g. Home or Office" /><fieldset className="saved-place-icon-picker"><legend>Icon</legend>{savedPlaceIconOptions.map((option) => <button type="button" className={savedPlaceIcon === option.value ? "active" : undefined} aria-label={option.label} aria-pressed={savedPlaceIcon === option.value} title={option.label} key={option.value} onClick={() => setSavedPlaceIcon(option.value)}><SavedPlaceIcon icon={option.value} size={18} /></button>)}</fieldset>{saveError && <div className="form-error" role="alert">{saveError}</div>}</div>}
+        {mode === "saved-place" && <div className="location-picker-actions"><TextInput label="Place name" aria-label="Saved place name" value={savedPlaceName} onChange={(event) => setSavedPlaceName(event.currentTarget.value)} placeholder="e.g. Home or Office" /><fieldset className="saved-place-icon-picker"><legend>Icon</legend>{savedPlaceIconOptions.map((option) => <button type="button" className={savedPlaceIcon === option.value ? "active" : undefined} aria-label={option.label} aria-pressed={savedPlaceIcon === option.value} title={option.label} key={option.value} onClick={() => setSavedPlaceIcon(option.value)}><SavedPlaceIcon icon={option.value} size={18} /></button>)}</fieldset><FormError message={saveError} /></div>}
         <div className="dialog-actions"><button type="button" className="secondary-button" disabled={saving} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={saving || !candidate || !candidate.label.trim() || (mode === "saved-place" && !savedPlaceName.trim())} onClick={() => void confirm()}><MapPin size={17} />{saving ? "Saving…" : mode === "saved-place" ? "Save place" : "Use this location"}</button></div>
       </footer>
     </section>

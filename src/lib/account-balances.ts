@@ -22,22 +22,44 @@ export function accountActivityThrough(
   transfers: readonly BalanceTransfer[],
   throughDate?: string,
 ): AccountActivity {
-  const accountTransactions = transactions.filter((item) =>
-    item.paymentAccountId === account.id
-    && isAfterAccountAnchor(item.occurredOn, item.createdAt, account)
-    && (!throughDate || item.occurredOn <= throughDate),
-  );
-  const accountTransfers = transfers.filter((item) =>
-    isAfterAccountAnchor(item.occurredOn, item.createdAt, account)
-    && (!throughDate || item.occurredOn <= throughDate)
-    && (item.fromAccountId === account.id || item.toAccountId === account.id),
-  );
-  return {
-    incomeMinor: accountTransactions.filter((item) => item.kind === "income").reduce((total, item) => total + item.amountMinor, 0),
-    expenseMinor: accountTransactions.filter((item) => item.kind === "expense").reduce((total, item) => total + item.amountMinor, 0),
-    transfersInMinor: accountTransfers.filter((item) => item.toAccountId === account.id).reduce((total, item) => total + item.amountMinor, 0),
-    transfersOutMinor: accountTransfers.filter((item) => item.fromAccountId === account.id).reduce((total, item) => total + item.amountMinor, 0),
-  };
+  let incomeMinor = 0;
+  let expenseMinor = 0;
+  let transfersInMinor = 0;
+  let transfersOutMinor = 0;
+  for (const item of transactions) {
+    if (item.paymentAccountId !== account.id) continue;
+    if (!isAfterAccountAnchor(item.occurredOn, item.createdAt, account)) continue;
+    if (throughDate && item.occurredOn > throughDate) continue;
+    if (item.kind === "income") incomeMinor += item.amountMinor;
+    else if (item.kind === "expense") expenseMinor += item.amountMinor;
+  }
+  for (const item of transfers) {
+    if (!isAfterAccountAnchor(item.occurredOn, item.createdAt, account)) continue;
+    if (throughDate && item.occurredOn > throughDate) continue;
+    if (item.toAccountId === account.id) transfersInMinor += item.amountMinor;
+    if (item.fromAccountId === account.id) transfersOutMinor += item.amountMinor;
+  }
+  return { incomeMinor, expenseMinor, transfersInMinor, transfersOutMinor };
+}
+
+function pushGroup<T>(groups: Map<string, T[]>, key: string, item: T) {
+  const bucket = groups.get(key);
+  if (bucket) bucket.push(item);
+  else groups.set(key, [item]);
+}
+
+/** One index of the ledger, then one balance per account. */
+export function attachCurrentBalances(accounts: readonly PaymentAccount[], transactions: readonly BalanceTransaction[], transfers: readonly BalanceTransfer[]): PaymentAccount[] {
+  const transactionsByAccount = new Map<string, BalanceTransaction[]>();
+  for (const item of transactions) if (item.paymentAccountId) pushGroup(transactionsByAccount, item.paymentAccountId, item);
+  const transfersByAccount = new Map<string, BalanceTransfer[]>();
+  for (const item of transfers) {
+    pushGroup(transfersByAccount, item.fromAccountId, item);
+    if (item.toAccountId !== item.fromAccountId) pushGroup(transfersByAccount, item.toAccountId, item);
+  }
+  const emptyTransactions: BalanceTransaction[] = [];
+  const emptyTransfers: BalanceTransfer[] = [];
+  return accounts.map((account) => withCurrentAccountBalance(account, transactionsByAccount.get(account.id) ?? emptyTransactions, transfersByAccount.get(account.id) ?? emptyTransfers));
 }
 
 export function expectedAccountBalanceThrough(account: PaymentAccount, transactions: readonly BalanceTransaction[], transfers: readonly BalanceTransfer[], throughDate: string) {
@@ -59,4 +81,64 @@ export function withCurrentAccountBalance(account: PaymentAccount, transactions:
 
 export function totalCurrentBalance(accounts: readonly PaymentAccount[]) {
   return accounts.reduce((total, account) => total + account.currentBalanceMinor, 0);
+}
+
+export function activityHasMovement(activity: AccountActivity) {
+  return activity.incomeMinor !== 0 || activity.expenseMinor !== 0 || activity.transfersInMinor !== 0 || activity.transfersOutMinor !== 0;
+}
+
+export interface ReconciliationSpendingGap {
+  beforeMonth: AccountActivity;
+  duringMonth: AccountActivity;
+  monthExpenseMinor: number;
+  otherAccountExpenseMinor: number;
+  alreadyInOpeningExpenseMinor: number;
+}
+
+function shiftIsoDate(date: string, days: number) {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+function activityDifference(later: AccountActivity, earlier: AccountActivity): AccountActivity {
+  return {
+    incomeMinor: later.incomeMinor - earlier.incomeMinor,
+    expenseMinor: later.expenseMinor - earlier.expenseMinor,
+    transfersInMinor: later.transfersInMinor - earlier.transfersInMinor,
+    transfersOutMinor: later.transfersOutMinor - earlier.transfersOutMinor,
+  };
+}
+
+/**
+ * Explains why a reconciliation expense line and that calendar month's spending
+ * can differ. The balance check runs from the account's confirmed snapshot
+ * through the checked date. Month spending is every expense dated in the month
+ * through that same date, including cash and other accounts.
+ */
+export function reconciliationSpendingGap(
+  account: PaymentAccount,
+  transactions: readonly BalanceTransaction[],
+  transfers: readonly BalanceTransfer[],
+  monthKey: string,
+  checkedOn: string,
+): ReconciliationSpendingGap {
+  const monthStart = `${monthKey}-01`;
+  const beforeMonth = accountActivityThrough(account, transactions, transfers, shiftIsoDate(monthStart, -1));
+  const throughChecked = accountActivityThrough(account, transactions, transfers, checkedOn);
+  const duringMonth = activityDifference(throughChecked, beforeMonth);
+  let monthExpenseMinor = 0;
+  let onThisAccount = 0;
+  for (const item of transactions) {
+    if (item.kind !== "expense" || item.occurredOn < monthStart || item.occurredOn > checkedOn) continue;
+    monthExpenseMinor += item.amountMinor;
+    if (item.paymentAccountId === account.id) onThisAccount += item.amountMinor;
+  }
+  const otherAccountExpenseMinor = monthExpenseMinor - onThisAccount;
+  return {
+    beforeMonth,
+    duringMonth,
+    monthExpenseMinor,
+    otherAccountExpenseMinor,
+    alreadyInOpeningExpenseMinor: onThisAccount - duringMonth.expenseMinor,
+  };
 }

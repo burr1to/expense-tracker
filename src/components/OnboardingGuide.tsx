@@ -65,15 +65,15 @@ export function OnboardingGuide({ userId, hasPin, hasAccount, hasTransaction, ha
 
   return (
     <div className="onboarding-guide-shell">
-      <section className={`onboarding-guide${expanded ? " expanded" : ""}${allComplete ? " complete" : ""}`} aria-labelledby="onboarding-title">
+      <section className={`onboarding-guide t-acc${expanded ? " expanded" : ""}${allComplete ? " complete" : ""}`} data-open={expanded ? "true" : "false"} aria-labelledby="onboarding-title">
         <div className="onboarding-guide-heading">
           <span className="onboarding-guide-mark" aria-hidden="true">{allComplete ? <Check size={18} weight="bold" /> : <Sparkle size={18} weight="fill" />}</span>
-          <button className="onboarding-guide-summary" type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
+          <button className="onboarding-guide-summary t-acc-head" type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
             <span>
               <strong id="onboarding-title">{allComplete ? "Your ledger is ready" : "Set up your ledger"}</strong>
               <small>{allComplete ? "You finished the essentials." : `${completed} of ${steps.length} setup steps complete`}</small>
             </span>
-            <CaretDown size={17} className={expanded ? "rotated" : undefined} />
+            <span className="t-acc-chevron"><CaretDown size={17} /></span>
           </button>
           <button className="onboarding-guide-close" type="button" onClick={() => dismiss(allComplete ? "completed" : "dismissed")} aria-label={allComplete ? "Finish setup guide" : "Dismiss setup guide"}><X size={17} /></button>
         </div>
@@ -82,7 +82,8 @@ export function OnboardingGuide({ userId, hasPin, hasAccount, hasTransaction, ha
           <span style={{ "--onboarding-progress": completed / steps.length } as CSSProperties} />
         </div>
 
-        {expanded && (
+        <div className="t-acc-panel">
+          <div className="t-acc-panel-inner">
           <div className="onboarding-guide-body">
             <p>{allComplete ? "Your first money system is in place. Keep recording transactions and the dashboard will become more useful over time." : "We’ll take this one step at a time. Past imports are optional, and reconciliation comes later when you are ready to check an account."}</p>
             {!allComplete && <ol className="onboarding-steps">
@@ -111,7 +112,8 @@ export function OnboardingGuide({ userId, hasPin, hasAccount, hasTransaction, ha
                 : <button type="button" className="text-button" onClick={() => dismiss("dismissed")}>I’ll explore on my own</button>}
             </div>
           </div>
-        )}
+          </div>
+        </div>
       </section>
     </div>
   );

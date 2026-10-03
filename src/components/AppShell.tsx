@@ -3,6 +3,7 @@ import {
   Bank,
   Calculator,
   ChartPieSlice,
+  ClockCounterClockwise,
   DotsThreeCircle,
   Flag,
   HandCoins,
@@ -30,6 +31,7 @@ const navItems: { id: AppView; label: string; icon: typeof House }[] = [
   { id: "transactions", label: "Transactions", icon: ListBullets },
   { id: "accounts", label: "Accounts", icon: Bank },
   { id: "maps", label: "Map", icon: MapTrifold },
+  { id: "logs", label: "Logs", icon: ClockCounterClockwise },
   { id: "settings", label: "Profile", icon: UserCircle },
 ];
 
@@ -43,7 +45,7 @@ interface AppShellProps {
 
 export function AppShell({ view, onAdd, onSignOut, signingOut, children }: AppShellProps) {
   const [moreOpen, setMoreOpen] = useState(false);
-  const moreItems = navItems.filter((item) => item.id === "calculator" || item.id === "dues" || item.id === "reports" || item.id === "accounts" || item.id === "maps" || item.id === "settings");
+  const moreItems = navItems.filter((item) => item.id === "calculator" || item.id === "dues" || item.id === "reports" || item.id === "accounts" || item.id === "maps" || item.id === "logs" || item.id === "settings");
   const moreActive = moreItems.some((item) => item.id === view);
   return (
     <div className="app-frame">
@@ -88,7 +90,7 @@ export function AppShell({ view, onAdd, onSignOut, signingOut, children }: AppSh
           {moreItems.map(({ id, label, icon: Icon }) => (
             <Link key={id} href={appRoutes[id]} className={view === id ? "mobile-more-link active" : "mobile-more-link"} onClick={() => setMoreOpen(false)} aria-current={view === id ? "page" : undefined}>
               <span><Icon size={22} weight={view === id ? "fill" : "duotone"} /></span>
-              <span><strong>{label}</strong><small>{id === "calculator" ? "Split an amount into percentages and goals" : id === "dues" ? "Payments, reminders, and money between people" : id === "reports" ? "Spending patterns and monthly comparisons" : id === "accounts" ? "Balances, transfers, and account-wise transactions" : id === "maps" ? "Kathmandu income and expense locations" : "Preferences, categories, and security"}</small></span>
+              <span><strong>{label}</strong><small>{id === "calculator" ? "Split an amount into percentages and goals" : id === "dues" ? "Payments, reminders, and money between people" : id === "reports" ? "Spending patterns and monthly comparisons" : id === "accounts" ? "Balances, transfers, and account-wise transactions" : id === "maps" ? "Kathmandu income and expense locations" : id === "logs" ? "Everything you changed, kept for 90 days" : "Preferences, categories, and security"}</small></span>
             </Link>
           ))}
         </nav>

@@ -5,6 +5,7 @@ import { getAuthenticatedSession } from "../../../../../lib/auth";
 import { normalizeRecoveryAnswer, normalizeRecoveryCode, RECOVERY_QUESTION_OPTIONS } from "../../../../../lib/recovery";
 import { hashRecoverySecret } from "../../../../../lib/recovery-crypto";
 import { getPrisma } from "../../../../../lib/prisma";
+import { recordActivitySafely } from "../../../../../lib/activity-recorder";
 
 export const runtime = "nodejs";
 
@@ -32,6 +33,7 @@ export async function POST(request: Request) {
     hashRecoverySecret(normalizeRecoveryAnswer(parsed.data.answerTwo)),
     hashRecoverySecret(normalizeRecoveryCode(parsed.data.recoveryCode)),
   ]);
+  const hadRecovery = Boolean(await getPrisma().accountRecovery.findUnique({ where: { userId: session.user.id }, select: { userId: true } }));
   await getPrisma().accountRecovery.upsert({
     where: { userId: session.user.id },
     create: {
@@ -52,5 +54,6 @@ export async function POST(request: Request) {
       lockedUntil: null,
     },
   });
+  await recordActivitySafely(session.user.id, { action: hadRecovery ? "recovery.updated" : "recovery.set_up", area: "security", title: hadRecovery ? "Updated account recovery" : "Set up account recovery", subject: "Security questions and a recovery code" });
   return NextResponse.json({ ok: true });
 }
