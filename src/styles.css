@@ -2447,6 +2447,8 @@ strong {
 .month-picker .month-label { display: grid; justify-items: center; gap: 1px; line-height: 1.15; }
 .month-picker .month-label.is-bs { font-size: 18px; letter-spacing: 0; }
 .month-picker .month-label > small { color: var(--muted); font-size: var(--text-meta); font-weight: 700; letter-spacing: 0; }
+.month-picker .month-today-chip { margin-left: 4px; padding: 3px 10px; border: 1px solid color-mix(in srgb, var(--blue) 40%, var(--line)); border-radius: 999px; background: transparent; color: var(--blue); font-size: var(--text-meta); font-weight: 700; cursor: pointer; white-space: nowrap; }
+.month-picker .month-today-chip:hover { background: color-mix(in srgb, var(--blue) 10%, transparent); }
 
 .nepali-year-section { display: grid; gap: 14px; margin-bottom: 26px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 15px; background: var(--paper-strong); }
 .fiscal-year-picker { display: flex; align-items: center; gap: 8px; }

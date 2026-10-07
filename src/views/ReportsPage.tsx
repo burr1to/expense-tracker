@@ -9,12 +9,13 @@ import { MonthPicker } from "../components/MonthPicker";
 import { formatMoney } from "../lib/currency";
 import { countsAsIncomeOrSpending } from "../lib/categories";
 import { isInMonth, monthKey, todayInput } from "../lib/dates";
+import type { PeriodKey } from "../lib/period";
 import { monthlySeries, summarizeLedger } from "../lib/ledger";
 import { financialMilestones } from "../lib/milestones";
 import type { CalendarSystem, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount } from "../types";
 import { totalCurrentBalance } from "../lib/account-balances";
 import { paymentAccountLabel } from "../lib/payment-accounts";
-import { isCompletedReportMonth } from "../lib/monthly-report";
+import { isCompletedReportMonth, reportFileKey } from "../lib/monthly-report";
 import { addFiscalYears, fiscalYearBounds, fiscalYearLabel, fiscalYearOf } from "../lib/fiscal-year";
 import { compareFestivalSpending, expensesBetween, FESTIVALS, festivalMonthLabel, type FestivalComparison } from "../lib/festivals";
 import { adToBs } from "../lib/nepali-date";
@@ -22,24 +23,24 @@ const reportCategoryColors = ["#0072b2", "#e69f00", "#009e73", "#d55e00", "#cc79
 
 interface ReportsPageProps {
   calendarSystem: CalendarSystem;
-  month: Date;
+  period: PeriodKey;
   currency: CurrencyCode;
   transactions: LedgerTransaction[];
   customCategories: CustomCategory[];
   paymentAccounts: PaymentAccount[];
   dueItems: DueItem[];
-  onMonthChange: (date: Date) => void;
+  onPeriodChange: (period: PeriodKey) => void;
   onAdd: () => void;
   allowPdfDownload?: boolean;
 }
 
-export function ReportsPage({ month, currency, transactions, customCategories, paymentAccounts, dueItems, onMonthChange, onAdd, allowPdfDownload = false, calendarSystem }: ReportsPageProps) {
+export function ReportsPage({ period: month, currency, transactions, customCategories, paymentAccounts, dueItems, onPeriodChange, onAdd, allowPdfDownload = false, calendarSystem }: ReportsPageProps) {
   const [activeCategoryIndex, setActiveCategoryIndex] = useState<number | null>(null);
   const current = useMemo(() => transactions.filter((item) => isInMonth(item.occurredOn, month)), [month, transactions]);
   const summary = useMemo(() => summarizeLedger(current, customCategories), [current, customCategories]);
   const expenseCount = useMemo(() => current.reduce((count, item) => count + (item.kind === "expense" && countsAsIncomeOrSpending(item) ? 1 : 0), 0), [current]);
   const categoryData = summary.categories.map((item, index) => ({ ...item, color: reportCategoryColors[index % reportCategoryColors.length] }));
-  const history = useMemo(() => monthlySeries(transactions), [transactions]);
+  const history = useMemo(() => monthlySeries(transactions, calendarSystem), [calendarSystem, transactions]);
   const milestones = useMemo(() => financialMilestones(transactions, dueItems), [dueItems, transactions]);
   const activeCategory = activeCategoryIndex === null ? undefined : categoryData[activeCategoryIndex];
   const trackedBalance = totalCurrentBalance(paymentAccounts);
@@ -52,14 +53,14 @@ export function ReportsPage({ month, currency, transactions, customCategories, p
 
   return (
     <div className="page reports-page">
-      <header className="page-header"><div><span className="eyebrow">The bigger picture</span><h1>Reports</h1><p>See where your money moved and how the months compare.</p></div><div className="report-header-actions"><MonthPicker calendarSystem={calendarSystem} month={month} onChange={onMonthChange} />{canDownloadPdf && <a className="secondary-button" href={`/api/reports/monthly?month=${reportMonthKey}`} download={`SaveYoRupee-${reportMonthKey}-monthly-report.pdf`}><DownloadSimple size={17} />Download PDF</a>}</div></header>
+      <header className="page-header"><div><span className="eyebrow">The bigger picture</span><h1>Reports</h1><p>See where your money moved and how the months compare.</p></div><div className="report-header-actions"><MonthPicker calendarSystem={calendarSystem} period={month} onChange={onPeriodChange} />{canDownloadPdf && <a className="secondary-button" href={`/api/reports/monthly?month=${encodeURIComponent(reportMonthKey)}`} download={`SaveYoRupee-${reportFileKey(reportMonthKey)}-monthly-report.pdf`}><DownloadSimple size={17} />Download PDF</a>}</div></header>
       <section className="report-kpis">
         <div><span>Savings rate</span><strong className={summary.savedPercentage < 0 ? "negative" : ""}>{summary.savedPercentage}%</strong><small>{summary.savedPercentage >= 0 ? <><TrendUp size={15} /> of income retained</> : <><TrendDown size={15} /> spending above income</>}</small></div>
         <div><span>Tracked balance</span>{balancesShown || !paymentAccounts.length ? <strong>{formatMoney(trackedBalance, currency)}</strong> : <BalanceLocked compact title="Hidden" />}<small>{paymentAccounts.length} {paymentAccounts.length === 1 ? "account" : "accounts"} checked manually</small></div>
         <div><span>Largest category</span><strong>{summary.categories[0]?.label ?? "—"}</strong><small>{summary.categories[0] ? formatMoney(summary.categories[0].value, currency) : "No expenses"}</small></div>
         <div><span>Average expense</span><strong>{formatMoney(summary.expenses / Math.max(1, expenseCount), currency)}</strong><small>per expense entry</small></div>
       </section>
-      <NepaliYearSection transactions={transactions} currency={currency} />
+      <NepaliYearSection transactions={transactions} currency={currency} allowPdfDownload={allowPdfDownload} />
       <section className="reports-grid">
         <article className="report-panel category-report">
           <div className="section-heading"><div><span className="section-label">Category mix</span><h2>Where it went</h2></div><strong>{formatMoney(summary.expenses, currency)}</strong></div>
@@ -85,7 +86,7 @@ export function ReportsPage({ month, currency, transactions, customCategories, p
  * what salaries, taxes and household budgets in Nepal actually run on. A
  * Jan-Dec summary matches nothing a user here files against.
  */
-function NepaliYearSection({ transactions, currency }: { transactions: LedgerTransaction[]; currency: CurrencyCode }) {
+function NepaliYearSection({ transactions, currency, allowPdfDownload }: { transactions: LedgerTransaction[]; currency: CurrencyCode; allowPdfDownload: boolean }) {
   const today = todayInput();
   const [fiscalKey, setFiscalKey] = useState(() => { try { return fiscalYearOf(today); } catch { return null; } });
   if (!fiscalKey) return null;
@@ -119,7 +120,7 @@ function NepaliYearSection({ transactions, currency }: { transactions: LedgerTra
 
   return <section className="nepali-year-section" aria-label="Nepali fiscal year and festivals">
     <div className="section-heading"><div><span className="section-label">Nepali year</span><h2>Fiscal year and festivals</h2></div>
-      <div className="fiscal-year-picker"><button className="icon-button" onClick={() => step(-1)} aria-label="Previous fiscal year"><CaretLeft size={17} /></button><strong>{fiscalYearLabel(fiscalKey)}</strong><button className="icon-button" onClick={() => step(1)} aria-label="Next fiscal year"><CaretRight size={17} /></button></div>
+      <div className="fiscal-year-picker"><button className="icon-button" onClick={() => step(-1)} aria-label="Previous fiscal year"><CaretLeft size={17} /></button><strong>{fiscalYearLabel(fiscalKey)}</strong><button className="icon-button" onClick={() => step(1)} aria-label="Next fiscal year"><CaretRight size={17} /></button>{allowPdfDownload && isCompletedReportMonth(fiscalKey) && <a className="secondary-button small" href={`/api/reports/monthly?month=${encodeURIComponent(fiscalKey)}`} download={`SaveYoRupee-${reportFileKey(fiscalKey)}-summary.pdf`}><DownloadSimple size={16} />Download FY summary</a>}</div>
     </div>
     <p className="fiscal-year-range">Shrawan 1 to the end of Ashadh · {format(parseISO(bounds.start), "MMM d, yyyy")} – {format(parseISO(bounds.endExclusive), "MMM d, yyyy")}</p>
     <div className="fiscal-year-kpis">

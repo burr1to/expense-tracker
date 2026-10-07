@@ -1,5 +1,6 @@
 import {
   addMonthsToKey,
+  daysBetweenIso,
   currentMonthKey as currentPeriodKey,
   isMonthKey,
   monthLabel,
@@ -8,10 +9,13 @@ import {
   todayInAppZone,
 } from "./period";
 import { countsAsIncomeOrSpending } from "./categories";
+// Registers the fiscal-year resolver (and through it the BS calendar) with period.ts.
+import { addFiscalYears, fiscalYearLabel, isFiscalYearKey } from "./fiscal-year";
 import { ALL_SPENDING_CATEGORY, ALL_SPENDING_LABEL } from "./budgets";
 import type { CurrencyCode } from "../types";
 
 const MONTH_KEY = /^(\d{4})-(0[1-9]|1[0-2])$/;
+const BS_MONTH_KEY = /^BS:\d{4}-(0[1-9]|1[0-2])$/;
 
 export interface MonthlyReportTransaction {
   id: string;
@@ -91,6 +95,12 @@ interface AmountGroup {
 export interface MonthlyReport {
   monthKey: string;
   monthLabel: string;
+  /** First day of the period, `YYYY-MM-DD`; day N of the report is `periodStart` + N - 1. */
+  periodStart: string;
+  /** Days in the period: 28-31 for AD, 29-32 for a BS month, 365 or 366 for a fiscal year. */
+  dayCount: number;
+  /** What "prior" compares against: the previous month, or the previous fiscal year. */
+  periodNoun: "month" | "year";
   displayName: string;
   currency: CurrencyCode;
   generatedOn: string;
@@ -122,8 +132,23 @@ export function previousMonthKey(now = new Date()) {
   return toStorageKey(addMonthsToKey(currentPeriodKey("AD", now), -1));
 }
 
+/**
+ * Periods the PDF route serves: a stored Gregorian month (`2026-08`), a Bikram
+ * Sambat month (`BS:2083-06`), or a Nepali fiscal year (`FY:2082-83`).
+ */
+export function isReportPeriodKey(key: string) {
+  return MONTH_KEY.test(key) || BS_MONTH_KEY.test(key) || isFiscalYearKey(key);
+}
+
+/** A report period that has fully ended in Kathmandu. */
 export function isCompletedReportMonth(monthKey: string, now = new Date()) {
-  return MONTH_KEY.test(monthKey) && monthKey < currentMonthKey(now);
+  if (!isReportPeriodKey(monthKey)) return false;
+  try { return periodBounds(monthKey).endExclusive <= todayInAppZone(now); } catch { return false; }
+}
+
+/** A report key as it may appear in a file name: `BS:2083-06` -> `BS-2083-06`. */
+export function reportFileKey(key: string) {
+  return key.replace(/:/g, "-");
 }
 
 /** How many days into a month the bell keeps offering last month's report. */
@@ -148,16 +173,19 @@ export function monthlyReportNotice(transactions: readonly { occurredOn: string;
 }
 
 export function reportMonthBounds(monthKey: string) {
-  if (!isMonthKey(monthKey)) throw new Error("Invalid report month.");
+  if (!isMonthKey(monthKey) && !isFiscalYearKey(monthKey)) throw new Error("Invalid report month.");
   return periodBounds(monthKey);
 }
 
+/** The period a report compares against: the previous month in the same calendar, or the previous fiscal year. */
 export function precedingMonthKey(monthKey: string) {
+  if (isFiscalYearKey(monthKey)) return addFiscalYears(monthKey, -1);
   if (!isMonthKey(monthKey)) throw new Error("Invalid report month.");
   return toStorageKey(addMonthsToKey(monthKey, -1));
 }
 
 export function formatMonthLabel(monthKey: string) {
+  if (isFiscalYearKey(monthKey)) return fiscalYearLabel(monthKey);
   if (!isMonthKey(monthKey)) throw new Error("Invalid report month.");
   return monthLabel(monthKey);
 }
@@ -193,10 +221,14 @@ export function buildMonthlyReport(input: MonthlyReportInput, now = new Date()):
   const previousExpenseMinor = sumKind(previousCounted, "expense");
   const expenseTransactions = counted.filter((item) => item.kind === "expense");
   const spentByCategory = new Map(groupAmounts(expenseTransactions, (item) => item.category).map((item) => [item.label, item.amountMinor]));
+  const bounds = reportMonthBounds(input.monthKey);
 
   return {
     monthKey: input.monthKey,
     monthLabel: formatMonthLabel(input.monthKey),
+    periodStart: bounds.start,
+    dayCount: daysBetweenIso(bounds.start, bounds.endExclusive),
+    periodNoun: isFiscalYearKey(input.monthKey) ? "year" : "month",
     displayName: input.displayName,
     currency: input.currency,
     generatedOn: now.toISOString(),

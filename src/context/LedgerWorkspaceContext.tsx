@@ -2,6 +2,7 @@
 
 import { createContext, useContext, type Dispatch, type SetStateAction } from "react";
 import type { OnboardingStepId } from "../lib/onboarding";
+import type { PeriodKey } from "../lib/period";
 import type { LedgerTransaction, SavedPlace } from "../types";
 import { useLedger } from "./LedgerContext";
 
@@ -12,8 +13,9 @@ export interface DashboardFocus {
 
 interface LedgerWorkspaceContextValue {
   ledger: ReturnType<typeof useLedger>;
-  month: Date;
-  setMonth: Dispatch<SetStateAction<Date>>;
+  /** The month every view shows, in the user's calendar (`AD:2026-10`, `BS:2083-06`). */
+  period: PeriodKey;
+  setPeriod: Dispatch<SetStateAction<PeriodKey>>;
   homeFocus: DashboardFocus | null;
   recentlyAddedTransactionId: string | null;
   setHomeSelectedDate: Dispatch<SetStateAction<string>>;

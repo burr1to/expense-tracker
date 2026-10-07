@@ -6,8 +6,8 @@ import { TransactionsPage } from "../../../views/TransactionsPage";
 export default function TransactionsRoute() {
   const {
     ledger,
-    month,
-    setMonth,
+    period,
+    setPeriod,
     openAddForDate,
     openDuplicate,
     openEdit,
@@ -22,7 +22,7 @@ export default function TransactionsRoute() {
   };
 
   return <TransactionsPage
-    month={month}
+    period={period}
     calendarSystem={ledger.profile.calendarSystem}
     currency={ledger.profile.currency}
     transactions={ledger.transactions}
@@ -30,7 +30,7 @@ export default function TransactionsRoute() {
     customCategories={ledger.customCategories}
     customSubcategories={ledger.customSubcategories}
     paymentAccounts={ledger.paymentAccounts}
-    onMonthChange={setMonth}
+    onPeriodChange={setPeriod}
     onAdd={openAddForDate}
     onDuplicate={openDuplicate}
     onEdit={openEdit}

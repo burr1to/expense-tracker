@@ -1,5 +1,8 @@
 import { format, parseISO } from "date-fns";
 import { countsAsIncomeOrSpending, getCategory } from "./categories";
+// Registers the Bikram Sambat calendar for BS month buckets.
+import "./nepali-date";
+import { calendarFor, monthKeyOf, parseMonthKey, type CalendarSystem } from "./period";
 import type { CustomCategory, LedgerTransaction, TransactionCategory } from "../types";
 
 export interface CategoryTotal {
@@ -67,11 +70,17 @@ export function dailyExpenseSeries(transactions: readonly LedgerTransaction[]) {
     .map(([date, amount]) => ({ date, label: format(parseISO(date), "MMM d"), amount }));
 }
 
-export function monthlySeries(transactions: readonly LedgerTransaction[]) {
+/** The last six months with activity, bucketed by the user's calendar (BS months in BS mode). */
+export function monthlySeries(transactions: readonly LedgerTransaction[], system: CalendarSystem = "AD") {
   const months = new Map<string, { income: number; expenses: number }>();
+  const bucketOf = (occurredOn: string) => {
+    if (system === "AD") return occurredOn.slice(0, 7);
+    try { return monthKeyOf(occurredOn, system); } catch { return null; }
+  };
   for (const transaction of transactions) {
     if (!countsAsIncomeOrSpending(transaction)) continue;
-    const key = transaction.occurredOn.slice(0, 7);
+    const key = bucketOf(transaction.occurredOn);
+    if (!key) continue;
     const current = months.get(key) ?? { income: 0, expenses: 0 };
     current[transaction.kind === "income" ? "income" : "expenses"] += transaction.amountMinor;
     months.set(key, current);
@@ -79,5 +88,5 @@ export function monthlySeries(transactions: readonly LedgerTransaction[]) {
   return [...months.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .slice(-6)
-    .map(([key, values]) => ({ month: format(parseISO(`${key}-01`), "MMM"), ...values, saved: values.income - values.expenses }));
+    .map(([key, values]) => ({ month: system === "AD" ? format(parseISO(`${key}-01`), "MMM") : calendarFor(system).monthName(parseMonthKey(key).month), ...values, saved: values.income - values.expenses }));
 }

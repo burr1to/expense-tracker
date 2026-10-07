@@ -68,8 +68,10 @@ describe("shiftMonthKey", () => {
     expect(shiftMonthKey("2026-12", 1)).toBe("2027-01");
   });
 
-  it("refuses anything but a stored Gregorian month", () => {
-    expect(() => shiftMonthKey("BS:2083-06", -1)).toThrow(/Invalid month key/);
+  it("steps a BS key in the BS calendar, and refuses festival keys", () => {
+    expect(shiftMonthKey("BS:2083-06", -1)).toBe("BS:2083-05");
+    expect(shiftMonthKey("BS:2083-01", -1)).toBe("BS:2082-12");
+    expect(() => shiftMonthKey("FEST:dashain-tihar-2083", -1)).toThrow(/Invalid month key/);
   });
 });
 

@@ -1,9 +1,9 @@
-import { addDays, compareAsc, endOfMonth, format, getDate, getDaysInMonth, isSameMonth, parseISO, startOfMonth } from "date-fns";
+import { addDays, format, parseISO } from "date-fns";
 import { budgetCoversCategory, isAllSpendingBudget } from "./budgets";
 import { isLoanCategory } from "./categories";
 import { dueRemaining } from "./dues";
 import { transactionCountsTowardBudget } from "./household";
-import { isInMonth, monthKeyFor, todayInput } from "./dates";
+import { isInMonth, periodKeyFor, periodRange, toDateInput, todayInput, type MonthRef } from "./dates";
 import { isMonthKey, isSameMonthKey, type PeriodBounds } from "./period";
 import { recurringOccurrencesBetween } from "./recurrence";
 import type { Budget, DueItem, LedgerTransaction, RecurringEntry } from "../types";
@@ -108,7 +108,7 @@ function nextOccurrenceOfDay(day: number, today: string): string {
 export function detectSpendingHorizon(
   recurringEntries: readonly RecurringEntry[],
   transactions: readonly LedgerTransaction[],
-  month: Date,
+  month: MonthRef,
   today = todayInput(),
 ): SpendingHorizon {
   const scheduled = recurringEntries
@@ -120,7 +120,7 @@ export function detectSpendingHorizon(
   const day = dominantIncomeDay(transactions);
   if (day) return horizonTo(nextOccurrenceOfDay(day, today), today, "incomePattern");
 
-  const monthEnd = format(endOfMonth(month), "yyyy-MM-dd");
+  const monthEnd = periodRange(month).end;
   return horizonTo(monthEnd > today ? monthEnd : today, today, "periodEnd");
 }
 
@@ -180,13 +180,13 @@ export function calculateSafeToSpendV2(
 const sum = (values: readonly number[]) => values.reduce((total, value) => total + value, 0);
 const percentage = (value: number, total: number) => total > 0 ? Math.round((value / total) * 100) : 0;
 
-function monthTiming(month: Date, today: Date) {
-  const monthStart = startOfMonth(month);
-  const todayStart = startOfMonth(today);
-  const daysInMonth = getDaysInMonth(month);
-  if (compareAsc(monthStart, todayStart) < 0) return { elapsedPercentage: 100, remainingDays: 0 };
-  if (compareAsc(monthStart, todayStart) > 0) return { elapsedPercentage: 0, remainingDays: daysInMonth };
-  const elapsedDays = getDate(today);
+/** Where `today` sits in the month, counted over the month's own days (a BS month has 29 to 32). */
+function monthTiming(month: MonthRef, today: Date) {
+  const { start, end, days: daysInMonth } = periodRange(month);
+  const todayKey = toDateInput(today);
+  if (end < todayKey) return { elapsedPercentage: 100, remainingDays: 0 };
+  if (start > todayKey) return { elapsedPercentage: 0, remainingDays: daysInMonth };
+  const elapsedDays = dayDifference(start, todayKey) + 1;
   return {
     elapsedPercentage: Math.round((elapsedDays / daysInMonth) * 100),
     remainingDays: Math.max(1, daysInMonth - elapsedDays + 1),
@@ -198,17 +198,16 @@ interface RecurringOccurrence {
   occurredOn: string;
 }
 
-const upcomingRecurringForMonth = (entries: readonly RecurringEntry[], month: Date): RecurringOccurrence[] => {
-  const start = format(startOfMonth(month), "yyyy-MM-dd");
-  const end = format(endOfMonth(month), "yyyy-MM-dd");
+const upcomingRecurringForMonth = (entries: readonly RecurringEntry[], month: MonthRef): RecurringOccurrence[] => {
+  const { start, end } = periodRange(month);
   return entries.flatMap((entry) => recurringOccurrencesBetween(entry, start, end).map((occurredOn) => ({ entry, occurredOn })));
 };
 
-const upcomingDuesForMonth = (items: readonly DueItem[], month: Date) =>
+const upcomingDuesForMonth = (items: readonly DueItem[], month: MonthRef) =>
   items.filter((item) => item.status === "open" && isInMonth(item.dueOn, month));
 
-const upcomingRecurringForBreathingRoom = (entries: readonly RecurringEntry[], month: Date, today: Date) => {
-  if (!isSameMonth(month, today)) return upcomingRecurringForMonth(entries, month);
+const upcomingRecurringForBreathingRoom = (entries: readonly RecurringEntry[], month: MonthRef, today: Date) => {
+  if (!isInMonth(toDateInput(today), month)) return upcomingRecurringForMonth(entries, month);
 
   // The dashboard is a near-term cash-flow view. Include overdue entries and
   // the next 30 days so a payment due just after month-end is still visible.
@@ -295,7 +294,7 @@ export function calculateBudgetPacing(
   transactions: readonly LedgerTransaction[],
   recurringEntries: readonly RecurringEntry[],
   dueItems: readonly DueItem[],
-  month: Date,
+  month: MonthRef,
   today = new Date(),
 ): BudgetPacing[] {
   const timing = monthTiming(month, today);
@@ -304,7 +303,7 @@ export function calculateBudgetPacing(
   const dues = upcomingDuesForMonth(dueItems, month).filter((item) => item.kind === "payment" || item.kind === "borrowed");
 
   return budgets
-    .filter((budget) => isMonthKey(budget.monthKey) && isSameMonthKey(budget.monthKey, monthKeyFor(month)))
+    .filter((budget) => isMonthKey(budget.monthKey) && isSameMonthKey(budget.monthKey, periodKeyFor(month)))
     .map((budget) => paceBudget(budget, expenses, recurring, dues, timing, "month"));
 }
 
@@ -345,8 +344,8 @@ export interface UnbudgetedSpending {
  * This month's expenses that no category budget counts. An "All spending"
  * limit does not make a category budgeted, and loan movements are not spending.
  */
-export function calculateUnbudgetedSpending(budgets: readonly Budget[], transactions: readonly LedgerTransaction[], month: Date): UnbudgetedSpending {
-  const categoryBudgets = budgets.filter((budget) => !isAllSpendingBudget(budget) && isMonthKey(budget.monthKey) && isSameMonthKey(budget.monthKey, monthKeyFor(month)));
+export function calculateUnbudgetedSpending(budgets: readonly Budget[], transactions: readonly LedgerTransaction[], month: MonthRef): UnbudgetedSpending {
+  const categoryBudgets = budgets.filter((budget) => !isAllSpendingBudget(budget) && isMonthKey(budget.monthKey) && isSameMonthKey(budget.monthKey, periodKeyFor(month)));
   const totals = new Map<string, number>();
   for (const item of transactions) {
     if (item.kind !== "expense" || isLoanCategory(item.category) || !isInMonth(item.occurredOn, month)) continue;
@@ -361,7 +360,7 @@ export function calculateMonthlyBreathingRoom(
   transactions: readonly LedgerTransaction[],
   recurringEntries: readonly RecurringEntry[],
   dueItems: readonly DueItem[],
-  month: Date,
+  month: MonthRef,
   today = new Date(),
 ): MonthlyBreathingRoom {
   const monthTransactions = transactions.filter((item) => isInMonth(item.occurredOn, month));

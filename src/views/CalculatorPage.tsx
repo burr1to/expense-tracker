@@ -10,6 +10,7 @@ import { averagingWindowLabel, calculateCategoryMonthlyAverages, calculateDebtPa
 import { getCategory, spendingCategoriesFor } from "../lib/categories";
 import { formatMoney, majorToMinor } from "../lib/currency";
 import { monthKey, todayInput } from "../lib/dates";
+import { calendarFor, monthLabel, parseMonthKey, type PeriodKey } from "../lib/period";
 import { transactionCountsTowardBudget } from "../lib/household";
 import { simulateWhatIf } from "../lib/what-if";
 import type { CurrencyCode, CustomCategory, LedgerTransaction, SavingsGoal } from "../types";
@@ -31,7 +32,8 @@ type CalculatorTool = "split" | "goal-pace" | "budgets" | "what-if" | "debt" | "
 
 interface CalculatorPageProps {
   currency: CurrencyCode;
-  month: Date;
+  /** The workspace month smart budgets are saved for (a BS key saves BS budgets). */
+  period: PeriodKey;
   transactions: LedgerTransaction[];
   customCategories: CustomCategory[];
   goals?: SavingsGoal[];
@@ -67,7 +69,7 @@ const toolItems: { id: CalculatorTool; label: string; description: string; icon:
   { id: "bills", label: "Split a bill", description: "Divide a bill fairly", icon: HandCoins },
 ];
 
-export function CalculatorPage({ currency, month, transactions, customCategories, goals = [], onSaveGoal, onSaveBudgets }: CalculatorPageProps) {
+export function CalculatorPage({ currency, period: month, transactions, customCategories, goals = [], onSaveGoal, onSaveBudgets }: CalculatorPageProps) {
   const [tool, setTool] = useState<CalculatorTool>("split");
   return <div className="page calculator-page">
     <header className="page-header calculator-main-header">
@@ -186,7 +188,7 @@ function GoalPaceCalculator({ currency, onSaveGoal }: { currency: CurrencyCode; 
   </section>;
 }
 
-function SmartBudgetCalculator({ currency, month, transactions, customCategories, onSaveBudgets }: { currency: CurrencyCode; month: Date; transactions: LedgerTransaction[]; customCategories: CustomCategory[]; onSaveBudgets: CalculatorPageProps["onSaveBudgets"] }) {
+function SmartBudgetCalculator({ currency, month, transactions, customCategories, onSaveBudgets }: { currency: CurrencyCode; month: PeriodKey; transactions: LedgerTransaction[]; customCategories: CustomCategory[]; onSaveBudgets: CalculatorPageProps["onSaveBudgets"] }) {
   const [lookback, setLookback] = useState("3");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -209,12 +211,12 @@ function SmartBudgetCalculator({ currency, month, transactions, customCategories
     setSaving(true); setError(null); setSuccess(null);
     try {
       await onSaveBudgets(monthKey(month), chosen.map((row) => ({ category: row.category, amount: row.amount })));
-      setSuccess(`Saved ${chosen.length} ${chosen.length === 1 ? "budget" : "budgets"} for ${format(month, "MMMM yyyy")}. See them in Plan → Budgets.`);
+      setSuccess(`Saved ${chosen.length} ${chosen.length === 1 ? "budget" : "budgets"} for ${monthLabel(month)}. See them in Plan → Budgets.`);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save budgets."); }
     finally { setSaving(false); }
   };
   return <section className="calculator-tool-layout">
-    <article className="calculator-tool-panel"><ToolHeading step="Smart budgets" title="Let your history suggest a limit" description="Averages come from complete months only, so a half-finished month never drags a suggestion down. Untick or adjust any row before saving." /><Select label="Look back over" value={lookback} onChange={(value) => { if (value) { setLookback(value); setEdits({}); change(); } }} data={[{ value: "3", label: "3 months" }, { value: "6", label: "6 months" }, { value: "12", label: "12 months" }]} allowDeselect={false} disabled={saving} /><div className="calculator-tool-actions"><button type="button" className="primary-button" disabled={!chosen.length || saving} onClick={() => void saveBudgets()}>{saving ? <><ButtonSpinner />Saving budgets…</> : <><ChartPieSlice size={17} />Save {chosen.length || ""} {chosen.length === 1 ? "budget" : "budgets"} for {format(month, "MMMM")}</>}</button></div><ToolMessage error={error} success={success} /></article>
+    <article className="calculator-tool-panel"><ToolHeading step="Smart budgets" title="Let your history suggest a limit" description="Averages come from complete months only, so a half-finished month never drags a suggestion down. Untick or adjust any row before saving." /><Select label="Look back over" value={lookback} onChange={(value) => { if (value) { setLookback(value); setEdits({}); change(); } }} data={[{ value: "3", label: "3 months" }, { value: "6", label: "6 months" }, { value: "12", label: "12 months" }]} allowDeselect={false} disabled={saving} /><div className="calculator-tool-actions"><button type="button" className="primary-button" disabled={!chosen.length || saving} onClick={() => void saveBudgets()}>{saving ? <><ButtonSpinner />Saving budgets…</> : <><ChartPieSlice size={17} />Save {chosen.length || ""} {chosen.length === 1 ? "budget" : "budgets"} for {calendarFor(parseMonthKey(month).system).monthName(parseMonthKey(month).month)}</>}</button></div><ToolMessage error={error} success={success} /></article>
     <aside className="calculator-result-panel"><span className="section-label">Suggested budgets</span><h2>{rows.length ? `Based on ${basisLabel}` : "Not enough history yet"}</h2>{rows.length > 0 && basis.months < Number(lookback) && <p className="calculator-note smart-budget-basis">Only {basis.months} complete {basis.months === 1 ? "month" : "months"} of history so far, so each average covers {basis.months === 1 ? "that month" : "those months"}.</p>}{rows.length ? <div className="smart-budget-list">{rows.map((row) => <div className={`smart-budget-row${row.included ? "" : " is-off"}`} key={row.category}>
       <Checkbox checked={row.included} onChange={(event) => toggle(row.category, event.currentTarget.checked)} disabled={saving} aria-label={`Include ${row.label}`} />
       <div><strong>{row.label}</strong><small><span className="calculator-money">{formatMoney(row.averageMinor, currency)}</span> a month on average</small></div>

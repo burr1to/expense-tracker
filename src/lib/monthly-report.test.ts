@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildMonthlyReport, currentMonthKey, isCompletedReportMonth, monthlyReportNotice, type MonthlyReportInput, type MonthlyReportTransaction } from "./monthly-report";
+import { bsDaysInMonth, bsToAd } from "./nepali-date";
+import { buildMonthlyReport, currentMonthKey, isCompletedReportMonth, precedingMonthKey, monthlyReportNotice, type MonthlyReportInput, type MonthlyReportTransaction } from "./monthly-report";
 import { generateMonthlyReportPdf } from "./monthly-report-pdf";
 
 const transaction = (overrides: Partial<MonthlyReportTransaction> = {}): MonthlyReportTransaction => ({
@@ -43,6 +44,26 @@ describe("monthly report availability", () => {
     expect(monthlyReportNotice([{ occurredOn: "2026-07-31" }], { now })).toMatchObject({ monthKey: "2026-07", monthLabel: "July 2026" });
     expect(isCompletedReportMonth("2026-07", now)).toBe(true);
     expect(isCompletedReportMonth("2026-08", now)).toBe(false);
+  });
+});
+
+describe("BS and fiscal-year report periods", () => {
+  it("accepts completed BS months and fiscal years, measured in Kathmandu", () => {
+    const now = new Date("2026-10-20T06:00:00.000Z");
+    expect(isCompletedReportMonth("BS:2083-06", now)).toBe(true);
+    expect(isCompletedReportMonth("BS:2083-07", now)).toBe(false);
+    expect(isCompletedReportMonth("FY:2082-83", now)).toBe(true);
+    expect(isCompletedReportMonth("FY:2083-84", now)).toBe(false);
+    expect(isCompletedReportMonth("AD:2026-08", now)).toBe(false);
+    expect(isCompletedReportMonth("FEST:dashain-tihar-2083", now)).toBe(false);
+  });
+
+  it("compares a BS month with the previous BS month and spans its own days", () => {
+    expect(precedingMonthKey("BS:2083-01")).toBe("BS:2082-12");
+    expect(precedingMonthKey("FY:2082-83")).toBe("FY:2081-82");
+    const report = buildMonthlyReport(input({ monthKey: "BS:2083-06" }));
+    expect(report).toMatchObject({ monthLabel: "Ashwin 2083", periodStart: bsToAd({ year: 2083, month: 6, day: 1 }), dayCount: bsDaysInMonth(2083, 6), periodNoun: "month" });
+    expect(buildMonthlyReport(input({ monthKey: "FY:2082-83" }))).toMatchObject({ monthLabel: "FY 2082/83", periodNoun: "year" });
   });
 });
 

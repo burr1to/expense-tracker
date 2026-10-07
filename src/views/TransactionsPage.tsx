@@ -1,7 +1,7 @@
 import { Camera, CaretDown, ChatText, CheckCircle, DownloadSimple, FileText, FunnelSimple, MagnifyingGlass, Plus, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
 import { NumberInput, Popover, Select, TextInput } from "@mantine/core";
 import { DatePicker } from "@mantine/dates";
-import { format, isSameMonth, parseISO, startOfMonth } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { useSearchParams } from "next/navigation";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
@@ -17,7 +17,8 @@ import { CategoryIconPicker } from "../components/CategoryIconPicker";
 import { isFullBackupCsv } from "../lib/backup";
 import { allCategoriesFor, CATEGORIES, getCategory, pickerCategoriesFor } from "../lib/categories";
 import { parseTransactionCsv, TRANSACTION_CSV_TEMPLATE, type CsvCategoryDraft, type CsvSubcategoryDraft } from "../lib/csv";
-import { formatLedgerDay, todayInput } from "../lib/dates";
+import { formatLedgerDay, isInMonth, localDate, periodRange, todayInput } from "../lib/dates";
+import { monthKeyOf, type PeriodKey } from "../lib/period";
 import { useToday } from "../lib/use-today";
 import { onlinePaymentAccounts, paymentAccountLabel } from "../lib/payment-accounts";
 import { listLedgerActivity, transferAccountLabel, type TransactionHistoryScope } from "../lib/transaction-history";
@@ -28,9 +29,9 @@ import type { AccountTransfer, CalendarSystem, CurrencyCode, CustomCategory, Cus
 type LedgerKindFilter = TransactionKind | "transfer" | "all";
 
 interface TransactionsPageProps {
-  month: Date;
+  period: PeriodKey;
   currency: CurrencyCode; transactions: LedgerTransaction[]; transfers: AccountTransfer[]; customCategories: CustomCategory[]; customSubcategories: CustomSubcategory[]; paymentAccounts: PaymentAccount[];
-  onMonthChange: (date: Date) => void;
+  onPeriodChange: (period: PeriodKey) => void;
   onAdd: (occurredOn: string) => void; onDuplicate: (transaction: LedgerTransaction) => void; onEdit: (transaction: LedgerTransaction) => void; onDelete: (transaction: LedgerTransaction) => Promise<void>; onDeleteTransfer: (id: string) => Promise<void>;
   onImport: (drafts: TransactionDraft[], newCategories?: CsvCategoryDraft[], newSubcategories?: CsvSubcategoryDraft[]) => Promise<ImportJob | null>;
   importJobs: ImportJob[];
@@ -42,7 +43,7 @@ interface TransactionsPageProps {
   onSaveTransaction?: (draft: TransactionDraft) => Promise<string | undefined>;
 }
 
-export function TransactionsPage({ month, currency, transactions, transfers, customCategories, customSubcategories, paymentAccounts, importJobs, onMonthChange, onAdd, onDuplicate, onEdit, onDelete, onDeleteTransfer, onImport, onDismissImportJob, calendarSystem }: TransactionsPageProps) {
+export function TransactionsPage({ period: month, currency, transactions, transfers, customCategories, customSubcategories, paymentAccounts, importJobs, onPeriodChange, onAdd, onDuplicate, onEdit, onDelete, onDeleteTransfer, onImport, onDismissImportJob, calendarSystem }: TransactionsPageProps) {
   const workspace = useContext(LedgerWorkspaceContext);
   const searchParams = useSearchParams();
   const [query, setQuery] = useState(""); const [kind, setKind] = useState<LedgerKindFilter>("all");
@@ -55,7 +56,9 @@ export function TransactionsPage({ month, currency, transactions, transfers, cus
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [scope, setScope] = useState<TransactionHistoryScope>("history");
   const today = useToday();
-  const [selectedDay, setSelectedDay] = useState<Date>(() => isSameMonth(month, parseISO(today)) ? parseISO(today) : startOfMonth(month));
+  // Today inside the running month, else the month's first day (Ashwin 1 for a BS month).
+  const dayFor = (period: PeriodKey) => localDate(isInMonth(today, period) ? today : periodRange(period).start);
+  const [selectedDay, setSelectedDay] = useState<Date>(() => dayFor(month));
   const [visibleCount, setVisibleCount] = useState(50);
   const selectedDayKey = format(selectedDay, "yyyy-MM-dd");
   // When the date changes under an open tab, a day view sitting on "today" follows it to the new day (and month).
@@ -65,10 +68,9 @@ export function TransactionsPage({ month, currency, transactions, transfers, cus
     if (previous === today) return;
     followedToday.current = today;
     if (selectedDayKey !== previous) return;
-    const next = parseISO(today);
-    setSelectedDay(next);
-    if (!isSameMonth(month, next)) onMonthChange(next);
-  }, [month, onMonthChange, selectedDayKey, today]);
+    setSelectedDay(parseISO(today));
+    if (!isInMonth(today, month)) onPeriodChange(monthKeyOf(today, calendarSystem));
+  }, [calendarSystem, month, onPeriodChange, selectedDayKey, today]);
   // Read at tap time, so a tab left open overnight still adds to the real today.
   const activeOccurredOn = () => scope === "day" ? selectedDayKey : todayInput();
   // A statement's rows are online payments, so Cash in hand is not a statement account; imports land only in your own accounts.
@@ -140,15 +142,14 @@ export function TransactionsPage({ month, currency, transactions, transfers, cus
   const removeTransfer = async (id: string) => { if (deletingId || !window.confirm("Delete this transfer? Account balances will be recalculated.")) return; setDeletingId(`transfer:${id}`); try { await onDeleteTransfer(id); } finally { setDeletingId(null); } };
   const clearFilters = () => { setCategory("all"); setFrom(""); setTo(""); setMin(""); setMax(""); setPaymentMode("all"); };
   const hasActiveFilters = category !== "all" || Boolean(from || to || min || max) || paymentMode !== "all";
-  const changeMonth = (nextMonth: Date) => {
-    onMonthChange(nextMonth);
-    if (!isSameMonth(selectedDay, nextMonth)) setSelectedDay(isSameMonth(nextMonth, parseISO(today)) ? parseISO(today) : startOfMonth(nextMonth));
+  const changeMonth = (nextMonth: PeriodKey) => {
+    onPeriodChange(nextMonth);
+    if (!isInMonth(selectedDayKey, nextMonth)) setSelectedDay(dayFor(nextMonth));
   };
   const selectDay = (value: string | null) => {
     if (!value) return;
-    const nextDay = parseISO(value);
-    setSelectedDay(nextDay);
-    if (!isSameMonth(month, nextDay)) onMonthChange(nextDay);
+    setSelectedDay(parseISO(value));
+    if (!isInMonth(value, month)) onPeriodChange(monthKeyOf(value, calendarSystem));
   };
 
   return <div className="page list-page">
@@ -165,7 +166,7 @@ export function TransactionsPage({ month, currency, transactions, transfers, cus
     })}</section>}
     <section className="transaction-scope">
       <div className={scope === "history" ? "transaction-scope-title is-history" : "transaction-scope-title"}>{scope === "day"
-        ? <><span className="section-label">Viewing month</span><MonthPicker calendarSystem={calendarSystem} month={month} onChange={changeMonth} /><Popover position="bottom-start" shadow="md" withArrow><Popover.Target><button className="current-date" aria-label={`Choose day. Selected ${formatLedgerDay(selectedDay, calendarSystem)}`}>{formatLedgerDay(selectedDay, calendarSystem)} <CaretDown size={13} weight="bold" /></button></Popover.Target><Popover.Dropdown className="day-picker-popover"><DatePicker value={selectedDayKey} onChange={selectDay} firstDayOfWeek={0} /></Popover.Dropdown></Popover></>
+        ? <><span className="section-label">Viewing month</span><MonthPicker calendarSystem={calendarSystem} period={month} onChange={changeMonth} /><Popover position="bottom-start" shadow="md" withArrow><Popover.Target><button className="current-date" aria-label={`Choose day. Selected ${formatLedgerDay(selectedDay, calendarSystem)}`}>{formatLedgerDay(selectedDay, calendarSystem)} <CaretDown size={13} weight="bold" /></button></Popover.Target><Popover.Dropdown className="day-picker-popover"><DatePicker value={selectedDayKey} onChange={selectDay} firstDayOfWeek={0} /></Popover.Dropdown></Popover></>
         : <><span className="section-label">Viewing</span><strong className="month-label">All history</strong><span className="current-date as-text">Every transaction you have recorded</span></>}</div>
       <div className="transaction-scope-controls"><SlidingTabs<TransactionHistoryScope> className="transaction-history-scope" label="Transaction scope" value={scope} onChange={setScope} options={[{ id: "history", label: "All history" }, { id: "day", label: "By day" }]} /><SlidingTabs<LedgerKindFilter> className="transaction-kind-tabs" label="Transaction type" value={kind} onChange={setKind} options={[{ id: "all", label: "All" }, { id: "expense", label: "Expense" }, { id: "income", label: "Income" }, { id: "transfer", label: "Transfer" }]} /></div>
     </section>

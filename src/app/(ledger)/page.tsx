@@ -8,8 +8,8 @@ export default function DashboardRoute() {
   const router = useRouter();
   const {
     ledger,
-    month,
-    setMonth,
+    period,
+    setPeriod,
     homeFocus,
     setHomeSelectedDate,
     openAddForDate,
@@ -17,7 +17,7 @@ export default function DashboardRoute() {
   } = useLedgerWorkspace();
 
   return <DashboardPage
-    month={month}
+    period={period}
     calendarSystem={ledger.profile.calendarSystem}
     focus={homeFocus}
     currency={ledger.profile.currency}
@@ -32,7 +32,7 @@ export default function DashboardRoute() {
     savedPlaces={ledger.savedPlaces}
     hasPin={ledger.profile.hasPin}
     safeToSpendBufferMinor={ledger.profile.safeToSpendBufferMinor}
-    onMonthChange={setMonth}
+    onPeriodChange={setPeriod}
     onAdd={openAddForDate}
     onSelectedDayChange={setHomeSelectedDate}
     onNavigate={navigate}

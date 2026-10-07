@@ -1,7 +1,7 @@
 import { ArrowRight, Bank, CalendarBlank, CaretDown, Check, Flag, Lightbulb, MapPinLine, Minus, Plus, Repeat, TrendDown, TrendUp, WarningCircle } from "@phosphor-icons/react";
 import { Popover, SegmentedControl } from "@mantine/core";
 import { DatePicker } from "@mantine/dates";
-import { format, isSameMonth, parseISO, startOfMonth } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { EmptyState } from "../components/EmptyState";
@@ -14,7 +14,8 @@ import { FestivalHeadsUp } from "../components/FestivalHeadsUp";
 import { ALL_SPENDING_LABEL, budgetAllowanceText, budgetLabel, isAllSpendingBudget } from "../lib/budgets";
 import { getCategory } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
-import { formatLedgerDay, formatLedgerMonth, isInMonth, monthKey } from "../lib/dates";
+import { formatLedgerDay, formatLedgerMonth, isInMonth, localDate, monthKey, periodRange } from "../lib/dates";
+import { monthKeyOf, type PeriodKey } from "../lib/period";
 import { dailyExpenseSeries, summarizeLedger } from "../lib/ledger";
 import { generateInsights } from "../lib/insights";
 import { buildMonthSnapshot, type MonthSnapshot } from "../lib/month-snapshot";
@@ -30,7 +31,7 @@ import { listLedgerActivity, transferAccountLabel } from "../lib/transaction-his
 import type { AccountTransfer, CalendarSystem, AppView, Budget, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount, RecurringEntry, SavedPlace, SavingsGoal } from "../types";
 
 interface DashboardPageProps {
-  month: Date;
+  period: PeriodKey;
   focus: { date: string; revision: number } | null;
   currency: CurrencyCode;
   transactions: LedgerTransaction[];
@@ -45,7 +46,7 @@ interface DashboardPageProps {
   hasPin: boolean;
   safeToSpendBufferMinor: number;
   calendarSystem: CalendarSystem;
-  onMonthChange: (date: Date) => void;
+  onPeriodChange: (period: PeriodKey) => void;
   onAdd: (occurredOn: string) => void;
   onSelectedDayChange: (occurredOn: string) => void;
   onNavigate: (view: AppView) => void;
@@ -83,12 +84,14 @@ function previousMonthLine(target: Extract<MonthSnapshot["target"], { kind: "pre
   return <><span className="amount">{formatMoney(Math.abs(difference), currency)}</span> {difference > 0 ? "more" : "less"} than {when} ({difference > 0 ? "+" : "−"}{Math.abs(target.changePercentage)}%)</>;
 }
 
-export function DashboardPage({ month, focus, currency, transactions, transfers, budgets, recurringEntries, dueItems, goals, customCategories, paymentAccounts, savedPlaces, hasPin, safeToSpendBufferMinor, calendarSystem, onMonthChange, onAdd, onSelectedDayChange, onNavigate, onOpenPlace }: DashboardPageProps) {
+export function DashboardPage({ period: month, focus, currency, transactions, transfers, budgets, recurringEntries, dueItems, goals, customCategories, paymentAccounts, savedPlaces, hasPin, safeToSpendBufferMinor, calendarSystem, onPeriodChange, onAdd, onSelectedDayChange, onNavigate, onOpenPlace }: DashboardPageProps) {
   // Kathmandu today, kept current in a tab left open overnight.
   const today = useToday();
   const [reviewingRecurringId, setReviewingRecurringId] = useState<string | null>(null);
   const [showAllDue, setShowAllDue] = useState(false);
-  const [selectedDay, setSelectedDay] = useState<Date>(() => isSameMonth(month, parseISO(today)) ? parseISO(today) : startOfMonth(month));
+  // The day shown below the month card: today inside the running month, else the month's first day.
+  const dayFor = (period: PeriodKey) => localDate(isInMonth(today, period) ? today : periodRange(period).start);
+  const [selectedDay, setSelectedDay] = useState<Date>(() => dayFor(month));
   const [spendingPeriod, setSpendingPeriod] = useState<SpendingPeriod>("weekly");
   const [placeTrendPeriod, setPlaceTrendPeriod] = useState<PlaceTrendPeriodMonths>(1);
   const [forecastDays, setForecastDays] = useState("30");
@@ -128,10 +131,9 @@ export function DashboardPage({ month, focus, currency, transactions, transfers,
     if (previous === today) return;
     followedToday.current = today;
     if (selectedDayKey !== previous) return;
-    const next = parseISO(today);
-    setSelectedDay(next);
-    if (!isSameMonth(month, next)) onMonthChange(next);
-  }, [month, onMonthChange, selectedDayKey, today]);
+    setSelectedDay(parseISO(today));
+    if (!isInMonth(today, month)) onPeriodChange(monthKeyOf(today, calendarSystem));
+  }, [calendarSystem, month, onPeriodChange, selectedDayKey, today]);
   const dayTransactions = useMemo(() => transactions.filter((item) => item.occurredOn === selectedDayKey), [selectedDayKey, transactions]);
   const dayEntries = useMemo(() => listLedgerActivity(transactions, transfers, paymentAccounts, customCategories, {
     scope: "day", selectedDayKey, kind: "all", category: "all", from: "", to: "", minMinor: null, maxMinor: null, paymentMode: "all", query: "",
@@ -166,15 +168,14 @@ export function DashboardPage({ month, focus, currency, transactions, transfers,
   const hasPlans = currentBudgets.length > 0 || goals.length > 0 || upcomingEntries.length > 0;
   const dueEntries = useMemo(() => recurringEntries.filter((entry) => entry.active && entry.nextDueOn <= today).sort((a, b) => a.nextDueOn.localeCompare(b.nextDueOn)), [recurringEntries, today]);
   const visibleDueEntries = showAllDue ? dueEntries : dueEntries.slice(0, 3);
-  const changeMonth = (nextMonth: Date) => {
-    onMonthChange(nextMonth);
-    if (!isSameMonth(selectedDay, nextMonth)) setSelectedDay(isSameMonth(nextMonth, parseISO(today)) ? parseISO(today) : startOfMonth(nextMonth));
+  const changeMonth = (nextMonth: PeriodKey) => {
+    onPeriodChange(nextMonth);
+    if (!isInMonth(selectedDayKey, nextMonth)) setSelectedDay(dayFor(nextMonth));
   };
   const selectDay = (value: string | null) => {
     if (!value) return;
-    const nextDay = parseISO(value);
-    setSelectedDay(nextDay);
-    if (!isSameMonth(month, nextDay)) onMonthChange(nextDay);
+    setSelectedDay(parseISO(value));
+    if (!isInMonth(value, month)) onPeriodChange(monthKeyOf(value, calendarSystem));
   };
   const { target } = snapshot;
   const budgetTarget = target.kind === "allSpending" || target.kind === "categoryBudgets" ? target : null;
@@ -185,7 +186,7 @@ export function DashboardPage({ month, focus, currency, transactions, transfers,
     <div className="page dashboard-page">
       <header className="dashboard-header">
         <div>
-          <MonthPicker calendarSystem={calendarSystem} month={month} onChange={changeMonth} />
+          <MonthPicker calendarSystem={calendarSystem} period={month} onChange={changeMonth} />
           <Popover position="bottom-start" shadow="md" withArrow>
             <Popover.Target>
               <button className="current-date" aria-label={`Choose day. Selected ${formatLedgerDay(selectedDay, calendarSystem)}`}>

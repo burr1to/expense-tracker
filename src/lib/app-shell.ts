@@ -1,3 +1,6 @@
+// Registers the Bikram Sambat calendar, so a BS month key resolves here.
+import "./nepali-date";
+import { isSameMonthKey, monthKeyOf, parseMonthKey, type PeriodKey } from "./period";
 import type { ReminderNotice } from "./reminder-digest";
 import type { TransactionKind } from "../types";
 
@@ -28,16 +31,15 @@ export function readAddDeepLink(params: URLSearchParams): { link: AddDeepLink | 
 
 /**
  * When the Kathmandu date moves into a new month and the app was showing the month that just
- * ended, the month to show now. Returns null when nothing should change (another month was picked).
+ * ended, the month to show now — in the shown key's own calendar, so a BS view rolls over at the
+ * end of a BS month. Returns null when nothing should change (another month was picked).
  */
-export function rolledOverMonth(shown: Date, previousToday: string, today: string): Date | null {
-  const before = previousToday.slice(0, 7);
-  const now = today.slice(0, 7);
-  if (before === now) return null;
-  const shownKey = `${shown.getFullYear()}-${String(shown.getMonth() + 1).padStart(2, "0")}`;
-  if (shownKey !== before) return null;
-  const [year, month, day] = today.split("-").map(Number);
-  return new Date(year, month - 1, day);
+export function rolledOverMonth(shown: PeriodKey, previousToday: string, today: string): PeriodKey | null {
+  const { system } = parseMonthKey(shown);
+  const before = monthKeyOf(previousToday, system);
+  const now = monthKeyOf(today, system);
+  if (before === now || !isSameMonthKey(shown, before)) return null;
+  return now;
 }
 
 /** The once-a-day notification. With amounts hidden it names what is due without the figures. */

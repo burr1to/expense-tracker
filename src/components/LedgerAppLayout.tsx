@@ -2,7 +2,6 @@
 
 import { PasswordInput } from "@mantine/core";
 import { ArrowClockwise, Eye, EyeSlash, LockKey, MagnifyingGlass, WifiSlash } from "@phosphor-icons/react";
-import { parseISO } from "date-fns";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -10,7 +9,8 @@ import { useLedger } from "../context/LedgerContext";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { useToasts } from "../context/ToastContext";
 import { getCategory } from "../lib/categories";
-import { currentMonthMarker, toDateInput, todayInput } from "../lib/dates";
+import { toDateInput, todayInput } from "../lib/dates";
+import { convertMonthKey, currentMonthKey, monthKeyOf, parseMonthKey, type PeriodKey } from "../lib/period";
 import { buildReminderDigest } from "../lib/reminder-digest";
 import { BRAND_MARK_PATH } from "../lib/brand-mark";
 import { deliverNotification, readAddDeepLink, reminderNotificationText, reminderToastText, rolledOverMonth } from "../lib/app-shell";
@@ -65,7 +65,11 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const view = viewFromPathname(pathname);
-  const [month, setMonth] = useState(currentMonthMarker);
+  const calendarSystem = ledger.profile.calendarSystem;
+  // The workspace month, in the user's own calendar: "BS:2083-06" is exactly Ashwin's days.
+  const [period, setPeriod] = useState<PeriodKey>(() => currentMonthKey(calendarSystem));
+  // Switching calendars keeps roughly the same stretch of time (and today's month stays today's).
+  if (parseMonthKey(period).system !== calendarSystem) setPeriod(convertMonthKey(period, calendarSystem));
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<LedgerTransaction | null>(null);
   const [reusing, setReusing] = useState<LedgerTransaction | null>(null);
@@ -183,7 +187,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     const previous = monthRolloverDay.current;
     monthRolloverDay.current = reminderToday;
     if (previous === reminderToday) return;
-    setMonth((shown) => rolledOverMonth(shown, previous, reminderToday) ?? shown);
+    setPeriod((shown) => rolledOverMonth(shown, previous, reminderToday) ?? shown);
   }, [reminderToday]);
   // Home-screen shortcuts (?add=expense|income|sms) and shared text (?sms=…&title=…), once signed in and loaded.
   const deepLinkQuery = searchParams.toString();
@@ -293,7 +297,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
       setRecentlyAddedTransactionId(savedId);
     }
     if (!id && view === "home") {
-      setMonth(parseISO(draft.occurredOn));
+      setPeriod(monthKeyOf(draft.occurredOn, calendarSystem));
       setHomeFocus((current) => ({ date: draft.occurredOn, revision: (current?.revision ?? 0) + 1 }));
     }
   };
@@ -325,8 +329,8 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
 
   const workspace = {
     ledger,
-    month,
-    setMonth,
+    period,
+    setPeriod,
     homeFocus,
     recentlyAddedTransactionId,
     setHomeSelectedDate,

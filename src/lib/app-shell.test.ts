@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { bsToAd } from "./nepali-date";
+import { addDaysToIso } from "./period";
 import { browserNotificationBlocker, deliverNotification, readAddDeepLink, reminderNotificationText, reminderToastText, rolledOverMonth, SHARED_TEXT_LIMIT } from "./app-shell";
 
 const params = (query: string) => new URLSearchParams(query);
@@ -24,18 +26,24 @@ describe("readAddDeepLink", () => {
 
 describe("rolledOverMonth", () => {
   it("moves the month on when the shown month just ended", () => {
-    const next = rolledOverMonth(new Date(2026, 9, 1), "2026-10-31", "2026-11-01");
-    expect(next && [next.getFullYear(), next.getMonth(), next.getDate()]).toEqual([2026, 10, 1]);
+    expect(rolledOverMonth("AD:2026-10", "2026-10-31", "2026-11-01")).toBe("AD:2026-11");
   });
 
   it("leaves a month the person picked, and does nothing within a month", () => {
-    expect(rolledOverMonth(new Date(2026, 7, 1), "2026-10-31", "2026-11-01")).toBeNull();
-    expect(rolledOverMonth(new Date(2026, 9, 1), "2026-10-07", "2026-10-08")).toBeNull();
+    expect(rolledOverMonth("AD:2026-08", "2026-10-31", "2026-11-01")).toBeNull();
+    expect(rolledOverMonth("AD:2026-10", "2026-10-07", "2026-10-08")).toBeNull();
   });
 
   it("handles the new year", () => {
-    const next = rolledOverMonth(new Date(2026, 11, 15), "2026-12-31", "2027-01-01");
-    expect(next && [next.getFullYear(), next.getMonth()]).toEqual([2027, 0]);
+    expect(rolledOverMonth("AD:2026-12", "2026-12-31", "2027-01-01")).toBe("AD:2027-01");
+  });
+
+  it("rolls a BS view over at the end of the BS month, not the Gregorian one", () => {
+    const ashwinLast = addDaysToIso(bsToAd({ year: 2083, month: 7, day: 1 }), -1);
+    const kartikFirst = bsToAd({ year: 2083, month: 7, day: 1 });
+    expect(rolledOverMonth("BS:2083-06", ashwinLast, kartikFirst)).toBe("BS:2083-07");
+    // Oct 31 -> Nov 1 is mid-Kartik: a BS view stays put.
+    expect(rolledOverMonth("BS:2083-07", "2026-10-31", "2026-11-01")).toBeNull();
   });
 });
 

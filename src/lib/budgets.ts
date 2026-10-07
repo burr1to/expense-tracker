@@ -2,6 +2,9 @@ import { completedMonthsWindow, type AveragingWindow } from "./financial-calcula
 import { getCategory, isLoanCategory } from "./categories";
 import { formatMoney } from "./currency";
 import { transactionCountsTowardBudget } from "./household";
+// Registers the Bikram Sambat calendar, so BS budget keys step and resolve.
+import "./nepali-date";
+import { addMonthsToKey, isMonthKey, monthBounds, toStorageKey } from "./period";
 import type { Budget, CurrencyCode, CustomCategory, LedgerTransaction } from "../types";
 
 /**
@@ -42,14 +45,13 @@ export function budgetAllowanceText(
   return "Limit fully used";
 }
 
-const MONTH_KEY = /^(\d{4})-(0[1-9]|1[0-2])$/;
-
-/** "2026-10" -> "2026-09"; "2026-01" -> "2025-12". Stored (bare) Gregorian month keys only. */
+/**
+ * A stored month key moved by `delta` months in its own calendar:
+ * "2026-01" -> "2025-12", "BS:2083-01" -> "BS:2082-12". Festival keys are not months.
+ */
 export function shiftMonthKey(key: string, delta: number): string {
-  const match = MONTH_KEY.exec(key);
-  if (!match) throw new Error(`Invalid month key: ${key}`);
-  const index = Number(match[1]) * 12 + Number(match[2]) - 1 + delta;
-  return `${String(Math.floor(index / 12)).padStart(4, "0")}-${String((index % 12) + 1).padStart(2, "0")}`;
+  if (!isMonthKey(key)) throw new Error(`Invalid month key: ${key}`);
+  return toStorageKey(addMonthsToKey(key, delta));
 }
 
 export interface BudgetCarryForwardRow {
@@ -71,7 +73,8 @@ export interface BudgetCarryForward {
 }
 
 /**
- * Last month's budgets, ready to start `targetMonthKey` with. Returns null when
+ * Last month's budgets, ready to start `targetMonthKey` (a stored key, `YYYY-MM` or
+ * `BS:YYYY-MM`) with; "last month" is the previous month of the same calendar. Returns null when
  * the target month already has one of the viewer's budgets, when last month
  * had none, or when the target month is already over. A household partner's
  * shared budgets are theirs to copy, so only the viewer's own are offered.
@@ -83,7 +86,9 @@ export function buildBudgetCarryForward(
   viewerId: string,
   today: string,
 ): BudgetCarryForward | null {
-  if (!MONTH_KEY.test(targetMonthKey) || targetMonthKey < today.slice(0, 7)) return null;
+  if (!isMonthKey(targetMonthKey)) return null;
+  const target = monthBounds(targetMonthKey);
+  if (target.endExclusive <= today) return null;
   const mine = budgets.filter((budget) => budget.userId === viewerId);
   if (mine.some((budget) => budget.monthKey === targetMonthKey)) return null;
   const previousMonthKey = shiftMonthKey(targetMonthKey, -1);
@@ -95,8 +100,8 @@ export function buildBudgetCarryForward(
   const spentFor = (budget: Budget, from: string, toExclusive: string) => expenses
     .filter((item) => item.occurredOn >= from && item.occurredOn < toExclusive && budgetCoversCategory(budget, item.category) && transactionCountsTowardBudget(item, budget))
     .reduce((sum, item) => sum + item.amountMinor, 0);
-  const previousStart = `${previousMonthKey}-01`;
-  const previousEnd = `${targetMonthKey}-01`;
+  const previousStart = monthBounds(previousMonthKey).start;
+  const previousEnd = target.start;
 
   const rows = previous.map((budget): BudgetCarryForwardRow => ({
     category: budget.category,

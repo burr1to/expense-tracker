@@ -1,6 +1,6 @@
 import { CalendarDots, Check, Flag, PauseCircle, PencilSimple, PlayCircle, Plus, Repeat, Sparkle, Trash } from "@phosphor-icons/react";
 import { NumberInput, Select, TextInput } from "@mantine/core";
-import { eachDayOfInterval, endOfMonth, format, getDay, isSameDay, isSameMonth, parseISO, startOfMonth } from "date-fns";
+import { format, getDay, parseISO } from "date-fns";
 import { useEffect, useMemo, useState } from "react";
 import { BudgetPlanner } from "../components/BudgetPlanner";
 import { CategoryIcon } from "../components/CategoryIcon";
@@ -14,7 +14,8 @@ import { useLedger } from "../context/LedgerContext";
 import { allCategoriesFor, getCategory } from "../lib/categories";
 import { dailyCashFlow } from "../lib/calendar";
 import { formatMoney } from "../lib/currency";
-import { formatLedgerDay, todayInput } from "../lib/dates";
+import { formatLedgerDate, formatLedgerDay, isInMonth, localDate, periodRange, todayInput } from "../lib/dates";
+import { addDaysToIso, calendarFor, parseMonthKey, type PeriodKey } from "../lib/period";
 import { recurrenceLabel } from "../lib/recurrence";
 import { onlinePaymentAccounts, paymentAccountLabel } from "../lib/payment-accounts";
 import { detectRecurringPatterns, type RecurringPatternSuggestion } from "../lib/transaction-intelligence";
@@ -26,8 +27,8 @@ const previewMinor = (value: string) => Math.round(Number(value.replace(/,/g, ""
 
 interface PlanningPageProps {
   calendarSystem: CalendarSystem;
-  month: Date; currency: CurrencyCode; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; dueItems: DueItem[]; goals: SavingsGoal[]; customCategories: CustomCategory[]; paymentAccounts: PaymentAccount[];
-  onMonthChange: (date: Date) => void;
+  period: PeriodKey; currency: CurrencyCode; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; dueItems: DueItem[]; goals: SavingsGoal[]; customCategories: CustomCategory[]; paymentAccounts: PaymentAccount[];
+  onPeriodChange: (period: PeriodKey) => void;
   onSaveBudget: (draft: { category: string; amount: string; monthKey: string; shared?: boolean }, id?: string) => Promise<void>;
   onDeleteBudget: (id: string) => Promise<void>;
   onSaveRecurring: (draft: RecurringDraft, id?: string) => Promise<void>;
@@ -46,7 +47,7 @@ export function PlanningPage(props: PlanningPageProps) {
   ];
   return (
     <div className="page planning-page">
-      <header className="page-header"><div><span className="eyebrow">Your money plan</span><h1>Plan</h1><p>Set gentle guardrails and prepare the entries that repeat.</p></div><MonthPicker calendarSystem={calendarSystem} month={props.month} onChange={props.onMonthChange} /></header>
+      <header className="page-header"><div><span className="eyebrow">Your money plan</span><h1>Plan</h1><p>Set gentle guardrails and prepare the entries that repeat.</p></div><MonthPicker calendarSystem={calendarSystem} period={props.period} onChange={props.onPeriodChange} /></header>
       <div className="section-tabs-slot"><SlidingTabs label="Planning sections" value={tab} onChange={setTab} options={tabs.map(({ id, label, icon: Icon }) => ({ id, label, icon: <Icon size={16} /> }))} /></div>
       {tab === "budgets" && <BudgetsSection {...props} />}
       {tab === "goals" && <GoalsSection {...props} />}
@@ -56,24 +57,26 @@ export function PlanningPage(props: PlanningPageProps) {
   );
 }
 
-function BudgetsSection({ month, calendarSystem, currency, transactions, budgets, recurringEntries, dueItems, customCategories, onSaveBudget, onDeleteBudget }: PlanningPageProps) {
-  return <BudgetPlanner month={month} calendarSystem={calendarSystem} currency={currency} transactions={transactions} budgets={budgets} recurringEntries={recurringEntries} dueItems={dueItems} customCategories={customCategories} onSaveBudget={onSaveBudget} onDeleteBudget={onDeleteBudget} />;
+function BudgetsSection({ period, calendarSystem, currency, transactions, budgets, recurringEntries, dueItems, customCategories, onSaveBudget, onDeleteBudget }: PlanningPageProps) {
+  return <BudgetPlanner period={period} calendarSystem={calendarSystem} currency={currency} transactions={transactions} budgets={budgets} recurringEntries={recurringEntries} dueItems={dueItems} customCategories={customCategories} onSaveBudget={onSaveBudget} onDeleteBudget={onDeleteBudget} />;
 }
 
-function GoalsSection({ currency, goals, onSaveGoal, onContribute, onDeleteGoal }: PlanningPageProps) {
+function GoalsSection({ calendarSystem, currency, goals, onSaveGoal, onContribute, onDeleteGoal }: PlanningPageProps) {
+  // BS mode names the target day in both calendars; AD keeps the short month.
+  const targetLabel = (date: string) => calendarSystem === "BS" ? formatLedgerDate(date, "BS") : format(parseISO(date), "MMM yyyy");
   const [name, setName] = useState(""); const [target, setTarget] = useState(""); const [targetDate, setTargetDate] = useState(""); const [contributions, setContributions] = useState<Record<string, string>>({}); const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false); const [preview, setPreview] = useState<{ name: string; target: string; targetDate: string } | null>(null); const [pendingGoal, setPendingGoal] = useState<{ id: string; action: "contribute" | "delete" } | null>(null);
   const save = async (event: React.FormEvent) => { event.preventDefault(); if (saving) return; const draft = { name, target, targetDate }; setSaving(true); setPreview(draft); try { setError(null); await onSaveGoal({ ...draft, saved: "0" }); setName(""); setTarget(""); setTargetDate(""); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save goal."); } finally { setSaving(false); setPreview(null); } };
   const contribute = async (id: string) => { const amount = contributions[id] ?? ""; if (!amount || pendingGoal) return; setPendingGoal({ id, action: "contribute" }); try { setError(null); await onContribute(id, amount); setContributions((current) => ({ ...current, [id]: "" })); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not add contribution."); } finally { setPendingGoal(null); } };
   const remove = async (id: string) => { if (pendingGoal) return; setPendingGoal({ id, action: "delete" }); try { setError(null); await onDeleteGoal(id); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not delete goal."); } finally { setPendingGoal(null); } };
-  return <section className="planner-layout"><article className="planner-form-panel"><span className="section-label">New savings goal</span><h2>Give savings a purpose</h2><form onSubmit={save} className="stack-form" aria-busy={saving}><TextInput label="Goal name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Emergency fund" required disabled={saving} /><NumberInput label={`Target in ${currency}`} value={target} onChange={(value) => setTarget(String(value))} placeholder="300,000" required disabled={saving} min={0} thousandSeparator="," decimalScale={2} /><DatePickerInput label="Target date" description="Optional" value={targetDate || null} onChange={(value) => setTargetDate(value ?? "")} disabled={saving} clearable valueFormat="MMM D, YYYY" firstDayOfWeek={0} /><button className="primary-button" disabled={saving}>{saving ? <><ButtonSpinner />Creating goal…</> : <><Plus size={17} />Create goal</>}</button><FormError message={error} /></form></article><article className="planner-content"><div className="section-heading"><div><span className="section-label">Savings goals</span><h2>What you’re building toward</h2></div></div><div className="goal-grid">{preview && <article className="goal-card pending-preview" role="status"><span className="pending-label"><ButtonSpinner />Creating…</span><h3>{preview.name}</h3><strong>{formatMoney(0, currency)}</strong><small>of {formatMoney(previewMinor(preview.target), currency)}{preview.targetDate ? ` · by ${format(parseISO(preview.targetDate), "MMM yyyy")}` : ""}</small><div className="bar-track"><span style={{ width: "0%" }} /></div></article>}{goals.map((goal) => { const percent = Math.round((goal.savedMinor / goal.targetMinor) * 100); const contributing = pendingGoal?.id === goal.id && pendingGoal.action === "contribute"; const deleting = pendingGoal?.id === goal.id && pendingGoal.action === "delete"; return <article className="goal-card" key={goal.id} aria-busy={contributing || deleting}><button className="icon-button danger goal-delete" disabled={deleting} onClick={() => void remove(goal.id)} aria-label={`Delete ${goal.name}`}>{deleting ? <ButtonSpinner /> : <Trash size={16} />}</button><span>{deleting ? "Removing…" : `${percent}% complete`}</span><h3>{goal.name}</h3><strong>{formatMoney(goal.savedMinor, currency)}</strong><small>of {formatMoney(goal.targetMinor, currency)}{goal.targetDate ? ` · by ${format(parseISO(goal.targetDate), "MMM yyyy")}` : ""}</small><div className="bar-track"><span style={{ width: `${Math.min(100, percent)}%` }} /></div><div className="contribution-row"><NumberInput aria-label={`Contribution to ${goal.name}`} placeholder="Add amount" value={contributions[goal.id] ?? ""} min={0} thousandSeparator="," decimalScale={2} disabled={contributing || deleting || percent >= 100} onChange={(value) => setContributions((current) => ({ ...current, [goal.id]: String(value) }))} /><button disabled={contributing || deleting || percent >= 100 || !(contributions[goal.id] ?? "")} onClick={() => void contribute(goal.id)}>{contributing ? <><ButtonSpinner />Adding…</> : percent >= 100 ? "Done" : "Add"}</button></div><div className="goal-contributions"><div className="goal-contributions-heading"><strong>Contribution history</strong><span>{goal.contributions.length}</span></div>{goal.contributions.length ? <div className="goal-contribution-list">{goal.contributions.map((contribution) => <div className="goal-contribution" key={contribution.id}><time dateTime={contribution.createdAt}>{contribution.isOpeningBalance ? "Opening balance · " : ""}{format(parseISO(contribution.createdAt), "MMM d, yyyy · h:mm a")}</time><strong className="amount">+{formatMoney(contribution.amountMinor, currency)}</strong></div>)}</div> : <p>No contributions yet.</p>}</div></article>; })}</div>{!goals.length && !preview && <EmptyState title="No savings goals yet" />}</article></section>;
+  return <section className="planner-layout"><article className="planner-form-panel"><span className="section-label">New savings goal</span><h2>Give savings a purpose</h2><form onSubmit={save} className="stack-form" aria-busy={saving}><TextInput label="Goal name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Emergency fund" required disabled={saving} /><NumberInput label={`Target in ${currency}`} value={target} onChange={(value) => setTarget(String(value))} placeholder="300,000" required disabled={saving} min={0} thousandSeparator="," decimalScale={2} /><DatePickerInput label="Target date" description="Optional" value={targetDate || null} onChange={(value) => setTargetDate(value ?? "")} disabled={saving} clearable valueFormat="MMM D, YYYY" firstDayOfWeek={0} /><button className="primary-button" disabled={saving}>{saving ? <><ButtonSpinner />Creating goal…</> : <><Plus size={17} />Create goal</>}</button><FormError message={error} /></form></article><article className="planner-content"><div className="section-heading"><div><span className="section-label">Savings goals</span><h2>What you’re building toward</h2></div></div><div className="goal-grid">{preview && <article className="goal-card pending-preview" role="status"><span className="pending-label"><ButtonSpinner />Creating…</span><h3>{preview.name}</h3><strong>{formatMoney(0, currency)}</strong><small>of {formatMoney(previewMinor(preview.target), currency)}{preview.targetDate ? ` · by ${targetLabel(preview.targetDate)}` : ""}</small><div className="bar-track"><span style={{ width: "0%" }} /></div></article>}{goals.map((goal) => { const percent = Math.round((goal.savedMinor / goal.targetMinor) * 100); const contributing = pendingGoal?.id === goal.id && pendingGoal.action === "contribute"; const deleting = pendingGoal?.id === goal.id && pendingGoal.action === "delete"; return <article className="goal-card" key={goal.id} aria-busy={contributing || deleting}><button className="icon-button danger goal-delete" disabled={deleting} onClick={() => void remove(goal.id)} aria-label={`Delete ${goal.name}`}>{deleting ? <ButtonSpinner /> : <Trash size={16} />}</button><span>{deleting ? "Removing…" : `${percent}% complete`}</span><h3>{goal.name}</h3><strong>{formatMoney(goal.savedMinor, currency)}</strong><small>of {formatMoney(goal.targetMinor, currency)}{goal.targetDate ? ` · by ${targetLabel(goal.targetDate)}` : ""}</small><div className="bar-track"><span style={{ width: `${Math.min(100, percent)}%` }} /></div><div className="contribution-row"><NumberInput aria-label={`Contribution to ${goal.name}`} placeholder="Add amount" value={contributions[goal.id] ?? ""} min={0} thousandSeparator="," decimalScale={2} disabled={contributing || deleting || percent >= 100} onChange={(value) => setContributions((current) => ({ ...current, [goal.id]: String(value) }))} /><button disabled={contributing || deleting || percent >= 100 || !(contributions[goal.id] ?? "")} onClick={() => void contribute(goal.id)}>{contributing ? <><ButtonSpinner />Adding…</> : percent >= 100 ? "Done" : "Add"}</button></div><div className="goal-contributions"><div className="goal-contributions-heading"><strong>Contribution history</strong><span>{goal.contributions.length}</span></div>{goal.contributions.length ? <div className="goal-contribution-list">{goal.contributions.map((contribution) => <div className="goal-contribution" key={contribution.id}><time dateTime={contribution.createdAt}>{contribution.isOpeningBalance ? "Opening balance · " : ""}{format(parseISO(contribution.createdAt), "MMM d, yyyy · h:mm a")}</time><strong className="amount">+{formatMoney(contribution.amountMinor, currency)}</strong></div>)}</div> : <p>No contributions yet.</p>}</div></article>; })}</div>{!goals.length && !preview && <EmptyState title="No savings goals yet" />}</article></section>;
 }
 
 function RecurringKindToggle({ value, disabled, onChange }: { value: TransactionKind; disabled: boolean; onChange: (value: TransactionKind) => void }) {
   return <div className="recurring-kind-control"><SlidingTabs label="Recurring entry type" value={value} disabled={disabled} onChange={onChange} options={[{ id: "expense", label: "Expense" }, { id: "income", label: "Income" }]} /></div>;
 }
 
-function RecurringSection({ currency, transactions, recurringEntries, customCategories, paymentAccounts, onSaveRecurring, onDeleteRecurring }: PlanningPageProps) {
+function RecurringSection({ calendarSystem, currency, transactions, recurringEntries, customCategories, paymentAccounts, onSaveRecurring, onDeleteRecurring }: PlanningPageProps) {
   const { setRecurringActive } = useLedger();
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const today = todayInput();
@@ -182,7 +185,7 @@ function RecurringSection({ currency, transactions, recurringEntries, customCate
             <strong>{label}</strong>
             <span>{formatMoney(entry.amountMinor, currency)} · {recurrenceLabel(entry)}</span>
             <small>{accountText}</small>
-            <small>{deleting ? "Removing…" : toggling ? (entry.active ? "Pausing…" : "Resuming…") : entry.active ? `Next: ${format(parseISO(entry.nextDueOn), "MMM d, yyyy")}` : "Paused · nothing will be due until you resume"}</small>
+            <small>{deleting ? "Removing…" : toggling ? (entry.active ? "Pausing…" : "Resuming…") : entry.active ? `Next: ${formatLedgerDate(entry.nextDueOn, calendarSystem)}` : "Paused · nothing will be due until you resume"}</small>
           </div>
           <button className="secondary-button small" disabled={!ready || busy} onClick={() => setReviewingId(entry.id)}>{ready ? <><Check size={15} />Confirm</> : entry.active ? "Scheduled" : "Paused"}</button>
           <button className="icon-button pause-toggle" disabled={busy || saving} onClick={() => void runEntryAction(entry, "toggle")} aria-label={`${entry.active ? "Pause" : "Resume"} ${label}`} title={entry.active ? "Pause" : "Resume"}>{toggling ? <ButtonSpinner /> : entry.active ? <PauseCircle size={16} /> : <PlayCircle size={16} />}</button>
@@ -196,22 +199,25 @@ function RecurringSection({ currency, transactions, recurringEntries, customCate
   </section>;
 }
 
-function CalendarSection({ month, currency, transactions, onMonthChange, calendarSystem }: PlanningPageProps) {
-  const days = useMemo(() => eachDayOfInterval({ start: startOfMonth(month), end: endOfMonth(month) }), [month]);
-  const firstOffset = getDay(days[0]);
+function CalendarSection({ period, currency, transactions, onPeriodChange, calendarSystem }: PlanningPageProps) {
+  // Every day of the month in its own calendar: Ashwin 1 to Ashwin's last day for a BS month.
+  const days = useMemo(() => { const { start, days: count } = periodRange(period); return Array.from({ length: count }, (_, index) => addDaysToIso(start, index)); }, [period]);
+  const firstOffset = getDay(localDate(days[0]));
+  // The number printed in each cell: the BS day in BS mode, the Gregorian day otherwise.
+  const dayNumber = (iso: string) => parseMonthKey(period).system === "BS" ? String(calendarFor("BS").fromIso(iso).day) : String(Number(iso.slice(8, 10)));
   const totals = useMemo(() => dailyCashFlow(transactions), [transactions]);
-  const [selected, setSelected] = useState<Date>(() => isSameMonth(new Date(), month) ? new Date() : startOfMonth(month));
-  useEffect(() => { setSelected((current) => isSameMonth(current, month) ? current : startOfMonth(month)); }, [month]);
-  const selectedKey = format(selected, "yyyy-MM-dd");
+  const [selectedKey, setSelectedKey] = useState(() => { const today = todayInput(); return isInMonth(today, period) ? today : periodRange(period).start; });
+  useEffect(() => { setSelectedKey((current) => isInMonth(current, period) ? current : periodRange(period).start); }, [period]);
+  const selected = localDate(selectedKey);
   const selectedEntries = useMemo(() => transactions.filter((item) => item.occurredOn === selectedKey), [selectedKey, transactions]);
   const selectedTotal = totals.get(selectedKey);
   const netAmount = (value: number) => `${currency} ${value < 0 ? "−" : ""}${formatMoney(Math.abs(value), currency, true).replace(currency, "").trim()}`;
-  return <section className="calendar-layout"><article className="calendar-panel"><div className="calendar-heading"><MonthPicker calendarSystem={calendarSystem} month={month} onChange={onMonthChange} /></div><div className="weekday-row">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-grid">{Array.from({ length: firstOffset }).map((_, index) => <span key={`blank-${index}`} />)}{days.map((day) => {
-    const key = format(day, "yyyy-MM-dd"); const total = totals.get(key);
+  return <section className="calendar-layout"><article className="calendar-panel"><div className="calendar-heading"><MonthPicker calendarSystem={calendarSystem} period={period} onChange={onPeriodChange} /></div><div className="weekday-row">{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <span key={day}>{day}</span>)}</div><div className="calendar-grid">{Array.from({ length: firstOffset }).map((_, index) => <span key={`blank-${index}`} />)}{days.map((key) => {
+    const total = totals.get(key);
     const netTone = !total ? "" : total.net > 0 ? "net-positive" : total.net < 0 ? "net-negative" : "net-balanced";
     const summary = total ? `Income ${formatMoney(total.income, currency)}, expenses ${formatMoney(total.expenses, currency)}, net ${total.net >= 0 ? "positive " : "negative "}${formatMoney(Math.abs(total.net), currency)}` : "No entries";
-    return <button key={key} className={`${isSameDay(day, selected) ? "selected " : ""}${total ? `has-entries ${netTone}` : ""}`} onClick={() => setSelected(day)} aria-label={`${formatLedgerDay(day, calendarSystem, "date")}. ${summary}`}>
-      <strong className="calendar-date">{format(day, "d")}</strong>
+    return <button key={key} className={`${key === selectedKey ? "selected " : ""}${total ? `has-entries ${netTone}` : ""}`} onClick={() => setSelectedKey(key)} aria-label={`${formatLedgerDay(key, calendarSystem, "date")}. ${summary}`}>
+      <strong className="calendar-date">{dayNumber(key)}</strong>
       {total && <span className="calendar-summary calendar-amount">{netAmount(total.net)}</span>}
     </button>;
   })}</div></article><aside className="calendar-day" aria-live="polite"><span className="section-label">{formatLedgerDay(selected, calendarSystem)}</span><h2>{selectedEntries.length ? `${selectedEntries.length} ${selectedEntries.length === 1 ? "entry" : "entries"}` : "A clear day"}</h2>{selectedTotal && <div className="calendar-day-summary"><span><small>Income</small><strong className="income calendar-amount">{formatMoney(selectedTotal.income, currency)}</strong></span><span><small>Expenses</small><strong className="expense calendar-amount">{formatMoney(selectedTotal.expenses, currency)}</strong></span><span><small>Net</small><strong className={`calendar-amount ${selectedTotal.net < 0 ? "expense" : selectedTotal.net > 0 ? "income" : ""}`}>{netAmount(selectedTotal.net)}</strong></span></div>}<div className="calendar-entry-list">{selectedEntries.map((item) => <div key={item.id}><span>{item.note || getCategory(item.category).label}</span><strong className={item.kind}>{item.kind === "income" ? "+" : "−"}{formatMoney(item.amountMinor, currency)}</strong></div>)}</div>{!selectedEntries.length && <p>No income or expenses logged.</p>}</aside></section>;

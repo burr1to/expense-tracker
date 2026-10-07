@@ -166,17 +166,19 @@ function money(report: MonthlyReport, amountMinor: number, compact = false) {
   return formatMoney(amountMinor, report.currency, compact);
 }
 
-function changeLabel(value: number | null) {
-  if (value === null) return "New vs prior month";
-  if (value === 0) return "No change vs prior month";
-  return `${value > 0 ? "+" : ""}${value}% vs prior month`;
+function changeLabel(value: number | null, noun: MonthlyReport["periodNoun"] = "month") {
+  if (value === null) return `New vs prior ${noun}`;
+  if (value === 0) return `No change vs prior ${noun}`;
+  return `${value > 0 ? "+" : ""}${value}% vs prior ${noun}`;
 }
 
 function reportMonthDayCount(report: MonthlyReport) {
-  const lastDay = new Date(`${report.monthKey}-01T00:00:00.000Z`);
-  lastDay.setUTCMonth(lastDay.getUTCMonth() + 1);
-  lastDay.setUTCDate(0);
-  return lastDay.getUTCDate();
+  return report.dayCount;
+}
+
+/** 1-based day of the report period: the BS day for a BS month, the day of the year for a fiscal year. */
+function reportDayOf(report: MonthlyReport, occurredOn: string) {
+  return Math.round((Date.parse(`${occurredOn}T00:00:00Z`) - Date.parse(`${report.periodStart}T00:00:00Z`)) / 86_400_000) + 1;
 }
 
 function shareOf(amountMinor: number, totalMinor: number) {
@@ -270,7 +272,7 @@ function drawDailyChart(page: PdfPage, report: MonthlyReport, x: number, y: numb
   const dayCount = reportMonthDayCount(report);
   const daily = Array.from({ length: dayCount }, (_, index) => ({ day: index + 1, income: 0, expense: 0 }));
   for (const transaction of report.transactions) {
-    const day = Number(transaction.occurredOn.slice(8, 10));
+    const day = reportDayOf(report, transaction.occurredOn);
     if (day < 1 || day > dayCount) continue;
     daily[day - 1][transaction.kind] += transaction.amountMinor;
   }
@@ -285,6 +287,7 @@ function drawDailyChart(page: PdfPage, report: MonthlyReport, x: number, y: numb
     page.text(money(report, Math.round(max * (1 - index / 3)), true), chartX - 7, lineY - 3, { size: 6.5, color: COLOR.muted, align: "right" });
   }
   const slot = chartWidth / dayCount;
+  const labelEvery = dayCount > 40 ? 30 : 5;
   const barWidth = Math.max(1.4, Math.min(4, slot * 0.34));
   daily.forEach((item, index) => {
     const incomeHeight = (item.income / max) * chartHeight;
@@ -292,7 +295,7 @@ function drawDailyChart(page: PdfPage, report: MonthlyReport, x: number, y: numb
     const center = chartX + slot * index + slot / 2;
     if (incomeHeight > 0) page.rect(center - barWidth - 0.5, chartY + chartHeight - incomeHeight, barWidth, incomeHeight, COLOR.green);
     if (expenseHeight > 0) page.rect(center + 0.5, chartY + chartHeight - expenseHeight, barWidth, expenseHeight, COLOR.coral);
-    if (item.day === 1 || item.day % 5 === 0 || item.day === dayCount) page.text(String(item.day), center, chartY + chartHeight + 8, { size: 6, color: COLOR.muted, align: "center" });
+    if (item.day === 1 || item.day % labelEvery === 0 || item.day === dayCount) page.text(String(item.day), center, chartY + chartHeight + 8, { size: 6, color: COLOR.muted, align: "center" });
   });
   page.rect(x + width - 139, y + 19, 7, 7, COLOR.green);
   page.text("Income", x + width - 127, y + 18, { size: 7.5, color: COLOR.muted });
@@ -313,8 +316,8 @@ function drawCoverPage(report: MonthlyReport) {
   page.text(`${report.displayName}  |  Generated ${report.generatedOn.slice(0, 10)}`, MARGIN, 133, { size: 8, color: "#d8e1db" });
 
   const metrics = [
-    { label: "Income", value: money(report, report.summary.incomeMinor, true), note: changeLabel(report.summary.incomeChangePercentage), color: COLOR.green },
-    { label: "Spending", value: money(report, report.summary.expenseMinor, true), note: changeLabel(report.summary.expenseChangePercentage), color: COLOR.coral },
+    { label: "Income", value: money(report, report.summary.incomeMinor, true), note: changeLabel(report.summary.incomeChangePercentage, report.periodNoun), color: COLOR.green },
+    { label: "Spending", value: money(report, report.summary.expenseMinor, true), note: changeLabel(report.summary.expenseChangePercentage, report.periodNoun), color: COLOR.coral },
     { label: "Net cash flow", value: money(report, report.summary.netMinor, true), note: report.summary.netMinor >= 0 ? "Positive month" : "Expenses exceeded income", color: report.summary.netMinor >= 0 ? COLOR.green : COLOR.coral },
     { label: "Savings rate", value: `${report.summary.savingsRate}%`, note: `${report.summary.transactionCount} ledger entries`, color: COLOR.sage },
   ];
@@ -588,8 +591,8 @@ class FlowRenderer {
     this.page.text("REPORT TOTALS", MARGIN, this.y, { size: 6.5, bold: true, color: COLOR.sage });
     this.y += 15;
     const metrics = [
-      { label: "INCOME", value: money(this.report, this.report.summary.incomeMinor, true), note: changeLabel(this.report.summary.incomeChangePercentage), color: COLOR.green },
-      { label: "SPENDING", value: money(this.report, this.report.summary.expenseMinor, true), note: changeLabel(this.report.summary.expenseChangePercentage), color: COLOR.coral },
+      { label: "INCOME", value: money(this.report, this.report.summary.incomeMinor, true), note: changeLabel(this.report.summary.incomeChangePercentage, this.report.periodNoun), color: COLOR.green },
+      { label: "SPENDING", value: money(this.report, this.report.summary.expenseMinor, true), note: changeLabel(this.report.summary.expenseChangePercentage, this.report.periodNoun), color: COLOR.coral },
       { label: "NET CASH FLOW", value: money(this.report, this.report.summary.netMinor, true), note: `${this.report.summary.savingsRate}% savings rate`, color: this.report.summary.netMinor >= 0 ? COLOR.green : COLOR.coral },
       { label: "LEDGER ENTRIES", value: String(this.report.summary.transactionCount), note: `${new Set(this.report.transactions.map((item) => item.occurredOn)).size} active days`, color: COLOR.sage },
     ];

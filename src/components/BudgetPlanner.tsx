@@ -12,7 +12,8 @@ import { minorToMajorInput } from "../lib/allocation-calculator";
 import { ALL_SPENDING_CATEGORY, ALL_SPENDING_LABEL, budgetAllowanceText, buildBudgetCarryForward, isAllSpendingBudget, type BudgetCarryForward } from "../lib/budgets";
 import { getCategory, spendingCategoriesFor } from "../lib/categories";
 import { formatMoney, majorToMinor } from "../lib/currency";
-import { formatLedgerMonth, monthKey } from "../lib/dates";
+import { formatLedgerMonth, monthKey, periodRange } from "../lib/dates";
+import type { PeriodKey } from "../lib/period";
 import { compareFestivalSpending, expensesBetween, festivalBounds, festivalLabel, festivalMonthLabel, festivalSeasonsFrom, parseFestivalPeriodKey, type UpcomingFestival } from "../lib/festivals";
 import { averagingWindowLabel, calculateCategoryMonthlyAverages } from "../lib/financial-calculators";
 import { transactionCountsTowardBudget } from "../lib/household";
@@ -21,7 +22,8 @@ import { useToday } from "../lib/use-today";
 import type { Budget, CalendarSystem, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, RecurringEntry } from "../types";
 
 interface BudgetPlannerProps {
-  month: Date;
+  /** The workspace month; a BS key saves budgets under `BS:YYYY-MM` and paces them over that month's days. */
+  period: PeriodKey;
   calendarSystem: CalendarSystem;
   currency: CurrencyCode;
   transactions: LedgerTransaction[];
@@ -49,7 +51,7 @@ function budgetLook(category: string, customCategories: readonly CustomCategory[
  * limits with edit and delete, what no budget covers, last month's budgets to
  * carry forward on an empty month, and festival-season budgets.
  */
-export function BudgetPlanner({ month, calendarSystem, currency, transactions, budgets, recurringEntries, dueItems, customCategories, onSaveBudget, onDeleteBudget }: BudgetPlannerProps) {
+export function BudgetPlanner({ period: month, calendarSystem, currency, transactions, budgets, recurringEntries, dueItems, customCategories, onSaveBudget, onDeleteBudget }: BudgetPlannerProps) {
   const { profile, saveBudgets } = useLedger();
   const searchParams = useSearchParams();
   const focusFestival = searchParams.get("festival");
@@ -158,7 +160,7 @@ function BudgetPacingRow({ item, label, color, icon, currency, allowance, busy, 
 interface CarryRow { category: string; shared: boolean; lastLimitMinor: number; lastActualMinor: number; averageMinor: number | null; include: boolean; amount: string }
 
 /** "Start October with last month's 4 budgets": an editable checklist saved in one request. */
-function BudgetCarryForwardCard({ plan, month, calendarSystem, currency, customCategories, onSave }: { plan: BudgetCarryForward; month: Date; calendarSystem: CalendarSystem; currency: CurrencyCode; customCategories: CustomCategory[]; onSave: (drafts: { category: string; amount: string; shared: boolean }[]) => Promise<void> }) {
+function BudgetCarryForwardCard({ plan, month, calendarSystem, currency, customCategories, onSave }: { plan: BudgetCarryForward; month: PeriodKey; calendarSystem: CalendarSystem; currency: CurrencyCode; customCategories: CustomCategory[]; onSave: (drafts: { category: string; amount: string; shared: boolean }[]) => Promise<void> }) {
   // Only the viewer's choices are state; limits, actuals and averages follow the ledger as it changes.
   const [choices, setChoices] = useState<Record<string, Partial<Pick<CarryRow, "include" | "amount">>>>({});
   const rows: CarryRow[] = plan.rows.map((row) => ({ ...row, include: choices[row.category]?.include ?? true, amount: choices[row.category]?.amount ?? minorToMajorInput(row.lastLimitMinor) }));
@@ -192,7 +194,7 @@ function BudgetCarryForwardCard({ plan, month, calendarSystem, currency, customC
 interface FestivalBudgetsProps {
   focusFestival: string | null;
   today: string;
-  month: Date;
+  month: PeriodKey;
   currency: CurrencyCode;
   transactions: LedgerTransaction[];
   ownSpending: LedgerTransaction[];
@@ -219,8 +221,7 @@ function FestivalBudgets({ focusFestival, today, month, currency, transactions, 
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { if (focusFestival) document.getElementById("festival-budgets")?.scrollIntoView({ behavior: "smooth", block: "start" }); }, [focusFestival]);
 
-  const monthStart = format(month, "yyyy-MM-01");
-  const nextMonthStart = format(new Date(month.getFullYear(), month.getMonth() + 1, 1), "yyyy-MM-dd");
+  const { start: monthStart, endExclusive: nextMonthStart } = periodRange(month);
   const rows = useMemo(() => budgets.flatMap((budget) => {
     const parsed = budget.monthKey.startsWith("FEST:") ? parseFestivalPeriodKey(budget.monthKey) : null;
     if (!parsed) return [];

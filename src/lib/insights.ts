@@ -1,8 +1,9 @@
-import { addDays, addMonths, endOfMonth, format, getDay, getDaysInMonth, isSameMonth, parseISO, startOfMonth } from "date-fns";
+import { addDays, format, getDay, parseISO } from "date-fns";
 import { countsAsIncomeOrSpending, getCategory } from "./categories";
-import { formatLedgerMonth, todayInput } from "./dates";
+import { formatLedgerMonth, periodKeyFor, periodRange, todayInput, type MonthRef } from "./dates";
 import { dueRemaining } from "./dues";
 import { summarizeLedger } from "./ledger";
+import { addMonthsToKey, daysBetweenIso } from "./period";
 import { recurringOccurrencesBetween, scheduledOccurrencesBetween } from "./recurrence";
 import type { CalendarSystem, CurrencyCode, CustomCategory, DueItem, Insight, LedgerTransaction, RecurringEntry } from "../types";
 
@@ -17,7 +18,8 @@ export interface InsightContext {
 }
 
 const sum = (values: readonly number[]) => values.reduce((total, value) => total + value, 0);
-const dayOf = (date: string) => Number(date.slice(8, 10));
+/** 1-based day of the period a date falls on: the BS day in a BS month, the calendar day in an AD one. */
+const dayIn = (date: string, start: string) => daysBetweenIso(start, date) + 1;
 const dayBefore = (date: string) => format(addDays(parseISO(date), -1), "yyyy-MM-dd");
 const isExpense = (item: { kind: string }) => item.kind === "expense";
 const isIncome = (item: { kind: string }) => item.kind === "income";
@@ -27,10 +29,9 @@ const isIncome = (item: { kind: string }) => item.kind === "income";
  * only the remaining day-to-day spending is projected by pace: a salary on the
  * 1st or rent paid on day one is never stretched across the month.
  */
-export function projectMonth(current: readonly LedgerTransaction[], recurringEntries: readonly RecurringEntry[], dueItems: readonly DueItem[], month: Date, today: string) {
-  const monthStart = format(startOfMonth(month), "yyyy-MM-dd");
-  const monthEnd = format(endOfMonth(month), "yyyy-MM-dd");
-  const elapsed = dayOf(today);
+export function projectMonth(current: readonly LedgerTransaction[], recurringEntries: readonly RecurringEntry[], dueItems: readonly DueItem[], month: MonthRef, today: string) {
+  const { start: monthStart, end: monthEnd, days: daysInMonth } = periodRange(month);
+  const elapsed = dayIn(today, monthStart);
   const counted = current.filter(countsAsIncomeOrSpending);
   const loggedIncomeMinor = sum(counted.filter(isIncome).map((item) => item.amountMinor));
   const loggedExpensesMinor = sum(counted.filter(isExpense).map((item) => item.amountMinor));
@@ -41,7 +42,7 @@ export function projectMonth(current: readonly LedgerTransaction[], recurringEnt
     return scheduledOccurrencesBetween(entry, monthStart, lastConfirmed < today ? lastConfirmed : today).map(() => entry.amountMinor);
   }));
   const dayToDaySoFar = Math.max(0, sum(counted.filter((item) => isExpense(item) && item.occurredOn <= today).map((item) => item.amountMinor)) - scheduledSoFar);
-  const pacedRestMinor = Math.round((dayToDaySoFar / elapsed) * (getDaysInMonth(month) - elapsed));
+  const pacedRestMinor = Math.round((dayToDaySoFar / elapsed) * (daysInMonth - elapsed));
   // Unconfirmed occurrences still count, but last month's land in last month when confirmed on their due date.
   const upcomingFrom = (entry: RecurringEntry) => {
     const from = entry.nextDueOn < today ? entry.nextDueOn : today;
@@ -56,21 +57,23 @@ export function projectMonth(current: readonly LedgerTransaction[], recurringEnt
   return { incomeMinor, expensesMinor, netMinor: incomeMinor - expensesMinor };
 }
 
-export function generateInsights(transactions: readonly LedgerTransaction[], month: Date, currency: CurrencyCode, customCategories: readonly CustomCategory[] = [], context: InsightContext = {}): Insight[] {
+export function generateInsights(transactions: readonly LedgerTransaction[], month: MonthRef, currency: CurrencyCode, customCategories: readonly CustomCategory[] = [], context: InsightContext = {}): Insight[] {
   const today = context.today ?? todayInput();
-  const monthStart = format(startOfMonth(month), "yyyy-MM-dd");
-  const monthEnd = format(endOfMonth(month), "yyyy-MM-dd");
+  const period = periodKeyFor(month);
+  const { start: monthStart, end: monthEnd } = periodRange(period);
   const isCurrent = today >= monthStart && today <= monthEnd;
   const isPast = monthEnd < today;
-  const current = transactions.filter((item) => isSameMonth(parseISO(item.occurredOn), month));
-  const previousMonth = addMonths(month, -1);
-  const previous = transactions.filter((item) => isSameMonth(parseISO(item.occurredOn), previousMonth));
+  const current = transactions.filter((item) => item.occurredOn >= monthStart && item.occurredOn <= monthEnd);
+  const previousMonth = addMonthsToKey(period, -1);
+  const previousRange = periodRange(previousMonth);
+  const previous = transactions.filter((item) => item.occurredOn >= previousRange.start && item.occurredOn <= previousRange.end);
   const summary = summarizeLedger(current);
-  const previousName = formatLedgerMonth(previousMonth, context.calendarSystem);
+  // A Date marker names the previous month as before (a BS span in BS mode); a period key names its own month.
+  const previousName = formatLedgerMonth(typeof month === "string" ? previousMonth : parseISO(previousRange.start), context.calendarSystem);
   // Like for like: mid-month, last month only counts up to the same day.
-  const throughDay = isCurrent ? Math.min(dayOf(today), getDaysInMonth(previousMonth)) : 31;
+  const throughDay = isCurrent ? Math.min(dayIn(today, monthStart), previousRange.days) : 32;
   const expensesToDate = summarizeLedger(isCurrent ? current.filter((item) => item.occurredOn <= today) : current).expenses;
-  const previousExpenses = summarizeLedger(previous.filter((item) => dayOf(item.occurredOn) <= throughDay)).expenses;
+  const previousExpenses = summarizeLedger(previous.filter((item) => dayIn(item.occurredOn, previousRange.start) <= throughDay)).expenses;
   const insights: Insight[] = [];
 
   if (summary.categories[0]) {
