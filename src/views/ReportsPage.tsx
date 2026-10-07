@@ -1,8 +1,10 @@
 import { Bank, CaretLeft, CaretRight, DownloadSimple, FlagBanner, Sparkle, TrendDown, TrendUp } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
-import { useMemo, useState } from "react";
+import { useContext, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { EmptyState } from "../components/EmptyState";
+import { BalanceLocked, BalancePinHint } from "../components/BalancePrivacy";
+import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { MonthPicker } from "../components/MonthPicker";
 import { formatMoney } from "../lib/currency";
 import { countsAsIncomeOrSpending } from "../lib/categories";
@@ -11,6 +13,7 @@ import { monthlySeries, summarizeLedger } from "../lib/ledger";
 import { financialMilestones } from "../lib/milestones";
 import type { CalendarSystem, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount } from "../types";
 import { totalCurrentBalance } from "../lib/account-balances";
+import { paymentAccountLabel } from "../lib/payment-accounts";
 import { isCompletedReportMonth } from "../lib/monthly-report";
 import { addFiscalYears, fiscalYearBounds, fiscalYearLabel, fiscalYearOf } from "../lib/fiscal-year";
 import { compareFestivalSpending, expensesBetween, FESTIVALS, festivalMonthLabel, type FestivalComparison } from "../lib/festivals";
@@ -40,6 +43,10 @@ export function ReportsPage({ month, currency, transactions, customCategories, p
   const milestones = useMemo(() => financialMilestones(transactions, dueItems), [dueItems, transactions]);
   const activeCategory = activeCategoryIndex === null ? undefined : categoryData[activeCategoryIndex];
   const trackedBalance = totalCurrentBalance(paymentAccounts);
+  // The same session unlock as the dashboard and Accounts.
+  const workspace = useContext(LedgerWorkspaceContext);
+  const balancesShown = workspace?.balancesVisible ?? true;
+  const hasPin = workspace?.ledger.profile.hasPin ?? false;
   const reportMonthKey = monthKey(month);
   const canDownloadPdf = allowPdfDownload && isCompletedReportMonth(reportMonthKey);
 
@@ -48,7 +55,7 @@ export function ReportsPage({ month, currency, transactions, customCategories, p
       <header className="page-header"><div><span className="eyebrow">The bigger picture</span><h1>Reports</h1><p>See where your money moved and how the months compare.</p></div><div className="report-header-actions"><MonthPicker calendarSystem={calendarSystem} month={month} onChange={onMonthChange} />{canDownloadPdf && <a className="secondary-button" href={`/api/reports/monthly?month=${reportMonthKey}`} download={`SaveYoRupee-${reportMonthKey}-monthly-report.pdf`}><DownloadSimple size={17} />Download PDF</a>}</div></header>
       <section className="report-kpis">
         <div><span>Savings rate</span><strong className={summary.savedPercentage < 0 ? "negative" : ""}>{summary.savedPercentage}%</strong><small>{summary.savedPercentage >= 0 ? <><TrendUp size={15} /> of income retained</> : <><TrendDown size={15} /> spending above income</>}</small></div>
-        <div><span>Tracked balance</span><strong>{formatMoney(trackedBalance, currency)}</strong><small>{paymentAccounts.length} {paymentAccounts.length === 1 ? "account" : "accounts"} checked manually</small></div>
+        <div><span>Tracked balance</span>{balancesShown || !paymentAccounts.length ? <strong>{formatMoney(trackedBalance, currency)}</strong> : <BalanceLocked compact title="Hidden" />}<small>{paymentAccounts.length} {paymentAccounts.length === 1 ? "account" : "accounts"} checked manually</small></div>
         <div><span>Largest category</span><strong>{summary.categories[0]?.label ?? "—"}</strong><small>{summary.categories[0] ? formatMoney(summary.categories[0].value, currency) : "No expenses"}</small></div>
         <div><span>Average expense</span><strong>{formatMoney(summary.expenses / Math.max(1, expenseCount), currency)}</strong><small>per expense entry</small></div>
       </section>
@@ -67,7 +74,7 @@ export function ReportsPage({ month, currency, transactions, customCategories, p
           <div className="chart-legend"><span><i className="income-dot" />Income</span><span><i className="expense-dot" />Expenses</span></div>
         </article>
       </section>
-      <section className="report-panel account-report-panel"><div className="section-heading"><div><span className="section-label">Account picture</span><h2>Where your tracked money sits</h2></div><Bank size={22} weight="duotone" /></div>{paymentAccounts.length ? <div className="report-account-list">{paymentAccounts.map((account) => { const percentage = trackedBalance > 0 ? Math.round((account.currentBalanceMinor / trackedBalance) * 100) : 0; return <div key={account.id}><div><span>{account.label || account.provider}</span><strong>{formatMoney(account.currentBalanceMinor, currency)}</strong></div><div className="bar-track"><span style={{ width: `${Math.max(0, Math.min(100, percentage))}%` }} /></div><small>{percentage}% of tracked balance · checked {account.balanceAsOf}</small></div>; })}</div> : <EmptyState title="No account balances yet" message="Add your bank or wallet balances on the Accounts page to see the full picture." />}</section>
+      <section className="report-panel account-report-panel"><div className="section-heading"><div><span className="section-label">Account picture</span><h2>Where your tracked money sits</h2></div><Bank size={22} weight="duotone" /></div>{paymentAccounts.length > 0 && !balancesShown ? <BalanceLocked title="Account balances are hidden" /> : paymentAccounts.length ? <div className="report-account-list">{paymentAccounts.map((account) => { const percentage = trackedBalance > 0 ? Math.round((account.currentBalanceMinor / trackedBalance) * 100) : 0; return <div key={account.id}><div><span>{paymentAccountLabel(account)}</span><strong>{formatMoney(account.currentBalanceMinor, currency)}</strong></div><div className="bar-track"><span style={{ width: `${Math.max(0, Math.min(100, percentage))}%` }} /></div><small>{percentage}% of tracked balance · checked {account.balanceAsOf}</small></div>; })}{!hasPin && <BalancePinHint />}</div> : <EmptyState title="No account balances yet" message="Add your bank or wallet balances on the Accounts page to see the full picture." />}</section>
       <section className="milestone-panel"><div className="section-heading"><div><span className="section-label">Financial timeline</span><h2>The moments your ledger remembers</h2></div><Sparkle size={22} weight="duotone" /></div>{milestones.length ? <div className="milestone-list">{milestones.map((item) => <article key={item.id} className={item.tone}><span><FlagBanner size={17} weight="duotone" /></span><div><small>{format(parseISO(item.date), "MMM d, yyyy")}</small><strong>{item.title}</strong><p>{item.detail}</p></div></article>)}</div> : <EmptyState />}</section>
     </div>
   );

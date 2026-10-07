@@ -1,4 +1,4 @@
-import type { PaymentAccount, PaymentAccountType } from "../types";
+import type { AccountTransfer, PaymentAccount, PaymentAccountType } from "../types";
 
 export const PAYMENT_ACCOUNT_TYPES: readonly { value: PaymentAccountType; label: string }[] = [
   { value: "mobile_banking", label: "Mobile banking" },
@@ -33,7 +33,7 @@ export function paymentAccountTypeLabel(type: PaymentAccountType) {
   return PAYMENT_ACCOUNT_TYPES.find((item) => item.value === type)?.label ?? type;
 }
 
-export function paymentAccountLabel(account: PaymentAccount) {
+export function paymentAccountLabel(account: Pick<PaymentAccount, "type" | "provider" | "label">) {
   const provider = account.type === "mobile_banking" || account.type === "other" ? account.provider : paymentAccountTypeLabel(account.type);
   return account.label ? `${account.label} · ${provider}` : provider;
 }
@@ -123,4 +123,18 @@ export function transferAccountDefaults(accounts: readonly Pick<PaymentAccount, 
   if (!toAccountId) toAccountId = other(fromAccountId);
   if (!fromAccountId) fromAccountId = other(toAccountId);
   return { fromAccountId, toAccountId };
+}
+
+type TransferRoute = Pick<AccountTransfer, "fromAccountId" | "toAccountId" | "amountMinor" | "occurredOn">;
+
+const dayNumber = (date: string) => Date.parse(`${date}T00:00:00Z`) / 86_400_000;
+
+/**
+ * A transfer already recorded on the same route for the same amount within a day, such as the
+ * bank's alert for a wallet load whose wallet alert is being read now. Saving both would move the money twice.
+ */
+export function findSimilarTransfer<T extends TransferRoute & { id: string }>(transfers: readonly T[], draft: TransferRoute, ignoreId?: string): T | null {
+  if (!draft.fromAccountId || !draft.toAccountId || !(draft.amountMinor > 0) || !Number.isFinite(dayNumber(draft.occurredOn))) return null;
+  return transfers.find((item) => item.id !== ignoreId && item.fromAccountId === draft.fromAccountId && item.toAccountId === draft.toAccountId
+    && item.amountMinor === draft.amountMinor && Math.abs(dayNumber(item.occurredOn) - dayNumber(draft.occurredOn)) <= 1) ?? null;
 }

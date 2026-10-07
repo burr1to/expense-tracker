@@ -44,6 +44,8 @@ export interface SmsHints {
   otherProvider: string | null;
   transferHint: SmsTransferHint | null;
   mentionsSalary: boolean;
+  /** The message's words outside the merchant, so a co-op the parser has no keyword for can still be found by name. */
+  outsideText?: string;
 }
 
 export interface SmsParseResult extends SmsHints {
@@ -116,7 +118,28 @@ const PROVIDER_KEYWORDS: ReadonlyArray<{ provider: string; pattern: RegExp }> = 
   { provider: "Garima Bikas Bank", pattern: /\bgarima\b/i },
   { provider: "Mahalaxmi Bikas Bank", pattern: /\bmahalaxmi\b/i },
   { provider: "Kamana Sewa Bikas Bank", pattern: /\bkamana\s?sewa\b/i },
+  // Names that are also places or plain words (Lumbini, Green, Excel) need the bank's own suffix.
+  { provider: "Jyoti Bikas Bank", pattern: bankName("jyoti") },
+  { provider: "Lumbini Bikas Bank", pattern: bankName("lumbini") },
+  { provider: "Excel Development Bank", pattern: bankName("excel") },
+  { provider: "Corporate Development Bank", pattern: bankName("corporate") },
+  { provider: "Green Development Bank", pattern: bankName("green") },
+  { provider: "Karnali Development Bank", pattern: bankName("karnali") },
+  { provider: "Miteri Development Bank", pattern: bankName("miteri") },
+  { provider: "Narayani Development Bank", pattern: bankName("narayani") },
+  { provider: "Salapa Bikas Bank", pattern: bankName("salapa") },
+  { provider: "Saptakoshi Development Bank", pattern: bankName("saptakoshi") },
+  { provider: "Shangrila Development Bank", pattern: bankName(String.raw`shangri-?la`) },
+  { provider: "Shine Resunga Development Bank", pattern: /\bshine\s?resunga\b/i },
+  { provider: "Sindhu Bikas Bank", pattern: bankName("sindhu") },
 ];
+
+function bankName(name: string) {
+  return new RegExp(String.raw`\b${name}\s?(?:(?:development|dev\.?|bikas)\s?)?bank\b|\b${name}\s?(?:development|bikas)\b`, "i");
+}
+
+/** Payment rails carry money between accounts but never hold it, so they never name the user's account. */
+const RAIL_PROVIDERS = new Set(["Fonepay"]);
 
 export function detectProvider(text: string): string | null {
   return detectProviders(text)[0] ?? null;
@@ -148,10 +171,11 @@ const AMOUNT = /(?:NPR|NRS|RS|₨|रू|रु)\.?\s*([\d,]+(?:\.\d{1,2})?)/i;
 const BALANCE = /(?:bal(?:ance)?|avl\.?\s*bal|available\s*balance)[^\d]{0,20}(?:NPR|NRS|RS|₨|रू|रु)?\.?\s*([\d,]+(?:\.\d{1,2})?)/i;
 
 const DEBIT_WORDS = /\b(debited|debit|withdraw(?:n|al)?|paid|payment|purchase|spent|transferred\s+to|sent\s+to|dr\b|charge[ds]?|deducted)\b/i;
-const CREDIT_WORDS = /\b(credited|credit|deposit(?:ed)?|received|refund(?:ed)?|salary|cr\b|added|top(?:ped)?[\s-]?up)\b/i;
+const CREDIT_WORDS = /\b(credited|credit|deposit(?:ed)?|received|refund(?:ed)?|salary|cr\b|added|loaded|top(?:ped)?[\s-]?up)\b/i;
 
 // "A/C XXXXXX4821", "A/C 0010XXXXXX1234", "A/C ###1234", "card ending 1234".
-const ACCOUNT_TAIL = /(?:a\/c|acct?|account|card)[^\d]{0,12}(?:\d{0,8}(?:x{2,}|[*#•]{2,}|\.{2,})\s?)?(\d{3,4})(?!\d)/i;
+// "card ending with 1234" is read too; an amount right after the account word ("A/C Dr NPR 750") never is.
+const ACCOUNT_TAIL = /(?:a\/c|acct?|account|card)(?:\s+(?:no\.?\s+)?ending\s+(?:with|in)\s+|[^\d]{0,12})(?:\d{0,8}(?:x{2,}|[*#•]{2,}|\.{2,})\s?)?(?<!(?:npr|nrs|rs|₨|रू|रु)\.?\s?)(\d{3,4})(?!\d)/i;
 // A masked number with no account word before it: "12XXXXXX4821".
 const MASKED_ACCOUNT = /(?<![A-Za-z\d])\d{0,8}(?:[xX]{2,}|[*#•]{2,})(\d{4})(?!\d)/;
 const MERCHANT = /\b(at|to|from|for|info|remarks?|narration|towards)[:\s]+([A-Za-z0-9][A-Za-z0-9 .,'&/-]{1,60})/gi;
@@ -162,6 +186,8 @@ const WALLET_LOAD = new RegExp([
   String.raw`\b${WALLET_NAME}\s+(?:wallet\s+)?(?:fund\s+)?(?:load|top[\s-]?up)`,
   String.raw`\b(?:load(?:ed)?|top(?:ped)?[\s-]?up)\s+(?:(?:to|of|in|into)\s+)?(?:your\s+)?${WALLET_NAME}\b`,
   String.raw`\b(?:added|credited|loaded)\s+(?:to|in|into)\s+your\s+${WALLET_NAME}\s+wallet\b`,
+  // "Your eSewa wallet has been loaded with Rs 1,000 from Nabil Bank".
+  String.raw`\b${WALLET_NAME}\s+wallet\s+(?:has\s+been\s+|is\s+|was\s+)?(?:loaded|top(?:ped)?[\s-]?up)\b`,
 ].join("|"), "i");
 const OWN_TRANSFER = /\bself[\s-]?transfer\b|\b(?:to|into)\s+(?:your\s+)?own\s+(?:a\/c|acct?|account)\b|\bown\s+account\s+transfer\b/i;
 const SALARY_WORDS = /\b(?:salary|payroll)\b/i;
@@ -228,13 +254,17 @@ function isValidCalendarDate(iso: string): boolean {
 // Trailing clauses that follow a merchant name in the same run of text and
 // must not be absorbed into it.
 const MERCHANT_TAIL = /\s+(?:avl\.?|available|bal(?:ance)?|ref(?:erence)?|txn|transaction|info|remarks?|narration|card|a\/c|acct?|account|on|dated?)\b.*$/i;
+// "QR payment to CAFE SOMA", "POS purchase at BHATBHATENI", "Fund transfer from RAM" name the payee after how the money moved.
+const GENERIC_LEAD = /^(?:(?:qr|pos|online|card|merchant|fund)\s+)?(?:payment|purchase|txn|transaction|transfer(?:red)?)\s+(to|at|from)\s+/i;
+// "QR payment" or "POS purchase" alone names no one, so reading continues to a later "at".
+const GENERIC_ONLY = /^(?:(?:qr|pos|online|card|merchant|fund|mobile)\s+)?(?:payment|purchase|txn|transaction|transfer|withdrawal)s?$/i;
 
 function cleanMerchant(raw: string): string | null {
   const value = raw
     .replace(/\s+/g, " ")
     // A sentence boundary ends the merchant name.
     .split(/[.;]\s+/)[0]
-    .replace(/^(?:qr\s+)?payment\s+to\s+/i, "")
+    .replace(GENERIC_LEAD, "")
     .replace(MERCHANT_TAIL, "")
     // "Nepal Telecom via Khalti" names the payee, then the rail.
     .replace(/\s+via\s+.*$/i, "")
@@ -251,6 +281,8 @@ function cleanMerchant(raw: string): string | null {
   if (/^(?:your|you|yours|my)\b/i.test(value) || /^(?:a\/c|acct?|account|card)\b/i.test(value) || /\bwallet\b/i.test(value)) return null;
   // "Thank you for using Khalti" is a sign-off naming the sender, not a payee.
   if (/^using\b/i.test(value)) return null;
+  // "to own A/C" is the user's own account.
+  if (GENERIC_ONLY.test(value) || /^own\b/i.test(value)) return null;
   return value.slice(0, 60);
 }
 
@@ -260,7 +292,8 @@ function extractMerchant(message: string): { merchant: string; keyword: string }
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(message))) {
     const merchant = cleanMerchant(match[2]);
-    if (merchant) return { merchant, keyword: match[1].toLowerCase() };
+    // "POS purchase at X" puts X after "at" as surely as "at X" does.
+    if (merchant) return { merchant, keyword: GENERIC_LEAD.exec(match[2].replace(/\s+/g, " "))?.[1].toLowerCase() === "at" ? "at" : match[1].toLowerCase() };
     // Resume right after the keyword so a later "at ATM KTM" inside a rejected phrase is still seen.
     pattern.lastIndex = match.index + match[1].length;
   }
@@ -289,8 +322,10 @@ export function readSmsHints(text: string, kind: TransactionKind | null = null):
   const found = extractMerchant(message);
   const merchant = found?.merchant ?? null;
   const outside = merchant ? message.replace(new RegExp(escapeRegExp(merchant).replace(/ /g, "\\s+"), "i"), (span) => " ".repeat(span.length)) : message;
-  const provider = detectProviders(outside)[0] ?? null;
-  const otherProvider = detectProviders(message).find((name) => name !== provider) ?? null;
+  // "via Fonepay" names the rail; the bank or wallet beside it is the account.
+  const outsideProviders = detectProviders(outside);
+  const provider = outsideProviders.find((name) => !RAIL_PROVIDERS.has(name)) ?? outsideProviders[0] ?? null;
+  const otherProvider = detectProviders(message).find((name) => name !== provider && !RAIL_PROVIDERS.has(name)) ?? null;
   const direction = kind ?? directionOf(message);
   let transferHint: SmsTransferHint | null = null;
   if (WALLET_LOAD.test(message) && [provider, otherProvider].some((name) => name && WALLET_PROVIDERS.has(name))) transferHint = "wallet_load";
@@ -304,7 +339,13 @@ export function readSmsHints(text: string, kind: TransactionKind | null = null):
     otherProvider,
     transferHint,
     mentionsSalary: SALARY_WORDS.test(message),
+    outsideText: wordsOf(outside),
   };
+}
+
+/** Lower-case words separated by single spaces, for whole-word name lookups. */
+export function wordsOf(text: string) {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
 /* ------------------------------------------------------------------ */
@@ -318,6 +359,13 @@ export function readSmsHints(text: string, kind: TransactionKind | null = null):
  */
 export function mentionsCurrencyAmount(text: string) {
   return AMOUNT.test(text.slice(0, SMS_MAX_LENGTH));
+}
+
+const ONE_TIME_CODE = /\b(?:otp|one[\s-]?time\s+(?:password|pin|code)|verification\s+code|security\s+code)\b/i;
+
+/** A one-time code message, which may name the amount it approves but is never a transaction to record. */
+export function mentionsOneTimeCode(text: string) {
+  return ONE_TIME_CODE.test(text.slice(0, SMS_MAX_LENGTH));
 }
 
 export function matchSmsTemplate(text: string): BankSmsTemplate | null {

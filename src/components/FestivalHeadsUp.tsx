@@ -9,9 +9,9 @@ import { useLedger } from "../context/LedgerContext";
 import { minorToMajorInput } from "../lib/allocation-calculator";
 import { isAllSpendingBudget } from "../lib/budgets";
 import { formatMoney, majorToMinor } from "../lib/currency";
-import { todayInput } from "../lib/dates";
 import { compareFestivalSpending, expensesBetween, festivalHeadsUp, festivalLabel } from "../lib/festivals";
 import { transactionCountsTowardBudget } from "../lib/household";
+import { useToday } from "../lib/use-today";
 import type { Budget, CurrencyCode, LedgerTransaction } from "../types";
 
 const DISMISS_EVENT = "syr:festival-heads-up";
@@ -31,7 +31,7 @@ const subscribe = (callback: () => void) => {
 export function FestivalHeadsUp({ transactions, budgets, currency }: { transactions: LedgerTransaction[]; budgets: Budget[]; currency: CurrencyCode }) {
   const { profile, goals, saveGoal } = useLedger();
   const router = useRouter();
-  const today = todayInput();
+  const today = useToday();
   const season = useMemo(() => { try { return festivalHeadsUp(today, 30); } catch { return null; } }, [today]);
   const lastYearMinor = useMemo(() => {
     if (!season) return 0;
@@ -41,13 +41,14 @@ export function FestivalHeadsUp({ transactions, budgets, currency }: { transacti
   const periodKey = season?.periodKey ?? "";
   // Hidden during server render and until storage is read, so a dismissed card never flashes.
   const dismissed = useSyncExternalStore(subscribe, () => !periodKey || readDismissed(periodKey), () => true);
-  const [hidden, setHidden] = useState(false);
+  // The season dismissed this visit (storage may be blocked); the next season still gets its card.
+  const [hiddenKey, setHiddenKey] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [goalOpen, setGoalOpen] = useState(false);
   const [goalAmount, setGoalAmount] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  if (!season || dismissed || hidden) return null;
+  if (!season || dismissed || hiddenKey === season.periodKey) return null;
   if (budgets.some((budget) => budget.userId === profile.id && budget.monthKey === season.periodKey && isAllSpendingBudget(budget))) return null;
 
   const { festival, bsYear, daysAway, daysToMainDay, mainDay } = season;
@@ -58,7 +59,7 @@ export function FestivalHeadsUp({ transactions, budgets, currency }: { transacti
   const targetDate = mainDay && mainDay > today ? mainDay : season.bounds.start > today ? season.bounds.start : "";
   const amount = goalAmount ?? (lastYearMinor > 0 ? minorToMajorInput(Math.ceil(lastYearMinor / 100_000) * 100_000) : "");
   const dismiss = () => {
-    setHidden(true);
+    setHiddenKey(season.periodKey);
     try { window.localStorage.setItem(storageKey(season.periodKey), "dismissed"); window.dispatchEvent(new Event(DISMISS_EVENT)); } catch { /* storage blocked: hidden for this visit only */ }
   };
   const createGoal = async (event: React.FormEvent) => {

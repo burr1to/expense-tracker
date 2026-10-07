@@ -58,7 +58,7 @@ const MAIN_DAYS: Readonly<Record<string, Readonly<Record<number, readonly [strin
   },
   holi: {
     2077: ["2021-03-28", "2021-03-28"], 2078: ["2022-03-17", "2022-03-17"], 2079: ["2023-03-06", "2023-03-06"], 2080: ["2024-03-24", "2024-03-24"],
-    2081: ["2025-03-13", "2025-03-13"], 2082: ["2026-03-02", "2026-03-02"], 2083: ["2027-03-22", "2027-03-22"],
+    2081: ["2025-03-13", "2025-03-13"], 2082: ["2026-03-02", "2026-03-02"], 2083: ["2027-03-21", "2027-03-21"],
   },
 };
 
@@ -80,10 +80,14 @@ export function festivalPeriodKey(festival: Festival, bsYear: number): PeriodKey
 
 const FESTIVAL_KEY = /^FEST:([a-z]+(?:-[a-z]+)*)-(\d{4})$/;
 
+/** A known season in a year the calendar can resolve; anything else (`FEST:holi-2090`, `FEST:teej-1999`) is null. */
 export function parseFestivalPeriodKey(key: PeriodKey): { festival: Festival; bsYear: number } | null {
   const match = FESTIVAL_KEY.exec(key);
   const festival = match ? festivalById(match[1]) : null;
-  return festival && match ? { festival, bsYear: Number(match[2]) } : null;
+  if (!festival || !match) return null;
+  const bsYear = Number(match[2]);
+  try { festivalBounds(festival, bsYear); } catch { return null; }
+  return { festival, bsYear };
 }
 
 /** The verified first and last main day, when the table knows this year. */

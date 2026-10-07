@@ -12,6 +12,7 @@ import { STORAGE_PERIOD_KEY } from "../../../lib/period";
 import { ALL_SPENDING_CATEGORY, ALL_SPENDING_LABEL } from "../../../lib/budgets";
 import { festivalLabel, parseFestivalPeriodKey } from "../../../lib/festivals";
 import { removeStoredReceipts, verifyStoredReceipt } from "../../../lib/receipt-storage";
+import { serverErrorResponse } from "../../../lib/user-messages";
 import { KATHMANDU_BOUNDS } from "../../../lib/kathmandu-locations";
 import { expectedAccountBalanceThrough } from "../../../lib/account-balances";
 import { asDate, dateOnly, loadLedger, purgeExpiredDeletedTransactions, serialize } from "../../../lib/ledger-snapshot";
@@ -23,9 +24,9 @@ import { IMPORT_BATCH_SIZE } from "../../../lib/import-job";
 import { todayInput } from "../../../lib/dates";
 import { canPostOnAccount } from "../../../lib/household";
 import { escapeHtml, sendLedgerEmail } from "../../../lib/outbound-mail";
-import { buildReminderDigest } from "../../../lib/reminder-digest";
+import { sendReminderEmail } from "../../../lib/reminder-mail";
 import { dateOnlyInTimeZone, firstRecurringOccurrence, latestDueOccurrence, nextRecurringOccurrence, recurrenceLabel } from "../../../lib/recurrence";
-import type { CategoryIconName, DueItem, LedgerTransaction, PaymentAccount, RecurrenceUnit } from "../../../types";
+import type { CategoryIconName, LedgerTransaction, PaymentAccount, RecurrenceUnit } from "../../../types";
 
 export const dynamic = "force-dynamic";
 
@@ -51,12 +52,15 @@ const transactionSchema = z.object({
   area: z.string().trim().max(120).nullable(), paymentMode: z.enum(["cash", "cheque", "online"]), paymentAccountId: z.string().nullable(),
   shared: z.boolean().optional(),
   location: locationSchema.optional(),
-}).superRefine((value, context) => {
+}).superRefine((value, context) => paymentAccountRule(value, context));
+function paymentAccountRule(value: { paymentMode: string; paymentAccountId: string | null }, context: z.RefinementCtx) {
   if (value.paymentMode === "online" && !value.paymentAccountId) context.addIssue({ code: "custom", path: ["paymentAccountId"], message: "Choose an online payment account." });
   if (value.paymentMode !== "online" && value.paymentAccountId) context.addIssue({ code: "custom", path: ["paymentAccountId"], message: "Payment accounts can only be used with online payments." });
-});
+}
 const receiptSchema = z.object({ name: z.string().trim().min(1).max(120), mimeType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]), size: z.number().int().positive().max(3 * 1024 * 1024), storagePath: z.string().min(1).max(300) });
-const savedTransactionSchema = transactionSchema.extend({ receipt: receiptSchema.optional(), removeReceipt: z.boolean().optional() });
+// clientRequestId is made once per new-entry sheet; prefixes the server writes itself (due-open:, split:) are reserved.
+// zod's extend drops the base schema's refinements, so the payment-account rule is applied again.
+const savedTransactionSchema = transactionSchema.extend({ receipt: receiptSchema.optional(), removeReceipt: z.boolean().optional(), clientRequestId: z.string().trim().min(8).max(100).refine((value) => !/^(due-open|split):/.test(value), "Invalid request id.").optional() }).superRefine((value, context) => paymentAccountRule(value, context));
 const receiptSplitTransactionSchema = transactionSchema.refine((transaction) => transaction.kind === "expense", { message: "Receipt scans can only create expenses.", path: ["kind"] });
 const receiptSplitSchema = z.object({
   receipt: receiptSchema.extend({ mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]) }),
@@ -416,7 +420,11 @@ export async function POST(request: Request) {
     switch (input.action) {
       case "saveTransaction": {
         const value = savedTransactionSchema.parse(input.payload);
-        const { receipt, removeReceipt, location, ...entry } = value;
+        const { receipt, removeReceipt, location, clientRequestId, ...entry } = value;
+        // A new entry retried after a lost response finds the row the first attempt saved, and logs nothing twice.
+        const requestId = recordId ? null : clientRequestId ?? null;
+        const alreadySaved = async () => Boolean(requestId && await db.transaction.findFirst({ where: { userId: id, clientRequestId: requestId }, select: { id: true } }));
+        if (await alreadySaved()) break;
         await assertAccountDatesAreOpen([{ paymentAccountId: entry.paymentAccountId, occurredOn: entry.occurredOn }]);
         const previous = recordId ? await db.transaction.findFirstOrThrow({ where: { id: recordId, userId: id, deletedAt: null }, select: { paymentAccountId: true, occurredOn: true, createdAt: true, kind: true, category: true, amountMinor: true, note: true, subcategory: true, paymentMode: true, shared: true, locationLabel: true, receiptScanId: true, receipt: { select: { id: true } } } }) : null;
         if (previous) await assertAccountDatesAreOpen([{ paymentAccountId: previous.paymentAccountId, occurredOn: dateOnly(previous.occurredOn)!, createdAt: previous.createdAt.toISOString() }]);
@@ -453,15 +461,22 @@ export async function POST(request: Request) {
                 detachedScanPath = scan?.storagePath ?? null;
               }
             }
-          } else transactionId = (await transaction.transaction.create({ data: { ...data, userId: id } })).id;
+          } else transactionId = (await transaction.transaction.create({ data: { ...data, userId: id, clientRequestId: requestId } })).id;
           if (!transactionId) throw new Error("Could not identify the saved transaction.");
           savedTransactionId = transactionId;
           const oldReceipt = removeReceipt || receipt ? await transaction.receiptAttachment.findFirst({ where: { transactionId, userId: id }, select: { storagePath: true } }) : null;
           if (removeReceipt && !receipt) await transaction.receiptAttachment.deleteMany({ where: { transactionId, userId: id } });
           if (storedReceipt) await transaction.receiptAttachment.upsert({ where: { transactionId }, update: storedReceipt, create: { ...storedReceipt, userId: id, transactionId } });
           return [oldReceipt?.storagePath && oldReceipt.storagePath !== receipt?.storagePath ? oldReceipt.storagePath : null, detachedScanPath];
+        }).catch(async (error: unknown) => {
+          // Two attempts of the same save raced and the other one committed it.
+          if (isDuplicateRequest(error) && await alreadySaved()) return null;
+          throw error;
         });
-        await removeStoredReceipts(pathsToRemove);
+        if (!pathsToRemove) break;
+        // The save has committed: a storage hiccup removing a replaced file must not report it as failed.
+        try { await removeStoredReceipts(pathsToRemove); }
+        catch (error) { console.warn("Saved the entry but could not remove a replaced receipt file.", error); }
         log(async (): Promise<ActivityDraft | null> => {
           const subject = await entryLabel(entry);
           if (!previous) return { action: "transaction.created", area: "transactions", entityId: savedTransactionId, title: `Added ${kindNoun(entry.kind)}`, subject, amountMinor: entry.amountMinor, meta: { kind: entry.kind, receipt: Boolean(receipt) } };
@@ -736,11 +751,14 @@ export async function POST(request: Request) {
           if (!recurring.active) throw new Error("This recurring entry is paused.");
           if (overrides.dueOn && overrides.dueOn !== scheduledOn) throw new Error("This occurrence was already recorded or skipped.");
           if (scheduledOn > dateOnlyInTimeZone("Asia/Kathmandu")) throw new Error("This recurring entry is not due yet.");
-          const paymentMode = overrides.paymentMode ?? (recurring.paymentAccountId ? "online" : "cash");
-          const paymentAccountId = overrides.paymentMode ? overrides.paymentAccountId ?? null : recurring.paymentAccountId;
+          // A schedule linked to Cash in hand records as cash, which that account collects on its own (as RecurringConfirmSheet does).
+          const linked = !overrides.paymentMode && recurring.paymentAccountId ? await transaction.paymentAccount.findFirstOrThrow({ where: { id: recurring.paymentAccountId, userId: id } }) : null;
+          const linkedOnline = Boolean(linked && linked.type !== "cash");
+          const paymentMode = overrides.paymentMode ?? (linkedOnline ? "online" : "cash");
+          const paymentAccountId = overrides.paymentMode ? overrides.paymentAccountId ?? null : linkedOnline ? recurring.paymentAccountId : null;
           const occurredOn = overrides.occurredOn ?? scheduledOn;
           const amountMinor = overrides.amountMinor ?? recurring.amountMinor;
-          if (paymentAccountId) await transaction.paymentAccount.findFirstOrThrow({ where: { id: paymentAccountId, userId: id } });
+          if (overrides.paymentMode && paymentAccountId) await transaction.paymentAccount.findFirstOrThrow({ where: { id: paymentAccountId, userId: id } });
           await assertAccountDatesAreOpen([{ paymentAccountId, occurredOn }]);
           const nextDueOn = nextRecurringOccurrence({
             recurrenceUnit: recurring.recurrenceUnit as RecurrenceUnit,
@@ -1052,12 +1070,13 @@ export async function POST(request: Request) {
       }
       case "saveTransfer": {
         const { clientRequestId, ...value } = transferSchema.parse(input.payload);
+        // Ownership first, so another person's reconciliation dates are never read or reported.
+        const owned = await db.paymentAccount.findMany({ where: { userId: id, id: { in: [value.fromAccountId, value.toAccountId] } }, select: { id: true } });
+        if (owned.length !== 2) throw new Error("Both transfer accounts must belong to you.");
         await assertAccountDatesAreOpen([
           { paymentAccountId: value.fromAccountId, occurredOn: value.occurredOn },
           { paymentAccountId: value.toAccountId, occurredOn: value.occurredOn },
         ]);
-        const owned = await db.paymentAccount.findMany({ where: { userId: id, id: { in: [value.fromAccountId, value.toAccountId] } }, select: { id: true } });
-        if (owned.length !== 2) throw new Error("Both transfer accounts must belong to you.");
         const data = { ...value, occurredOn: asDate(value.occurredOn) };
         if (recordId) {
           const existing = await db.accountTransfer.findFirst({ where: { id: recordId, userId: id } });
@@ -1165,7 +1184,10 @@ export async function POST(request: Request) {
           const oldReceipt = await db.receiptAttachment.findFirst({ where: { dueItemId, userId: id }, select: { storagePath: true } });
           const stored = await receiptData(receipt, id);
           await db.receiptAttachment.upsert({ where: { dueItemId }, update: stored, create: { ...stored, userId: id, dueItemId } });
-          if (oldReceipt?.storagePath && oldReceipt.storagePath !== receipt.storagePath) await removeStoredReceipts([oldReceipt.storagePath]);
+          if (oldReceipt?.storagePath && oldReceipt.storagePath !== receipt.storagePath) {
+            try { await removeStoredReceipts([oldReceipt.storagePath]); }
+            catch (error) { console.warn("Saved the due but could not remove its replaced receipt file.", error); }
+          }
         }
         break;
       }
@@ -1181,7 +1203,8 @@ export async function POST(request: Request) {
           if (movements.length) await tx.transaction.updateMany({ where: { userId: id, id: { in: movements.map((item) => item.id) } }, data: { deletedAt: new Date() } });
           return tx.dueItem.deleteMany({ where: { id: recordId, userId: id } });
         });
-        await removeStoredReceipts([receipt?.storagePath]);
+        try { await removeStoredReceipts([receipt?.storagePath]); }
+        catch (error) { console.warn("Deleted the due but could not remove its receipt file.", error); }
         if (removed.count && due) log(async () => ({ action: "due.deleted", area: "dues", entityId: recordId, title: "Deleted a due", subject: due.title, amountMinor: due.amountMinor, meta: { movementsRemoved: movements.length } }));
         break;
       }
@@ -1306,11 +1329,14 @@ export async function POST(request: Request) {
         break;
       }
       case "updateProfile": {
-        const value = profileSchema.parse(input.payload);
-        const before = await db.user.findUniqueOrThrow({ where: { id }, select: { pinHash: true, name: true, currency: true, hideAmounts: true, autoLockMinutes: true, calendarSystem: true, safeToSpendBufferMinor: true, emailReminders: true, browserReminders: true } });
-        const after = { name: value.displayName, currency: value.currency, hideAmounts: value.hideAmounts, autoLockMinutes: before.pinHash ? value.autoLockMinutes : 0, calendarSystem: value.calendarSystem, safeToSpendBufferMinor: value.safeToSpendBufferMinor, emailReminders: value.emailReminders, browserReminders: value.browserReminders };
-        await db.user.update({ where: { id }, data: after });
-        const settingsView = (item: Omit<typeof after, "currency" | "calendarSystem"> & { currency: string; calendarSystem: string }) => ({
+        // Only the settings sent are written, so two devices changing different settings never undo each other.
+        const value = profileSchema.partial().parse(input.payload);
+        const { pinHash, ...before } = await db.user.findUniqueOrThrow({ where: { id }, select: { pinHash: true, name: true, currency: true, hideAmounts: true, autoLockMinutes: true, calendarSystem: true, safeToSpendBufferMinor: true, emailReminders: true, browserReminders: true } });
+        const provided = { name: value.displayName, currency: value.currency, hideAmounts: value.hideAmounts, autoLockMinutes: value.autoLockMinutes === undefined ? undefined : pinHash ? value.autoLockMinutes : 0, calendarSystem: value.calendarSystem, safeToSpendBufferMinor: value.safeToSpendBufferMinor, emailReminders: value.emailReminders, browserReminders: value.browserReminders };
+        const update = Object.fromEntries(Object.entries(provided).filter(([, field]) => field !== undefined)) as Partial<typeof before>;
+        const after = { ...before, ...update };
+        if (Object.keys(update).length) await db.user.update({ where: { id }, data: update });
+        const settingsView = (item: typeof before) => ({
           ...item,
           autoLockMinutes: item.autoLockMinutes ? `After ${item.autoLockMinutes} minute${item.autoLockMinutes === 1 ? "" : "s"}` : "Off",
           calendarSystem: item.calendarSystem === "BS" ? "Bikram Sambat" : "Gregorian",
@@ -1340,47 +1366,12 @@ export async function POST(request: Request) {
         break;
       }
       case "sendDueReminders": {
-        const today = todayInput();
-        const me = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true, emailReminders: true, lastReminderEmailOn: true } });
-        if (!me.emailReminders || dateOnly(me.lastReminderEmailOn) === today) return NextResponse.json({ ok: true });
-        const [dues, recurring] = await Promise.all([
-          db.dueItem.findMany({ where: { userId: id, status: "open" }, include: { payments: { select: { amountMinor: true } } } }),
-          db.recurringEntry.findMany({ where: { userId: id, active: true } }),
-        ]);
-        const notices = buildReminderDigest({
-          today,
-          dues: dues.map((item) => ({
-            id: item.id,
-            userId: id,
-            kind: item.kind as DueItem["kind"],
-            title: item.title,
-            person: item.person,
-            amountMinor: item.amountMinor,
-            category: item.category,
-            occurredOn: dateOnly(item.occurredOn),
-            dueOn: dateOnly(item.dueOn)!,
-            remindOn: dateOnly(item.remindOn),
-            snoozedUntil: dateOnly(item.snoozedUntil),
-            note: item.note,
-            status: item.status as DueItem["status"],
-            annualRatePercent: item.annualRatePercent,
-            completedOn: dateOnly(item.completedOn),
-            createdAt: item.createdAt.toISOString(),
-            payments: item.payments.map((payment, index) => ({ id: `${item.id}-${index}`, userId: id, dueItemId: item.id, amountMinor: payment.amountMinor, occurredOn: today, note: "", transactionId: null, createdAt: item.createdAt.toISOString() })),
-          })),
-          recurring: recurring.flatMap((item) => {
-            const nextDueOn = dateOnly(item.nextDueOn);
-            if (!nextDueOn) return [];
-            return [{ id: item.id, active: item.active, kind: item.kind as "income" | "expense", note: item.note, category: item.category, amountMinor: item.amountMinor, nextDueOn }];
-          }),
-        });
-        await db.user.update({ where: { id }, data: { lastReminderEmailOn: asDate(today) } });
-        if (notices.length) {
-          const html = `<p>Here is what is due today or tomorrow in SaveYoRupee.</p><ul>${notices.map((notice) => `<li><strong>${escapeHtml(notice.title)}</strong> — ${escapeHtml(notice.body)}</li>`).join("")}</ul>`;
-          try { await sendLedgerEmail(me.email, "SaveYoRupee reminders", html); }
-          catch (error) { console.warn("Could not send reminder email.", error); }
-        }
-        return NextResponse.json({ ok: true });
+        // The 07:00 cron (/api/cron/reminders) normally sends this; the first app open of the day is the fallback.
+        // Either way the day is recorded only after the email went out.
+        const result = await sendReminderEmail(id, { appUrl: new URL(request.url).origin });
+        // Not 2xx, so the app tries again the next time it opens today.
+        if (result === "failed") return NextResponse.json({ error: "Could not send the reminder email." }, { status: 502 });
+        return NextResponse.json({ ok: true, result });
       }
       case "inviteHousehold": {
         const email = z.object({ email: z.string().trim().email().max(120) }).parse(input.payload).email.toLowerCase();
@@ -1455,7 +1446,9 @@ export async function POST(request: Request) {
     const entries = await flushActivity();
     return NextResponse.json({ ...serialize(await loadLedger(id)), activity: entries });
   } catch (error) {
-    const message = error instanceof z.ZodError ? error.issues[0]?.message : error instanceof Error ? error.message : "Request failed.";
-    return NextResponse.json({ error: message }, { status: 400 });
+    // Validation and deliberate messages stay at 400; database and library errors are logged and never echoed.
+    const { status, message, unexpected } = serverErrorResponse(error);
+    if (unexpected) console.error("Ledger action failed.", error);
+    return NextResponse.json({ error: message }, { status });
   }
 }

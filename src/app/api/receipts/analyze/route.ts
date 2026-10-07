@@ -2,8 +2,9 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAuthenticatedSession } from "../../../../lib/auth";
-import { CATEGORIES, SUBCATEGORIES } from "../../../../lib/categories";
+import { aiCategoryChoices } from "../../../../lib/categories";
 import { getPrisma } from "../../../../lib/prisma";
+import { AiQuotaError, consumeAiQuota } from "../../../../lib/ai-usage";
 import {
   GEMINI_RECEIPT_MODEL,
   interactionOutputText,
@@ -61,7 +62,7 @@ async function receiptBytes(path: string) {
 }
 
 function errorResponse(error: unknown) {
-  if (error instanceof AnalysisError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { "Cache-Control": "private, no-store" } });
+  if (error instanceof AnalysisError || error instanceof AiQuotaError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { "Cache-Control": "private, no-store" } });
   if (error instanceof z.ZodError) return NextResponse.json({ error: error.issues[0]?.message ?? "The receipt analysis was invalid." }, { status: 422, headers: { "Cache-Control": "private, no-store" } });
   return NextResponse.json({ error: "The receipt could not be analyzed. Try a clearer photo." }, { status: 502, headers: { "Cache-Control": "private, no-store" } });
 }
@@ -85,24 +86,14 @@ export async function POST(request: Request) {
       db.customCategory.findMany({ where: { userId: session.user.id }, select: { id: true, name: true, kind: true } }),
       db.customSubcategory.findMany({ where: { userId: session.user.id }, select: { categoryId: true, name: true } }),
     ]);
-    const categories: ReceiptAnalysisCategory[] = [
-      ...CATEGORIES.filter((category) => category.kind === "expense" || category.kind === "both").map((category) => ({
-        id: category.id,
-        label: category.label,
-        subcategories: [...(SUBCATEGORIES[category.id]?.options ?? []), ...customSubcategories.filter((item) => item.categoryId === category.id).map((item) => item.name)],
-      })),
-      ...customCategories.filter((category) => category.kind === "expense" || category.kind === "both").map((category) => ({
-        id: category.id,
-        label: category.name,
-        subcategories: customSubcategories.filter((item) => item.categoryId === category.id).map((item) => item.name),
-      })),
-    ];
+    const categories: ReceiptAnalysisCategory[] = aiCategoryChoices(customCategories, customSubcategories, "expense");
     const internalInput = {
       ...input,
       currency: user.currency as CurrencyCode,
       categories,
     };
     const image = await receiptBytes(input.receipt.storagePath);
+    await consumeAiQuota(db, session.user.id, "receipt");
     const response = await fetch(GEMINI_INTERACTIONS_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },

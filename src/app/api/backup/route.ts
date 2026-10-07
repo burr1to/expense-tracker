@@ -9,9 +9,12 @@ import {
   type BackupEntity,
   type BackupPayload,
   type BackupRecord,
+  budgetScopeFor,
   parseBackupCsv,
+  restoredRequestId,
   serializeBackupCsv,
 } from "../../../lib/backup";
+import { serverErrorResponse } from "../../../lib/user-messages";
 import { getPrisma } from "../../../lib/prisma";
 import {
   ensureReceiptsBucket,
@@ -49,7 +52,7 @@ async function receiptBase64(receipt: { storagePath: string | null; data?: Uint8
 async function buildBackup(userId: string) {
   const db = getPrisma();
   const [user, categories, subcategories, savedPlaces, accounts, reconciliations, transactions, transfers, budgets, recurring, goals, dues, receipts, receiptScans] = await Promise.all([
-    db.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true, currency: true, hideAmounts: true, autoLockMinutes: true, learningProfile: { select: { enabled: true } } } }),
+    db.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true, currency: true, hideAmounts: true, autoLockMinutes: true, calendarSystem: true, safeToSpendBufferMinor: true, emailReminders: true, browserReminders: true, learningProfile: { select: { enabled: true } } } }),
     db.customCategory.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     db.customSubcategory.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
     db.savedPlace.findMany({ where: { userId }, orderBy: { createdAt: "asc" } }),
@@ -68,13 +71,13 @@ async function buildBackup(userId: string) {
 
   const records: BackupRecord[] = [
     { entity: "metadata", backupId: "backup", payload: { app: "SaveYoRupee", exportedAt: new Date().toISOString() } },
-    { entity: "profile", backupId: "profile", payload: { displayName: user.name, currency: user.currency, hideAmounts: user.hideAmounts, autoLockMinutes: user.autoLockMinutes, learningEnabled: user.learningProfile?.enabled ?? false } },
+    { entity: "profile", backupId: "profile", payload: { displayName: user.name, currency: user.currency, hideAmounts: user.hideAmounts, autoLockMinutes: user.autoLockMinutes, learningEnabled: user.learningProfile?.enabled ?? false, calendarSystem: user.calendarSystem, safeToSpendBufferMinor: user.safeToSpendBufferMinor, emailReminders: user.emailReminders, browserReminders: user.browserReminders } },
     ...categories.map((item): BackupRecord => ({ entity: "custom_category", backupId: item.id, payload: { name: item.name, kind: item.kind, color: item.color, icon: item.icon, createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt) } })),
     ...subcategories.map((item): BackupRecord => ({ entity: "custom_subcategory", backupId: item.id, payload: { categoryId: item.categoryId, name: item.name, icon: item.icon, createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt) } })),
     ...savedPlaces.map((item): BackupRecord => ({ entity: "saved_place", backupId: item.id, payload: { name: item.name, icon: item.icon, address: item.address, latitude: item.latitude, longitude: item.longitude, createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt), lastUsedAt: iso(item.lastUsedAt) } })),
     ...accounts.map((item): BackupRecord => ({ entity: "payment_account", backupId: item.id, payload: { importId: item.importId, type: item.type, provider: item.provider, label: item.label, accountTail: item.accountTail, shared: item.shared, balanceMinor: item.balanceMinor, balanceAsOf: dateOnly(item.balanceAsOf), balanceRecordedAt: iso(item.balanceRecordedAt), createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt) } })),
     ...reconciliations.map((item): BackupRecord => ({ entity: "account_reconciliation", backupId: item.id, payload: { paymentAccountId: item.paymentAccountId, monthKey: item.monthKey, checkedOn: dateOnly(item.checkedOn), startingBalanceMinor: item.startingBalanceMinor, startingBalanceAsOf: dateOnly(item.startingBalanceAsOf), incomeMinor: item.incomeMinor, expenseMinor: item.expenseMinor, transfersInMinor: item.transfersInMinor, transfersOutMinor: item.transfersOutMinor, expectedBalanceMinor: item.expectedBalanceMinor, actualBalanceMinor: item.actualBalanceMinor, adjustmentMinor: item.adjustmentMinor, adjustmentNote: item.adjustmentNote, approvedAt: iso(item.approvedAt), createdAt: iso(item.createdAt) } })),
-    ...transactions.map((item): BackupRecord => ({ entity: "transaction", backupId: item.id, payload: { kind: item.kind, category: item.category, amountMinor: item.amountMinor, occurredOn: dateOnly(item.occurredOn), note: item.note, subcategory: item.subcategory, area: item.area, paymentMode: item.paymentMode, shared: item.shared, paymentAccountId: item.paymentAccountId, locationLabel: item.locationLabel, locationAddress: item.locationAddress, locationLatitude: item.locationLatitude, locationLongitude: item.locationLongitude, locationAccuracy: item.locationAccuracy, locationSource: item.locationSource, savedPlaceId: item.savedPlaceId, receiptScanId: item.receiptScanId, createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt) } })),
+    ...transactions.map((item): BackupRecord => ({ entity: "transaction", backupId: item.id, payload: { kind: item.kind, category: item.category, amountMinor: item.amountMinor, occurredOn: dateOnly(item.occurredOn), note: item.note, subcategory: item.subcategory, area: item.area, paymentMode: item.paymentMode, shared: item.shared, paymentAccountId: item.paymentAccountId, locationLabel: item.locationLabel, locationAddress: item.locationAddress, locationLatitude: item.locationLatitude, locationLongitude: item.locationLongitude, locationAccuracy: item.locationAccuracy, locationSource: item.locationSource, savedPlaceId: item.savedPlaceId, receiptScanId: item.receiptScanId, clientRequestId: item.clientRequestId, createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt) } })),
     ...transfers.map((item): BackupRecord => ({ entity: "account_transfer", backupId: item.id, payload: { fromAccountId: item.fromAccountId, toAccountId: item.toAccountId, amountMinor: item.amountMinor, occurredOn: dateOnly(item.occurredOn), note: item.note, createdAt: iso(item.createdAt) } })),
     ...budgets.map((item): BackupRecord => ({ entity: "budget", backupId: item.id, payload: { monthKey: item.monthKey, category: item.category, amountMinor: item.amountMinor, shared: item.shared, createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt) } })),
     ...recurring.map((item): BackupRecord => ({ entity: "recurring_entry", backupId: item.id, payload: { kind: item.kind, category: item.category, amountMinor: item.amountMinor, paymentAccountId: item.paymentAccountId, note: item.note, tags: item.tags, dayOfMonth: item.dayOfMonth, recurrenceUnit: item.recurrenceUnit, recurrenceInterval: item.recurrenceInterval, anchorDate: dateOnly(item.anchorDate), nextDueOn: dateOnly(item.nextDueOn), active: item.active, createdAt: iso(item.createdAt), updatedAt: iso(item.updatedAt) } })),
@@ -83,7 +86,7 @@ async function buildBackup(userId: string) {
       ...goal.contributions.map((item): BackupRecord => ({ entity: "savings_goal_contribution", backupId: item.id, payload: { goalId: item.goalId, amountMinor: item.amountMinor, isOpeningBalance: item.isOpeningBalance, createdAt: iso(item.createdAt) } })),
     ]),
     ...dues.flatMap((due): BackupRecord[] => [
-      { entity: "due_item", backupId: due.id, payload: { kind: due.kind, title: due.title, person: due.person, amountMinor: due.amountMinor, category: due.category, occurredOn: dateOnly(due.occurredOn), dueOn: dateOnly(due.dueOn), remindOn: dateOnly(due.remindOn), snoozedUntil: dateOnly(due.snoozedUntil), note: due.note, status: due.status, completedOn: dateOnly(due.completedOn), createdAt: iso(due.createdAt), updatedAt: iso(due.updatedAt) } },
+      { entity: "due_item", backupId: due.id, payload: { kind: due.kind, title: due.title, person: due.person, amountMinor: due.amountMinor, category: due.category, occurredOn: dateOnly(due.occurredOn), dueOn: dateOnly(due.dueOn), remindOn: dateOnly(due.remindOn), snoozedUntil: dateOnly(due.snoozedUntil), note: due.note, status: due.status, annualRatePercent: due.annualRatePercent, completedOn: dateOnly(due.completedOn), createdAt: iso(due.createdAt), updatedAt: iso(due.updatedAt) } },
       ...due.payments.map((item): BackupRecord => ({ entity: "due_payment", backupId: item.id, payload: { dueItemId: item.dueItemId, amountMinor: item.amountMinor, occurredOn: dateOnly(item.occurredOn), note: item.note, transactionId: item.transactionId && includedTransactionIds.has(item.transactionId) ? item.transactionId : null, createdAt: iso(item.createdAt) } })),
     ]),
   ];
@@ -219,7 +222,9 @@ async function restoreBackup(userId: string, csv: string) {
       await transaction.customSubcategory.deleteMany({ where: { userId } });
       await transaction.customCategory.deleteMany({ where: { userId } });
       await transaction.learningProfile.deleteMany({ where: { userId } });
-      await transaction.user.update({ where: { id: userId }, data: { name: profile.displayName, currency: profile.currency, hideAmounts: profile.hideAmounts, autoLockMinutes: profile.autoLockMinutes } });
+      // Settings an older backup does not carry keep their current value.
+      const laterSettings = { calendarSystem: profile.calendarSystem, safeToSpendBufferMinor: profile.safeToSpendBufferMinor, emailReminders: profile.emailReminders, browserReminders: profile.browserReminders };
+      await transaction.user.update({ where: { id: userId }, data: { name: profile.displayName, currency: profile.currency, hideAmounts: profile.hideAmounts, autoLockMinutes: profile.autoLockMinutes, ...Object.fromEntries(Object.entries(laterSettings).filter(([, value]) => value !== undefined)) } });
       if (profile.learningEnabled) await transaction.learningProfile.create({ data: { userId, enabled: true } });
 
       if (categories.length) await transaction.customCategory.createMany({ data: categories.map(({ backupId, payload }) => ({ id: categoryIds.get(backupId)!, userId, name: payload.name, kind: payload.kind, color: payload.color, icon: payload.icon, createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
@@ -228,9 +233,9 @@ async function restoreBackup(userId: string, csv: string) {
       if (accounts.length) await transaction.paymentAccount.createMany({ data: accounts.map(({ backupId, payload }) => ({ id: accountIds.get(backupId)!, importId: payload.importId ?? crypto.randomUUID(), userId, type: payload.type, provider: payload.provider, label: payload.label, accountTail: payload.accountTail ?? null, shared: payload.shared ?? false, balanceMinor: payload.balanceMinor, balanceAsOf: asDate(payload.balanceAsOf), balanceRecordedAt: asDateTime(payload.balanceRecordedAt), createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
       if (reconciliations.length) await transaction.accountReconciliation.createMany({ data: reconciliations.map(({ backupId, payload }) => ({ id: reconciliationIds.get(backupId)!, userId, paymentAccountId: accountIds.get(payload.paymentAccountId)!, monthKey: payload.monthKey, checkedOn: asDate(payload.checkedOn), startingBalanceMinor: payload.startingBalanceMinor, startingBalanceAsOf: asDate(payload.startingBalanceAsOf), incomeMinor: payload.incomeMinor, expenseMinor: payload.expenseMinor, transfersInMinor: payload.transfersInMinor, transfersOutMinor: payload.transfersOutMinor, expectedBalanceMinor: payload.expectedBalanceMinor, actualBalanceMinor: payload.actualBalanceMinor, adjustmentMinor: payload.adjustmentMinor, adjustmentNote: payload.adjustmentNote, approvedAt: asDateTime(payload.approvedAt), createdAt: asDateTime(payload.createdAt) })) });
       if (receiptScans.length) await transaction.receiptScan.createMany({ data: receiptScans.map(({ backupId, payload }) => ({ id: receiptScanIds.get(backupId)!, userId, name: payload.name, mimeType: payload.mimeType, size: payload.size, storagePath: uploadedReceiptScans.get(backupId)!, createdAt: asDateTime(payload.createdAt) })) });
-      if (transactions.length) await transaction.transaction.createMany({ data: transactions.map(({ backupId, payload }) => ({ id: transactionIds.get(backupId)!, userId, kind: payload.kind, category: categoryId(payload.category), amountMinor: payload.amountMinor, occurredOn: asDate(payload.occurredOn), note: payload.note, subcategory: payload.subcategory, area: payload.area, paymentMode: payload.paymentMode, shared: payload.shared ?? false, paymentAccountId: payload.paymentAccountId ? accountIds.get(payload.paymentAccountId)! : null, locationLabel: payload.locationLabel, locationAddress: payload.locationAddress, locationLatitude: payload.locationLatitude, locationLongitude: payload.locationLongitude, locationAccuracy: payload.locationAccuracy, locationSource: payload.locationSource, savedPlaceId: payload.savedPlaceId ? placeIds.get(payload.savedPlaceId)! : null, receiptScanId: payload.receiptScanId ? receiptScanIds.get(payload.receiptScanId)! : null, createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
+      if (transactions.length) await transaction.transaction.createMany({ data: transactions.map(({ backupId, payload }) => ({ id: transactionIds.get(backupId)!, userId, kind: payload.kind, category: categoryId(payload.category), amountMinor: payload.amountMinor, occurredOn: asDate(payload.occurredOn), note: payload.note, subcategory: payload.subcategory, area: payload.area, paymentMode: payload.paymentMode, shared: payload.shared ?? false, paymentAccountId: payload.paymentAccountId ? accountIds.get(payload.paymentAccountId)! : null, locationLabel: payload.locationLabel, locationAddress: payload.locationAddress, locationLatitude: payload.locationLatitude, locationLongitude: payload.locationLongitude, locationAccuracy: payload.locationAccuracy, locationSource: payload.locationSource, savedPlaceId: payload.savedPlaceId ? placeIds.get(payload.savedPlaceId)! : null, receiptScanId: payload.receiptScanId ? receiptScanIds.get(payload.receiptScanId)! : null, clientRequestId: restoredRequestId(payload.clientRequestId, dueIds), createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
       if (transfers.length) await transaction.accountTransfer.createMany({ data: transfers.map(({ backupId, payload }) => ({ id: transferIds.get(backupId)!, userId, fromAccountId: accountIds.get(payload.fromAccountId)!, toAccountId: accountIds.get(payload.toAccountId)!, amountMinor: payload.amountMinor, occurredOn: asDate(payload.occurredOn), note: payload.note, createdAt: asDateTime(payload.createdAt) })) });
-      if (budgets.length) await transaction.budget.createMany({ data: budgets.map(({ backupId, payload }) => ({ id: budgetIds.get(backupId)!, userId, monthKey: payload.monthKey, category: categoryId(payload.category), amountMinor: payload.amountMinor, shared: payload.shared ?? false, createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
+      if (budgets.length) await transaction.budget.createMany({ data: budgets.map(({ backupId, payload }) => ({ id: budgetIds.get(backupId)!, userId, monthKey: payload.monthKey, scope: budgetScopeFor(payload.monthKey), category: categoryId(payload.category), amountMinor: payload.amountMinor, shared: payload.shared ?? false, createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
       if (recurring.length) await transaction.recurringEntry.createMany({ data: recurring.map(({ backupId, payload }) => ({
         id: recurringIds.get(backupId)!,
         userId,
@@ -251,7 +256,7 @@ async function restoreBackup(userId: string, csv: string) {
       })) });
       if (goals.length) await transaction.savingsGoal.createMany({ data: goals.map(({ backupId, payload }) => ({ id: goalIds.get(backupId)!, userId, name: payload.name, targetMinor: payload.targetMinor, savedMinor: payload.savedMinor, targetDate: payload.targetDate ? asDate(payload.targetDate) : null, createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
       if (contributions.length) await transaction.savingsGoalContribution.createMany({ data: contributions.map(({ backupId, payload }) => ({ id: contributionIds.get(backupId)!, userId, goalId: goalIds.get(payload.goalId)!, amountMinor: payload.amountMinor, isOpeningBalance: payload.isOpeningBalance, createdAt: asDateTime(payload.createdAt) })) });
-      if (dues.length) await transaction.dueItem.createMany({ data: dues.map(({ backupId, payload }) => ({ id: dueIds.get(backupId)!, userId, kind: payload.kind, title: payload.title, person: payload.person, amountMinor: payload.amountMinor, category: categoryId(payload.category), occurredOn: payload.occurredOn ? asDate(payload.occurredOn) : null, dueOn: asDate(payload.dueOn), remindOn: payload.remindOn ? asDate(payload.remindOn) : null, snoozedUntil: payload.snoozedUntil ? asDate(payload.snoozedUntil) : null, note: payload.note, status: payload.status, completedOn: payload.completedOn ? asDate(payload.completedOn) : null, createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
+      if (dues.length) await transaction.dueItem.createMany({ data: dues.map(({ backupId, payload }) => ({ id: dueIds.get(backupId)!, userId, kind: payload.kind, title: payload.title, person: payload.person, amountMinor: payload.amountMinor, category: categoryId(payload.category), occurredOn: payload.occurredOn ? asDate(payload.occurredOn) : null, dueOn: asDate(payload.dueOn), remindOn: payload.remindOn ? asDate(payload.remindOn) : null, snoozedUntil: payload.snoozedUntil ? asDate(payload.snoozedUntil) : null, note: payload.note, status: payload.status, annualRatePercent: payload.annualRatePercent ?? null, completedOn: payload.completedOn ? asDate(payload.completedOn) : null, createdAt: asDateTime(payload.createdAt), updatedAt: asDateTime(payload.updatedAt) })) });
       if (duePayments.length) await transaction.duePayment.createMany({ data: duePayments.map(({ backupId, payload }) => ({ id: duePaymentIds.get(backupId)!, userId, dueItemId: dueIds.get(payload.dueItemId)!, amountMinor: payload.amountMinor, occurredOn: asDate(payload.occurredOn), note: payload.note, transactionId: payload.transactionId ? transactionIds.get(payload.transactionId)! : null, createdAt: asDateTime(payload.createdAt) })) });
       if (receipts.length) await transaction.receiptAttachment.createMany({ data: receipts.map(({ backupId, payload }) => ({ id: crypto.randomUUID(), userId, transactionId: payload.transactionId ? transactionIds.get(payload.transactionId)! : null, dueItemId: payload.dueItemId ? dueIds.get(payload.dueItemId)! : null, name: payload.name, mimeType: payload.mimeType, size: payload.size, storagePath: uploadedReceipts.get(backupId)!, data: null, createdAt: asDateTime(payload.createdAt) })) });
     }, { timeout: 30_000 });
@@ -281,7 +286,10 @@ export async function GET() {
       },
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Could not create the backup." }, { status: 500 });
+    // Our own reasons (a receipt file could not be read, too large) are shown; database errors are logged, never echoed.
+    const { message, unexpected } = serverErrorResponse(error);
+    if (unexpected) console.error("Could not build a backup.", error);
+    return NextResponse.json({ error: unexpected ? "Could not create the backup. Try again in a moment." : message }, { status: 500 });
   }
 }
 
@@ -315,7 +323,8 @@ export async function POST(request: Request) {
     }]);
     return NextResponse.json({ restoredAt: new Date().toISOString(), exportedAt: restored.metadata.exportedAt, counts: restored.counts, activity });
   } catch (error) {
-    const message = error instanceof z.ZodError ? error.issues[0]?.message : error instanceof Error ? error.message : "Could not restore this backup.";
-    return NextResponse.json({ error: message }, { status: 400 });
+    const { status, message, unexpected } = serverErrorResponse(error);
+    if (unexpected) console.error("Could not restore a backup.", error);
+    return NextResponse.json({ error: unexpected ? "Could not restore this backup. Nothing was changed; try again in a moment." : message }, { status });
   }
 }

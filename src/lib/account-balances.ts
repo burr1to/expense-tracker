@@ -102,6 +102,8 @@ export interface TransferRemovalEffect {
   transferCount: number;
   /** How the other account's current balance changes once these transfers are gone. */
   changeMinor: number;
+  /** Transfers newer than the other account's checked balance, the only ones its balance counts. */
+  countedCount: number;
 }
 
 /**
@@ -114,10 +116,13 @@ export function transferRemovalEffects(accountId: string, accounts: readonly Pay
     if (item.fromAccountId !== accountId && item.toAccountId !== accountId) continue;
     const otherId = item.fromAccountId === accountId ? item.toAccountId : item.fromAccountId;
     if (otherId === accountId) continue;
-    const effect = effects.get(otherId) ?? { accountId: otherId, transferCount: 0, changeMinor: 0 };
+    const effect = effects.get(otherId) ?? { accountId: otherId, transferCount: 0, changeMinor: 0, countedCount: 0 };
     effect.transferCount += 1;
     const other = accounts.find((account) => account.id === otherId);
-    if (other && isAfterAccountAnchor(item.occurredOn, item.createdAt, other)) effect.changeMinor += item.fromAccountId === accountId ? -item.amountMinor : item.amountMinor;
+    if (other && isAfterAccountAnchor(item.occurredOn, item.createdAt, other)) {
+      effect.changeMinor += item.fromAccountId === accountId ? -item.amountMinor : item.amountMinor;
+      effect.countedCount += 1;
+    }
     effects.set(otherId, effect);
   }
   return [...effects.values()];

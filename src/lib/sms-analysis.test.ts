@@ -89,6 +89,29 @@ describe("SMS to account matching", () => {
     expect(matchSmsAccount({ provider: "Nabil Bank", accountTail: null }, [tracked]).account?.id).toBe("nabil");
   });
 
+  it("does not book a message from one bank to another bank's account that shares its last digits", () => {
+    const nabilTail = account({ id: "nabil", accountTail: "1234" });
+    expect(draftFor("NIC ASIA: Your A/C ###1234 debited by NPR 900 on 05/10/2026 at BHATBHATENI", [nabilTail, nicAsia]).draft.paymentAccountId).toBe("nic");
+    // An NIC Asia account with other digits is not it either, so nothing is picked and the user is told.
+    const otherNic = draftFor("NIC ASIA: Your A/C ###1234 debited by NPR 900 on 05/10/2026 at BHATBHATENI", [nabilTail, account({ id: "nic", provider: "NIC Asia Bank Limited", accountTail: "9999" })]);
+    expect(otherNic.draft.paymentAccountId).toBe("");
+    expect(otherNic.warnings.join(" ")).toContain("ending 1234");
+    // With no account at the named bank, the stored digits still decide.
+    expect(draftFor("NIC ASIA: Your A/C ###1234 debited by NPR 900 on 05/10/2026 at BHATBHATENI", [nabilTail]).draft.paymentAccountId).toBe("nabil");
+  });
+
+  it("matches the bank named beside Fonepay", () => {
+    const result = draftFor("Your A/C ###1234 is debited by NPR 500.00 for QR payment via Fonepay at Himalayan Java on 05/10/2026. -Nabil Bank", [nabil, esewa]);
+    expect(result.draft).toMatchObject({ paymentMode: "online", paymentAccountId: "nabil", note: "Himalayan Java" });
+  });
+
+  it("finds a co-op or finance account by its own name, never by generic words alone", () => {
+    const sahara = account({ id: "sahara", type: "other", provider: "Sahara Saving and Credit Co-op" });
+    expect(draftFor("Sahara SACCOS: Rs 2,000 deposited to your saving A/C on 05/10/2026", [nabil, sahara]).draft).toMatchObject({ paymentMode: "online", paymentAccountId: "sahara" });
+    expect(draftFor("Your saving and credit co-op A/C is credited by Rs 2,000 on 05/10/2026", [nabil, sahara]).draft.paymentAccountId).toBe("");
+    expect(draftFor("Rs 450 paid at SAHARA CAFE on 05/10/2026", [sahara]).draft.paymentAccountId).toBe("");
+  });
+
   it("never matches the Cash in hand account from a bank message", () => {
     expect(matchSmsAccount({ provider: "Cash", accountTail: null }, [cash]).account).toBeNull();
   });

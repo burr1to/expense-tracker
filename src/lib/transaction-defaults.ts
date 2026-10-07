@@ -1,4 +1,5 @@
 import { addDays, format, parseISO } from "date-fns";
+import { countsAsIncomeOrSpending } from "./categories";
 import { adToBs, bsMonthName } from "./nepali-date";
 import type { CalendarSystem, LedgerTransaction, PaymentAccount, PaymentMode, TransactionKind } from "../types";
 
@@ -53,7 +54,8 @@ export function pickTransactionDefaults({ transactions, kind, paymentAccounts, t
   // A new entry starts unshared, and the server only lets a shared entry use a partner's account, so only your own accounts qualify.
   const accountIds = new Set(paymentAccounts.filter((account) => !ownerId || account.userId === ownerId).map((account) => account.id));
   const categories = categoryIds ? new Set(categoryIds) : null;
-  const own = transactions.filter((entry) => entry.kind === kind && (!ownerId || entry.userId === ownerId) && entry.occurredOn <= today).sort(newestFirst);
+  // Loan movements come from Dues, not from habits, so lending or repaying often never makes "Loans" (or its account) the default.
+  const own = transactions.filter((entry) => entry.kind === kind && countsAsIncomeOrSpending(entry) && (!ownerId || entry.userId === ownerId) && entry.occurredOn <= today).sort(newestFirst);
   const since = shiftDateKey(today, -(windowDays - 1));
   const recent = own.filter((entry) => entry.occurredOn >= since);
   const payment = (entry: LedgerTransaction): Omit<TransactionDefaults, "category"> | null => {

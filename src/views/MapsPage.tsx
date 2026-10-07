@@ -9,6 +9,7 @@ import { SavedPlaceIcon } from "../components/SavedPlaceIcon";
 import { TransactionRow } from "../components/TransactionRow";
 import { allCategoriesFor, countsAsIncomeOrSpending, getCategory } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
+import { onlinePaymentAccounts, paymentAccountLabel } from "../lib/payment-accounts";
 import { KATHMANDU_BOUNDS, KATHMANDU_CENTER, KATHMANDU_MAP_MAX_ZOOM, addKathmanduLabelMarkers, applyKathmanduMapTheme, kathmanduMapStyle } from "../lib/kathmandu-locations";
 import { transactionPlaceKey } from "../lib/place-spending-trends";
 import { savedPlaceIconOptions } from "../lib/saved-places";
@@ -128,7 +129,7 @@ function buildSummaries(transactions: LedgerTransaction[], savedPlaces: SavedPla
   return [...groups.values()].map((summary) => {
     const categoryTotals = new Map<string, number>();
     const monthlyTotals = new Map<string, number>();
-    summary.transactions.forEach((transaction) => categoryTotals.set(transaction.category, (categoryTotals.get(transaction.category) ?? 0) + transaction.amountMinor));
+    summary.transactions.forEach((transaction) => { if (countsAsIncomeOrSpending(transaction)) categoryTotals.set(transaction.category, (categoryTotals.get(transaction.category) ?? 0) + transaction.amountMinor); });
     summary.transactions.forEach((transaction) => { if (transaction.kind === "expense" && countsAsIncomeOrSpending(transaction)) monthlyTotals.set(transaction.occurredOn.slice(0, 7), (monthlyTotals.get(transaction.occurredOn.slice(0, 7)) ?? 0) + transaction.amountMinor); });
     summary.topCategory = [...categoryTotals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? summary.topCategory;
     summary.monthlyTotals = [...monthlyTotals.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-6).map(([month, amountMinor]) => ({ month, amountMinor }));
@@ -409,7 +410,7 @@ export function MapsPage({ currency, transactions, customCategories, paymentAcco
       {filtersOpen && <div className="map-filter-grid" id="map-filters">
         <Select label="Date" value={filters.dateFilter} data={[{ value: "all", label: "All time" }, { value: "this_month", label: "This month" }, { value: "last_3_months", label: "Last 3 months" }, { value: "this_year", label: "This year" }, { value: "custom", label: "Custom range" }]} onChange={(value) => updateFilter("dateFilter", (value ?? "all") as DateFilter)} />
         <Select label="Category" value={filters.category} data={[{ value: "all", label: "All categories" }, ...categories]} onChange={(value) => updateFilter("category", value ?? "all")} />
-        <Select label="Payment account" value={filters.paymentAccountId} data={[{ value: "all", label: "All payment sources" }, ...paymentAccounts.map((account) => ({ value: account.id, label: account.label || account.provider }))]} onChange={(value) => updateFilter("paymentAccountId", value ?? "all")} />
+        <Select label="Payment account" value={filters.paymentAccountId} data={[{ value: "all", label: "All payment sources" }, ...onlinePaymentAccounts(paymentAccounts).map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))]} onChange={(value) => updateFilter("paymentAccountId", value ?? "all")} />
         <SegmentedControl aria-label="Transaction type" value={filters.kind} data={[{ value: "all", label: "All" }, { value: "expense", label: "Expenses" }, { value: "income", label: "Income" }]} onChange={(value) => updateFilter("kind", value as TransactionKind | "all")} />
         {filters.dateFilter === "custom" && <><TextInput type="date" label="From" value={filters.fromDate} onChange={(event) => updateFilter("fromDate", event.currentTarget.value)} /><TextInput type="date" label="To" value={filters.toDate} onChange={(event) => updateFilter("toDate", event.currentTarget.value)} /></>}
         <TextInput label="Minimum amount" placeholder="0" value={filters.minAmount} onChange={(event) => updateFilter("minAmount", event.currentTarget.value)} />

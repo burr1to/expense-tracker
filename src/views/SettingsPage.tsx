@@ -7,7 +7,8 @@ import { LedgerIcon } from "../components/LedgerIcon";
 import { RecoverySetupModal } from "../components/RecoverySetupModal";
 import { useAuth } from "../context/AuthContext";
 import { useLedger } from "../context/LedgerContext";
-import { BACKUP_MAX_BYTES, parseBackupCsv } from "../lib/backup";
+import { BACKUP_MAX_BYTES, lastBackupSummary, parseBackupCsv } from "../lib/backup";
+import { readResponse } from "../lib/user-messages";
 import { CATEGORIES, getCategory } from "../lib/categories";
 import { CATEGORY_ICON_OPTIONS } from "../lib/category-icons";
 import { formatMoney, majorToMinor } from "../lib/currency";
@@ -17,6 +18,8 @@ import { reopenOnboardingGuide } from "../lib/onboarding";
 import type { CalendarSystem, CategoryIconName, CurrencyCode, TransactionKind } from "../types";
 import { FormError } from "../components/FormError";
 import { SlidingTabs } from "../components/SlidingTabs";
+import { Info } from "@phosphor-icons/react";
+import { notificationBlockerHere } from "../lib/app-shell";
 
 const currencies: { code: CurrencyCode; label: string }[] = [
   { code: "NPR", label: "Nepalese rupee" }, { code: "USD", label: "US dollar" }, { code: "AUD", label: "Australian dollar" },
@@ -35,6 +38,9 @@ export function SettingsPage({ onLock }: { onLock: () => void }) {
   const [currentPin, setCurrentPin] = useState(""); const [newPin, setNewPin] = useState(""); const [confirmPin, setConfirmPin] = useState(""); const [pinStatus, setPinStatus] = useState<string | null>(null); const [pinAction, setPinAction] = useState<"save" | "remove" | null>(null);
   const [savingPreferences, setSavingPreferences] = useState(false);
   const [reminderSaving, setReminderSaving] = useState(false);
+  const [reminderNote, setReminderNote] = useState<string | null>(null);
+  const [browserBlocker, setBrowserBlocker] = useState<string | null>(null);
+  useEffect(() => { setBrowserBlocker(notificationBlockerHere()); }, []);
   const [inviteEmail, setInviteEmail] = useState("");
   const [householdMessage, setHouseholdMessage] = useState<string | null>(null);
   const [householdError, setHouseholdError] = useState<string | null>(null);
@@ -47,6 +53,9 @@ export function SettingsPage({ onLock }: { onLock: () => void }) {
   const [restoreModalOpen, setRestoreModalOpen] = useState(false);
   const [restoringBackup, setRestoringBackup] = useState(false);
   const [restorePassword, setRestorePassword] = useState("");
+  // When the last full backup was downloaded: undefined until known, null when Logs hold none.
+  const [lastBackupAt, setLastBackupAt] = useState<string | null | undefined>(undefined);
+  const [backupCheck, setBackupCheck] = useState(0);
   const [recoveryConfigured, setRecoveryConfigured] = useState<boolean | null>(null);
   const [recoverySetupOpen, setRecoverySetupOpen] = useState(false);
   const [learningAction, setLearningAction] = useState<"toggle" | "run" | "reset" | null>(null);
@@ -78,6 +87,17 @@ export function SettingsPage({ onLock }: { onLock: () => void }) {
   useEffect(() => {
     if (!taxonomyCategories.some((category) => category.id === subcategoryCategoryId)) setSubcategoryCategoryId(taxonomyCategories[0]?.id ?? "other");
   }, [subcategoryCategoryId, taxonomyCategories]);
+  useEffect(() => {
+    if (activeTab !== "backup" || isDemo) return;
+    let cancelled = false;
+    // Offline, the line simply stays as it was.
+    const load = () => { void fetch("/api/backup/status", { cache: "no-store" }).then((response) => readResponse<{ lastBackupAt?: string | null }>(response)).then((parsed) => { if (!cancelled && parsed.ok && parsed.json) setLastBackupAt(parsed.body?.lastBackupAt ?? null); }).catch(() => undefined); };
+    load();
+    window.addEventListener("focus", load);
+    return () => { cancelled = true; window.removeEventListener("focus", load); };
+  }, [activeTab, backupCheck, isDemo]);
+  const checkBackupSoon = () => { for (const delay of [4_000, 15_000]) window.setTimeout(() => setBackupCheck((value) => value + 1), delay); };
+  const backupAge = lastBackupAt === undefined ? null : lastBackupSummary(lastBackupAt);
   const save = async (event: React.FormEvent) => { event.preventDefault(); if (savingPreferences || calendarSaving) return; setSavingPreferences(true); try { setStatus(null); await updateProfile({ displayName: name.trim() || "Personal ledger", currency, hideAmounts, autoLockMinutes: autoLock, calendarSystem, safeToSpendBufferMinor: majorToMinor(safetyBuffer || "0") }); setStatus("Preferences saved."); window.setTimeout(() => setStatus(null), 2500); } catch (caught) { setStatus(caught instanceof Error ? caught.message : "Could not save preferences."); } finally { setSavingPreferences(false); } };
   const chooseCalendar = async (value: string) => {
     const next = value as CalendarSystem;
@@ -140,14 +160,21 @@ export function SettingsPage({ onLock }: { onLock: () => void }) {
   const saveReminders = async (patch: { emailReminders?: boolean; browserReminders?: boolean }) => {
     if (reminderSaving || isDemo) return;
     setReminderSaving(true);
-    try { setStatus(null); await updateProfile(patch); }
-    catch (caught) { setStatus(caught instanceof Error ? caught.message : "Could not save reminders."); }
+    try { setReminderNote(null); await updateProfile(patch); }
+    catch (caught) { setReminderNote(caught instanceof Error ? caught.message : "Could not save reminders."); }
     finally { setReminderSaving(false); }
   };
+  // Refuse up front where this browser cannot show a notification (no API, blocked, or an iPhone outside the Home Screen app).
   const enableBrowserReminders = async (checked: boolean) => {
-    if (checked && typeof Notification !== "undefined" && Notification.permission === "default") {
-      const result = await Notification.requestPermission();
-      if (result !== "granted") { setStatus("Browser reminders stay off until this browser allows them."); return; }
+    setReminderNote(null);
+    if (checked) {
+      const blocker = notificationBlockerHere();
+      if (blocker) { setBrowserBlocker(blocker); setReminderNote(blocker); return; }
+      if (Notification.permission === "default") {
+        let result: NotificationPermission = "default";
+        try { result = await Notification.requestPermission(); } catch { /* treated as not allowed */ }
+        if (result !== "granted") { setReminderNote(result === "denied" ? notificationBlockerHere() ?? "Notifications are blocked for this site." : "Browser reminders stay off until this browser allows them."); return; }
+      }
     }
     await saveReminders({ browserReminders: checked });
   };
@@ -174,8 +201,9 @@ export function SettingsPage({ onLock }: { onLock: () => void }) {
     <article className="settings-panel"><div className="settings-title"><span className="settings-icon"><PiggyBank size={23} /></span><div><h2>Safe to spend</h2><p>Keep a cushion out of your daily spending allowance.</p></div></div><form onSubmit={save} className="settings-form" aria-busy={savingPreferences}><NumberInput label="Untouchable buffer" value={safetyBuffer} min={0} decimalScale={2} thousandSeparator="," onChange={(value) => setSafetyBuffer(String(value))} description="Held back from the daily allowance on your dashboard so the estimate never encourages emptying your accounts." /><button className="primary-button" disabled={savingPreferences}>{savingPreferences ? <><ButtonSpinner />Saving…</> : "Save buffer"}</button></form></article>
     <article className="settings-panel"><div className="settings-title"><span className="settings-icon"><Bell size={23} /></span><div><h2>Reminders that leave the app</h2><p>The bell inside the app stays. These also tell you the day before a due.</p></div></div>
       <div className="settings-form">
-        <Switch label="Email me" description="One message a day, the first time you open the ledger, when something is due today or tomorrow. It uses the same email setup as password reset." checked={profile.emailReminders} disabled={reminderSaving || isDemo} onChange={(event) => void saveReminders({ emailReminders: event.currentTarget.checked })} />
-        <Switch label="Notify this browser" description="Uses this browser’s notifications. Nothing is sent until you allow them." checked={profile.browserReminders} disabled={reminderSaving || isDemo} onChange={(event) => void enableBrowserReminders(event.currentTarget.checked)} />
+        <Switch label="Email me" description="Every morning around 7, or the first time you open the app that day. Only when something is due today or tomorrow, using the same email setup as password reset." checked={profile.emailReminders} disabled={reminderSaving || isDemo} onChange={(event) => void saveReminders({ emailReminders: event.currentTarget.checked })} />
+        <Switch label="Notify this browser" description="Uses this browser’s notifications, once a day when you open the app. Nothing is sent until you allow them." checked={profile.browserReminders} disabled={reminderSaving || isDemo} onChange={(event) => void enableBrowserReminders(event.currentTarget.checked)} />
+        {(reminderNote ?? (profile.browserReminders ? browserBlocker : null)) && <p className="reminder-settings-note" role="status"><Info size={16} weight="duotone" aria-hidden="true" /><span>{reminderNote ?? browserBlocker}</span></p>}
       </div>
     </article>
     <article className="settings-panel"><div className="settings-title"><span className="settings-icon"><UsersThree size={23} /></span><div><h2>Shared ledger</h2><p>Two people. Entries stay private until you mark them Ours.</p></div></div>
@@ -231,8 +259,8 @@ export function SettingsPage({ onLock }: { onLock: () => void }) {
     </article>
     </div></section>}
     {activeTab === "backup" && <section className="settings-section backup-section" aria-labelledby="backup-heading"><h2 id="backup-heading" className="settings-section-heading">Full backup</h2><div className="settings-grid">
-      <article className="settings-panel backup-panel"><div className="settings-title"><span className="settings-icon"><DownloadSimple size={23} /></span><div><h2>Download everything</h2><p>Create one restorable CSV containing your complete ledger and receipt files.</p></div></div><div className="backup-copy"><p>Includes transactions, accounts, reconciliation history, transfers, budgets, recurring entries, savings goals, dues and repayments, categories, saved places, preferences, and attached receipts.</p><p className="field-hint">Passwords, sessions, login details, and your ledger PIN are never included.</p></div><a className="primary-button backup-download" href="/api/backup" download><DownloadSimple size={17} />Download full backup</a><button className="settings-action backup-secondary-action" onClick={exportCsv}><div><strong>Transaction-only CSV</strong><span>For spreadsheets and the transaction importer · {transactions.length} entries</span></div><ArrowSquareOut size={20} /></button></article>
-      <article className="settings-panel backup-panel"><div className="settings-title"><span className="settings-icon"><UploadSimple size={23} /></span><div><h2>Restore a backup</h2><p>Validate a SaveYoRupee full-backup CSV before replacing this ledger.</p></div></div><input ref={backupFileRef} className="visually-hidden" type="file" accept=".csv,text/csv" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void inspectBackup(file); }} /><button className="secondary-button backup-file-button" onClick={() => backupFileRef.current?.click()} disabled={restoringBackup}><UploadSimple size={17} />Choose backup CSV</button>{backupSelection && <div className="backup-preview"><strong>{backupSelection.file.name}</strong><span>Created {new Date(backupSelection.exportedAt).toLocaleString()}</span><div>{Object.entries(backupSelection.counts).filter(([, count]) => count > 0).map(([entity, count]) => <span key={entity}>{entity.replaceAll("_", " ")}: <strong>{count}</strong></span>)}</div><button className="primary-button" onClick={() => setRestoreModalOpen(true)}>Review restore</button></div>}<FormError message={backupError} />{backupStatus && <div className="form-success" role="status">{backupStatus}</div>}<p className="backup-warning">Restoring replaces the current ledger. Download a fresh backup first if you may need its current contents.</p></article>
+      <article className="settings-panel backup-panel"><div className="settings-title"><span className="settings-icon"><DownloadSimple size={23} /></span><div><h2>Download a full backup</h2><p>One CSV with your ledger and receipt files that you can restore here later.</p></div></div>{backupAge && <p className={`backup-last${backupAge.stale ? " is-stale" : ""}`} role="status">{backupAge.label}</p>}<div className="backup-copy"><p>Includes transactions, accounts, reconciliation history, transfers, budgets, recurring entries, savings goals, dues and repayments, categories, saved places, preferences, and attached receipts.</p><p className="field-hint">Not included: Logs, entries deleted in the last day, what Learning has learned (only whether it is on), and your household membership. Passwords, sessions, login details and your ledger PIN are never included.</p></div><a className="primary-button backup-download" href="/api/backup" download onClick={checkBackupSoon}><DownloadSimple size={17} />Download full backup</a><button className="settings-action backup-secondary-action" onClick={exportCsv}><div><strong>Transaction-only CSV</strong><span>For spreadsheets and the transaction importer · {transactions.length} entries</span></div><ArrowSquareOut size={20} /></button></article>
+      <article className="settings-panel backup-panel"><div className="settings-title"><span className="settings-icon"><UploadSimple size={23} /></span><div><h2>Restore a backup</h2><p>Validate a SaveYoRupee full-backup CSV before replacing this ledger.</p></div></div><input ref={backupFileRef} className="visually-hidden" type="file" accept=".csv,text/csv" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void inspectBackup(file); }} /><button className="secondary-button backup-file-button" onClick={() => backupFileRef.current?.click()} disabled={restoringBackup}><UploadSimple size={17} />Choose backup CSV</button>{backupSelection && <div className="backup-preview"><strong>{backupSelection.file.name}</strong><span>Created {new Date(backupSelection.exportedAt).toLocaleString()}</span><div>{Object.entries(backupSelection.counts).filter(([, count]) => count > 0).map(([entity, count]) => <span key={entity}>{entity.replaceAll("_", " ")}: <strong>{count}</strong></span>)}</div><button className="primary-button" onClick={() => setRestoreModalOpen(true)}>Review restore</button></div>}<FormError message={backupError} />{backupStatus && <div className="form-success" role="status">{backupStatus}</div>}<p className="backup-warning">Restoring replaces everything in this ledger and clears what Learning has learned. Download a fresh backup first if you may need what is here now.</p></article>
     </div>{!isDemo && user && <button className="settings-action backup-setup-action" onClick={() => reopenOnboardingGuide(user.id)}><div><strong>Setup guide</strong><span>Reopen the five-step ledger checklist</span></div><ListChecks size={20} /></button>}{isDemo && <button className="settings-action backup-setup-action" onClick={resetDemo}><div><strong>Reset sample data</strong><span>Restore the original demo ledger</span></div><ArrowSquareOut size={20} /></button>}</section>}
   </div></div>
   <RecoverySetupModal opened={recoverySetupOpen} onClose={() => setRecoverySetupOpen(false)} title={recoveryConfigured ? "Change security questions and answers" : "Set up password recovery"} onSave={async (setup) => { await setupRecovery(setup); setRecoveryConfigured(true); setSecurityStatus("Security questions and answers updated."); }} />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountProviderName, accountTailsMatch, normalizeAccountTail, normalizeProviderName, onlinePaymentAccounts, paymentAccountLabel, paymentAccountProviderError, providerForAccountType, providersMatch, transferAccountDefaults } from "./payment-accounts";
+import { accountProviderName, accountTailsMatch, findSimilarTransfer, normalizeAccountTail, normalizeProviderName, onlinePaymentAccounts, paymentAccountLabel, paymentAccountProviderError, providerForAccountType, providersMatch, transferAccountDefaults } from "./payment-accounts";
 import type { PaymentAccount } from "../types";
 
 const account = (overrides: Partial<PaymentAccount>): PaymentAccount => ({
@@ -100,5 +100,21 @@ describe("transfer defaults", () => {
   it("fills the other side when there are only two accounts", () => {
     expect(transferAccountDefaults([{ id: "nabil" }, { id: "cash" }], { fromAccountId: "cash" })).toEqual({ fromAccountId: "cash", toAccountId: "nabil" });
     expect(transferAccountDefaults([{ id: "nabil" }, { id: "cash" }], { toAccountId: "cash" })).toEqual({ fromAccountId: "nabil", toAccountId: "cash" });
+  });
+});
+
+describe("findSimilarTransfer", () => {
+  const recorded = [{ id: "load", fromAccountId: "nabil", toAccountId: "esewa", amountMinor: 100_000, occurredOn: "2026-10-05" }];
+
+  it("finds the bank alert's transfer when the wallet alert for the same load is read a day later", () => {
+    expect(findSimilarTransfer(recorded, { fromAccountId: "nabil", toAccountId: "esewa", amountMinor: 100_000, occurredOn: "2026-10-06" })?.id).toBe("load");
+    expect(findSimilarTransfer(recorded, { fromAccountId: "nabil", toAccountId: "esewa", amountMinor: 100_000, occurredOn: "2026-09-30" })).toBeNull();
+  });
+
+  it("ignores another route, another amount, the transfer being edited and an incomplete draft", () => {
+    expect(findSimilarTransfer(recorded, { fromAccountId: "esewa", toAccountId: "nabil", amountMinor: 100_000, occurredOn: "2026-10-05" })).toBeNull();
+    expect(findSimilarTransfer(recorded, { fromAccountId: "nabil", toAccountId: "esewa", amountMinor: 99_900, occurredOn: "2026-10-05" })).toBeNull();
+    expect(findSimilarTransfer(recorded, { fromAccountId: "nabil", toAccountId: "esewa", amountMinor: 100_000, occurredOn: "2026-10-05" }, "load")).toBeNull();
+    expect(findSimilarTransfer(recorded, { fromAccountId: "nabil", toAccountId: "", amountMinor: 100_000, occurredOn: "2026-10-05" })).toBeNull();
   });
 });

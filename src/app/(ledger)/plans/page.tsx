@@ -2,9 +2,13 @@
 
 import { useLedgerWorkspace } from "../../../context/LedgerWorkspaceContext";
 import { PlanningPage } from "../../../views/PlanningPage";
+import { useMemo } from "react";
 
 export default function PlansRoute() {
   const { ledger, month, setMonth } = useLedgerWorkspace();
+  // A schedule can only be linked to your own accounts (the server refuses a partner's shared one).
+  const ownerId = ledger.profile.id;
+  const ownAccounts = useMemo(() => ledger.paymentAccounts.filter((account) => !ownerId || account.userId === ownerId), [ledger.paymentAccounts, ownerId]);
 
   return <PlanningPage
     month={month}
@@ -16,7 +20,7 @@ export default function PlansRoute() {
     dueItems={ledger.dueItems}
     goals={ledger.goals}
     customCategories={ledger.customCategories}
-    paymentAccounts={ledger.paymentAccounts}
+    paymentAccounts={ownAccounts}
     onMonthChange={setMonth}
     onSaveBudget={ledger.saveBudget}
     onDeleteBudget={ledger.deleteBudget}

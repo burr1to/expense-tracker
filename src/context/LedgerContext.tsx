@@ -16,6 +16,16 @@ import { useAuth } from "./AuthContext";
 import { useToasts, type ToastInput } from "./ToastContext";
 import { activityToast } from "../components/ActivityIcon";
 import type { ActivityEntry } from "../lib/activity-log";
+import { CANT_REACH_MESSAGE, isConnectionError, readResponse, responseMessage, timeoutSignal, toUserMessage, unconfirmedMessage, type ParsedResponse } from "../lib/user-messages";
+
+/** A save that has not answered in this long is reported as unconfirmed; the first load waits as long as it takes. */
+const ACTION_TIMEOUT_MS = 20_000;
+/** A tab hidden at least this long refreshes quietly when it comes back. */
+const STALE_AFTER_HIDDEN_MS = 5 * 60_000;
+// Repeating these after a lost response cannot record anything twice (the server dedupes them, or they set a value).
+const RETRY_SAFE_ACTIONS = new Set(["saveReceiptSplit", "saveBudgets", "updateProfile", "snoozeDueItem", "setPaymentAccountShared", "updatePaymentAccountTail", "listImportJobs", "processImportJob"]);
+const retrySafe = (action: string, payload: unknown, id?: string) => (Boolean(id) && action !== "contributeToGoal") || RETRY_SAFE_ACTIONS.has(action)
+  || (typeof payload === "object" && payload !== null && typeof (payload as { clientRequestId?: unknown }).clientRequestId === "string");
 
 interface BudgetDraft { category: string; amount: string; monthKey: string; shared?: boolean }
 interface GoalDraft { name: string; target: string; saved: string; targetDate: string }
@@ -28,6 +38,8 @@ export interface BackupRestoreResult { restoredAt: string; exportedAt: string; c
 export interface RecurringConfirmation { dueOn?: string; amountMinor?: number; occurredOn?: string; paymentMode?: TransactionDraft["paymentMode"]; paymentAccountId?: string | null }
 interface LedgerContextValue extends LedgerData {
   loading: boolean; error: string | null;
+  /** Loads the ledger again with the full-page loader, as the Retry on the load-error screen does. */
+  refresh: () => Promise<void>;
   saveTransaction: (draft: TransactionDraft, id?: string) => Promise<string | undefined>; importTransactions: (drafts: TransactionDraft[], newCategories?: CsvCategoryDraft[], newSubcategories?: CsvSubcategoryDraft[]) => Promise<ImportJob | null>; importJobs: ImportJob[]; dismissImportJob: (id: string) => void; saveReceiptSplit: (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => Promise<number>; deleteTransaction: (id: string) => Promise<void>; restoreTransaction: (id: string) => Promise<void>;
   saveSavedPlace: (draft: SavedPlaceDraft, id?: string) => Promise<void>; deleteSavedPlace: (id: string) => Promise<void>;
   saveBudget: (draft: BudgetDraft, id?: string) => Promise<void>; deleteBudget: (id: string) => Promise<void>;
@@ -70,8 +82,11 @@ type WithActivity<T> = T & { activity?: ActivityEntry[] };
 const splitTags = (value: string) => [...new Set(value.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean))].slice(0, 8);
 
 export function LedgerProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, refreshSession } = useAuth();
   const { push: pushToast } = useToasts();
+  // Saves in flight, and a counter bumped as each starts and ends, so a quiet refresh never paints over a newer save.
+  const actionsInFlight = useRef(0);
+  const actionRevision = useRef(0);
   const [activityRevision, setActivityRevision] = useState(0);
   const [data, setData] = useState<LedgerData>(emptyData);
   const [loading, setLoading] = useState(false);
@@ -80,24 +95,43 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const importJobsRef = useRef<ImportJob[]>([]);
   const importPollInFlight = useRef(false);
 
+  /** `showLoading: false` is a quiet refresh: no loader, and a failure keeps what is already on screen. */
   const refresh = useCallback(async (showLoading = true) => {
     if (!user) { setData(emptyData); return; }
-    if (showLoading) setLoading(true);
-    setError(null);
+    if (showLoading) { setLoading(true); setError(null); }
+    const revision = actionRevision.current;
     try {
       const response = await fetch("/api/ledger", { cache: "no-store" });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error ?? "Could not load your ledger.");
-      setData(body as LedgerData);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not load your ledger."); }
-    finally { if (showLoading) setLoading(false); }
-  }, [user]);
+      const parsed = await readResponse<LedgerData>(response);
+      if (response.status === 401) void refreshSession().catch(() => undefined);
+      if (!parsed.ok || !parsed.json || !parsed.body) throw new Error(responseMessage(parsed, "Could not load your ledger."));
+      // A save that started or finished meanwhile answered with a newer ledger; this copy is older.
+      if (!showLoading && actionRevision.current !== revision) return;
+      setData(parsed.body);
+      setError(null);
+    } catch (caught) {
+      if (showLoading) setError(isConnectionError(caught) ? CANT_REACH_MESSAGE : caught instanceof Error ? caught.message : "Could not load your ledger.");
+    } finally { if (showLoading) setLoading(false); }
+  }, [refreshSession, user]);
 
   const requestAction = useCallback(async (action: string, payload?: unknown, id?: string) => {
-    const response = await fetch("/api/ledger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, payload, id }) });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error ?? "Could not save your changes.");
-    return body as unknown;
+    const tracked = action !== "listImportJobs";
+    if (tracked) { actionsInFlight.current += 1; actionRevision.current += 1; }
+    try {
+      let parsed: ParsedResponse<{ error?: string }>;
+      try {
+        const response = await fetch("/api/ledger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, payload, id }), signal: timeoutSignal(ACTION_TIMEOUT_MS) });
+        parsed = await readResponse<{ error?: string }>(response);
+      } catch (caught) {
+        // Lost or too slow: the server may still have saved it, so say only what is true.
+        if (isConnectionError(caught)) throw new Error(unconfirmedMessage(retrySafe(action, payload, id)));
+        throw caught;
+      }
+      if (!parsed.ok || !parsed.json) throw new Error(responseMessage(parsed, "Could not save your changes."));
+      return parsed.body as unknown;
+    } finally {
+      if (tracked) { actionsInFlight.current -= 1; actionRevision.current += 1; }
+    }
   }, []);
 
   // Every confirmation toast comes from a log entry the server wrote, so toasts and Logs always agree.
@@ -128,6 +162,22 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   }, [pushToast, requestAction]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  // Catch up quietly after the tab sat hidden for a while or the connection came back (this also recovers a failed
+  // first load); skipped while a save is in flight, whose answer carries the latest ledger anyway.
+  useEffect(() => {
+    if (!user) return;
+    let hiddenAt = document.visibilityState === "hidden" ? Date.now() : null;
+    const quietRefresh = () => { if (!actionsInFlight.current) void refresh(false); };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") { hiddenAt ??= Date.now(); return; }
+      const stale = hiddenAt !== null && Date.now() - hiddenAt >= STALE_AFTER_HIDDEN_MS;
+      hiddenAt = null;
+      if (stale) quietRefresh();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("online", quietRefresh);
+    return () => { document.removeEventListener("visibilitychange", onVisibility); window.removeEventListener("online", quietRefresh); };
+  }, [refresh, user]);
   useEffect(() => { importJobsRef.current = importJobs; }, [importJobs]);
   useEffect(() => {
     if (!user) { setImportJobs([]); return; }
@@ -163,7 +213,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     announce(activity);
   }, [announce, requestAction]);
 
-  const transactionPayload = (draft: TransactionDraft) => ({ kind: draft.kind, category: draft.category, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn, note: draft.note.trim(), subcategory: draft.subcategory.trim() || null, area: draft.area.trim() || null, paymentMode: draft.paymentMode, paymentAccountId: draft.paymentMode === "online" ? draft.paymentAccountId || null : null, shared: draft.shared ?? false, location: draft.location ?? null, receipt: draft.receipt, removeReceipt: draft.removeReceipt });
+  // clientRequestId (new entries only) lets the server return the first save when a retry follows a lost response.
+  const transactionPayload = (draft: TransactionDraft) => ({ kind: draft.kind, category: draft.category, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn, note: draft.note.trim(), subcategory: draft.subcategory.trim() || null, area: draft.area.trim() || null, paymentMode: draft.paymentMode, paymentAccountId: draft.paymentMode === "online" ? draft.paymentAccountId || null : null, shared: draft.shared ?? false, location: draft.location ?? null, receipt: draft.receipt, removeReceipt: draft.removeReceipt, clientRequestId: draft.clientRequestId || undefined });
   const saveTransaction = useCallback(async (draft: TransactionDraft, id?: string) => {
     let savedId = id;
     const previousIds = new Set(data.transactions.map((transaction) => transaction.id));
@@ -247,26 +298,36 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const savePin = useCallback(async (pin: string, currentPin?: string) => mutate("savePin", { pin, currentPin }), [mutate]);
   const removePin = useCallback(async (currentPin: string) => mutate("removePin", { currentPin }), [mutate]);
   const verifyPin = useCallback(async (pin: string) => {
-    const response = await fetch("/api/auth/verify-pin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin }) });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.error ?? "That PIN did not match.");
+    let parsed: ParsedResponse<{ error?: string }>;
+    try { parsed = await readResponse(await fetch("/api/auth/verify-pin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin }) })); }
+    catch (caught) { throw new Error(toUserMessage(caught)); }
+    if (!parsed.ok) throw new Error(responseMessage(parsed, "That PIN did not match."));
   }, []);
   const restoreBackup = useCallback(async (file: File, password: string) => {
     const form = new FormData();
     form.append("backup", file);
     form.append("password", password);
-    const response = await fetch("/api/backup", { method: "POST", body: form });
-    const { activity, ...body } = await response.json() as WithActivity<BackupRestoreResult & { error?: string }>;
-    if (!response.ok) throw new Error(body.error ?? "Could not restore this backup.");
+    let parsed: ParsedResponse<WithActivity<BackupRestoreResult & { error?: string }>>;
+    try { parsed = await readResponse(await fetch("/api/backup", { method: "POST", body: form })); }
+    // The restore may still finish on the server; Logs will say so after a refresh.
+    catch (caught) { throw new Error(isConnectionError(caught) ? "We couldn’t confirm the restore because the connection dropped. Refresh and check Logs before trying again." : toUserMessage(caught)); }
+    if (!parsed.ok || !parsed.json || !parsed.body) throw new Error(responseMessage(parsed, "Could not restore this backup."));
+    const { activity, ...body } = parsed.body;
     await refresh();
     announce(activity);
     return body;
   }, [announce, refresh]);
-  const updateProfile = useCallback(async (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes" | "calendarSystem" | "safeToSpendBufferMinor" | "emailReminders" | "browserReminders">>) => mutate("updateProfile", { ...data.profile, ...changes }), [data.profile, mutate]);
+  // Only settings that differ from what this device last loaded are sent, so a stale form can't undo another device's change.
+  const updateProfile = useCallback(async (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes" | "calendarSystem" | "safeToSpendBufferMinor" | "emailReminders" | "browserReminders">>) => {
+    const changed = Object.fromEntries(Object.entries(changes).filter(([key, value]) => value !== undefined && data.profile[key as keyof typeof changes] !== value));
+    if (Object.keys(changed).length) await mutate("updateProfile", changed);
+  }, [data.profile, mutate]);
   const learningAction = useCallback(async (payload: { action: "setEnabled"; enabled: boolean } | { action: "run" } | { action: "reset" }) => {
-    const response = await fetch("/api/learning", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    const body = await response.json() as WithActivity<{ learning?: LearningState; processed?: number; error?: string }>;
-    if (!response.ok || !body.learning) throw new Error(body.error ?? "Could not update personalization.");
+    let parsed: ParsedResponse<WithActivity<{ learning?: LearningState; processed?: number; error?: string }>>;
+    try { parsed = await readResponse(await fetch("/api/learning", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })); }
+    catch (caught) { throw new Error(toUserMessage(caught)); }
+    const body = parsed.body;
+    if (!parsed.ok || !body?.learning) throw new Error(responseMessage(parsed, "Could not update personalization."));
     setData((current) => ({ ...current, profile: { ...current.profile, learning: body.learning! } }));
     announce(body.activity);
     return body.processed ?? 0;
@@ -275,8 +336,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const runLearning = useCallback(() => learningAction({ action: "run" }), [learningAction]);
   const resetLearning = useCallback(async () => { await learningAction({ action: "reset" }); }, [learningAction]);
   const resetDemo = useCallback(() => undefined, []);
+  const reload = useCallback(() => refresh(true), [refresh]);
 
-  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, saveBudgets, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, skipRecurring, setRecurringActive, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountTail, updatePaymentAccountBalance, setPaymentAccountShared, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, deleteDuePayment, saveSplitBill, savePin, removePin, verifyPin, restoreBackup, updateProfile, inviteHousehold, acceptHousehold, removeHouseholdMember, leaveHousehold, setLearningEnabled, runLearning, resetLearning, resetDemo, activityRevision }), [activityRevision, data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, saveBudgets, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, skipRecurring, setRecurringActive, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountTail, updatePaymentAccountBalance, setPaymentAccountShared, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, deleteDuePayment, saveSplitBill, savePin, removePin, verifyPin, restoreBackup, updateProfile, inviteHousehold, acceptHousehold, removeHouseholdMember, leaveHousehold, setLearningEnabled, runLearning, resetLearning, resetDemo]);
+  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, refresh: reload, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, saveBudgets, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, skipRecurring, setRecurringActive, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountTail, updatePaymentAccountBalance, setPaymentAccountShared, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, deleteDuePayment, saveSplitBill, savePin, removePin, verifyPin, restoreBackup, updateProfile, inviteHousehold, acceptHousehold, removeHouseholdMember, leaveHousehold, setLearningEnabled, runLearning, resetLearning, resetDemo, activityRevision }), [activityRevision, data, loading, error, reload, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, saveBudgets, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, skipRecurring, setRecurringActive, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountTail, updatePaymentAccountBalance, setPaymentAccountShared, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, deleteDuePayment, saveSplitBill, savePin, removePin, verifyPin, restoreBackup, updateProfile, inviteHousehold, acceptHousehold, removeHouseholdMember, leaveHousehold, setLearningEnabled, runLearning, resetLearning, resetDemo]);
   return <LedgerContext.Provider value={value}>{children}</LedgerContext.Provider>;
 }
 

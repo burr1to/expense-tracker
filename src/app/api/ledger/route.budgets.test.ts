@@ -166,7 +166,7 @@ describe("saveBudget ledger action", () => {
     expect(mocks.db.budget.upsert).toHaveBeenCalledWith(expect.objectContaining({ create: expect.objectContaining({ monthKey: "FEST:dashain-tihar-2083", scope: "festival", category: "__total" }) }));
     expect(saved.activity).toEqual([expect.objectContaining({ action: "budget.created", subject: "All spending · Dashain–Tihar 2083" })]);
 
-    for (const monthKey of ["FEST:dashain-2083", "FEST:foo-2083", "FEST:holi"]) {
+    for (const monthKey of ["FEST:dashain-2083", "FEST:foo-2083", "FEST:holi", "FEST:holi-2090", "FEST:teej-1999"]) {
       const single = await POST(action("saveBudget", { monthKey, category: "__total", amountMinor: 100 }));
       const batch = await POST(action("saveBudgets", { monthKey, budgets: [{ category: "__total", amountMinor: 100 }] }));
 

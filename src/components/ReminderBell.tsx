@@ -1,14 +1,16 @@
 import { Bell, CalendarBlank, Check, ClockCountdown, DownloadSimple, FilePdf, HandCoins, Repeat, X } from "@phosphor-icons/react";
-import { todayInput } from "../lib/dates";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { dueDateLabel, dueRemaining, groupActionableDues, urgentDueCount, type DueUrgency } from "../lib/dues";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { dueDateLabel, dueRemaining, groupActionableDues, type DueUrgency } from "../lib/dues";
+import { reminderBadgeText, urgentReminderCount } from "../lib/reminder-badge";
+import { useToday } from "../lib/use-today";
+import { navigateFromOverlay, useBackToClose } from "../lib/use-back-to-close";
 import { formatMoney } from "../lib/currency";
 import type { CurrencyCode, DueItem, TransactionKind } from "../types";
 import { ButtonSpinner } from "./ButtonSpinner";
 import { FormError } from "./FormError";
 import { RecurringConfirmSheet } from "./RecurringConfirmSheet";
 
-type ReminderAction = "complete" | "snooze" | "confirmRecurring";
+type ReminderAction = "snooze" | "confirmRecurring";
 
 export interface RecurringReminder {
   id: string;
@@ -23,9 +25,10 @@ interface ReminderBellProps {
   items: DueItem[];
   currency: CurrencyCode;
   recurringEntries: RecurringReminder[];
-  monthlyReport?: { monthKey: string; monthLabel: string; href: string } | null;
+  /** `storageKey` remembers (per user and month) that the notice was dismissed or downloaded. */
+  monthlyReport?: { monthKey: string; monthLabel: string; href: string; storageKey?: string | null } | null;
+  /** "repay" opens that due's confirm step: a repayment for a loan, Mark paid / Mark received for a bill or income. */
   onOpenDue: (id?: string, action?: "repay") => void;
-  onComplete: (id: string, addToLedger: boolean) => Promise<void>;
   onSnooze: (id: string) => Promise<void>;
   /** `dueOn` is the occurrence shown, so a stale tap never records the next one. */
   onConfirmRecurring: (id: string, overrides?: { dueOn?: string }) => Promise<void>;
@@ -38,7 +41,7 @@ const groupLabels: Record<DueUrgency, string> = {
 };
 
 function completionLabel(item: DueItem) {
-  return item.kind === "payment" ? "Paid" : "Received";
+  return item.kind === "payment" ? "Mark paid" : "Mark received";
 }
 
 function groupRecurringReminders(items: readonly RecurringReminder[], today: string) {
@@ -50,12 +53,28 @@ function groupRecurringReminders(items: readonly RecurringReminder[], today: str
   return groups;
 }
 
+const REPORT_NOTICE_EVENT = "syr:monthly-report-notice";
+
+function subscribeReportNotice(callback: () => void) {
+  window.addEventListener(REPORT_NOTICE_EVENT, callback);
+  window.addEventListener("storage", callback);
+  return () => {
+    window.removeEventListener(REPORT_NOTICE_EVENT, callback);
+    window.removeEventListener("storage", callback);
+  };
+}
+
+function readReportNotice(key: string | null | undefined) {
+  if (!key) return null;
+  try { return window.localStorage.getItem(key); } catch { return null; }
+}
+
 function dropdownCloseMs() {
   const value = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--dropdown-close-dur"));
   return Number.isFinite(value) ? value : 150;
 }
 
-export function ReminderBell({ items, currency, recurringEntries, monthlyReport, onOpenDue, onComplete, onSnooze, onConfirmRecurring }: ReminderBellProps) {
+export function ReminderBell({ items, currency, recurringEntries, monthlyReport, onOpenDue, onSnooze, onConfirmRecurring }: ReminderBellProps) {
   const [phase, setPhase] = useState<"closed" | "pre" | "open" | "closing">("closed");
   const [pending, setPending] = useState<{ id: string; action: ReminderAction } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -63,14 +82,28 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const groups = useMemo(() => groupActionableDues(items), [items]);
-  const recurringGroups = useMemo(() => groupRecurringReminders(recurringEntries, todayInput()), [recurringEntries]);
+  const today = useToday();
+  const groups = useMemo(() => groupActionableDues(items, today), [items, today]);
+  const recurringGroups = useMemo(() => groupRecurringReminders(recurringEntries, today), [recurringEntries, today]);
   const reminders = useMemo(() => [...groups.overdue, ...groups.today, ...groups.later], [groups]);
   const recurringReminderCount = recurringGroups.overdue.length + recurringGroups.today.length + recurringGroups.later.length;
-  const urgentCount = useMemo(() => urgentDueCount(items), [items]);
-  const recurringUrgentCount = recurringGroups.overdue.length + recurringGroups.today.length;
-  const totalUrgentCount = urgentCount + recurringUrgentCount;
-  const notificationCount = reminders.length + recurringReminderCount + (monthlyReport ? 1 : 0);
+  // One number for the filled bell, its badge, the panel header and the folded phone toggle.
+  const totalUrgentCount = useMemo(() => urgentReminderCount(items, recurringEntries, today), [items, recurringEntries, today]);
+  const laterCount = groups.later.length + recurringGroups.later.length;
+  const reportStorageKey = monthlyReport?.storageKey;
+  const storedReportState = useSyncExternalStore(subscribeReportNotice, () => readReportNotice(reportStorageKey), () => null);
+  // Without storage (a private window) a dismissal still holds for this session.
+  const [hiddenReport, setHiddenReport] = useState<string | null>(null);
+  const report = monthlyReport && !storedReportState && hiddenReport !== (monthlyReport.storageKey ?? monthlyReport.monthKey) ? monthlyReport : null;
+  const notificationCount = reminders.length + recurringReminderCount + (report ? 1 : 0);
+  const headerNote = [laterCount ? `${laterCount} coming up later` : null, report ? `${report.monthLabel} report is ready` : null].filter(Boolean).join(" · ");
+  const settleReport = (state: "dismissed" | "downloaded") => {
+    if (!monthlyReport) return;
+    setHiddenReport(monthlyReport.storageKey ?? monthlyReport.monthKey);
+    if (!monthlyReport.storageKey) return;
+    try { window.localStorage.setItem(monthlyReport.storageKey, state); } catch { /* the session-only dismissal above still applies */ }
+    window.dispatchEvent(new Event(REPORT_NOTICE_EVENT));
+  };
 
   const closeTimer = useRef<number | null>(null);
   const openPanel = () => {
@@ -89,6 +122,7 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
   useEffect(() => () => {
     if (closeTimer.current) window.clearTimeout(closeTimer.current);
   }, []);
+  useBackToClose(phase === "pre" || phase === "open", () => closePanel());
 
   useEffect(() => {
     if (phase !== "open") return;
@@ -112,15 +146,15 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
 
   const openDue = (id?: string, action?: "repay") => {
     closePanel();
-    onOpenDue(id, action);
+    // Dues replaces the panel's back-gesture entry, so Back from Dues returns to this page.
+    navigateFromOverlay(() => onOpenDue(id, action));
   };
 
-  const runAction = async (item: DueItem, action: ReminderAction) => {
-    setPending({ id: item.id, action });
+  const snooze = async (item: DueItem) => {
+    setPending({ id: item.id, action: "snooze" });
     setError(null);
     try {
-      if (action === "complete") await onComplete(item.id, true);
-      else await onSnooze(item.id);
+      await onSnooze(item.id);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not update this reminder.");
     } finally {
@@ -151,9 +185,9 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
       aria-controls="money-reminders-panel"
       aria-haspopup="dialog"
     >
-      <Bell size={20} weight={notificationCount ? "fill" : "regular"} />
-      <span className="t-badge" data-open={notificationCount > 0 ? "true" : "false"}>
-        <span className="t-badge-dot">{totalUrgentCount > 0 ? (totalUrgentCount > 9 ? "9+" : totalUrgentCount) : null}</span>
+      <Bell size={20} weight={totalUrgentCount ? "fill" : "regular"} />
+      <span className="t-badge" data-open={totalUrgentCount > 0 ? "true" : "false"}>
+        <span className="t-badge-dot">{reminderBadgeText(totalUrgentCount) || null}</span>
       </span>
     </button>
     <span className="sr-only" aria-live="polite">{totalUrgentCount} urgent money reminders</span>
@@ -169,22 +203,24 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
       <header>
         <div>
           <span className="section-label">Money to handle</span>
-          <h2 id="money-reminders-title">{notificationCount ? `${notificationCount} ${notificationCount === 1 ? "item is" : "items are"} ready` : "You’re all caught up"}</h2>
-          {notificationCount > 0 && <p>{urgentCount ? `${urgentCount} urgent right now` : "Nothing urgent right now"}</p>}
+          <h2 id="money-reminders-title">{totalUrgentCount ? `${totalUrgentCount} ${totalUrgentCount === 1 ? "item needs" : "items need"} attention` : notificationCount ? "Nothing urgent right now" : "You’re all caught up"}</h2>
+          {headerNote && <p>{headerNote}</p>}
         </div>
         <button ref={closeRef} className="icon-button" onClick={() => closePanel(true)} aria-label="Close money reminders"><X size={18} /></button>
       </header>
 
       <div className="reminder-panel-body">
-        {monthlyReport && <section className="monthly-report-notification" aria-labelledby="monthly-report-notification-title">
+        {report && <section className="monthly-report-notification has-dismiss" aria-labelledby="monthly-report-notification-title">
           <span className="reminder-kind report"><FilePdf size={18} weight="duotone" /></span>
           <span>
-            <strong id="monthly-report-notification-title">{monthlyReport.monthLabel} report is ready</strong>
+            <strong id="monthly-report-notification-title">{report.monthLabel} report is ready</strong>
             <small>Your completed income and expense report is available as a PDF.</small>
           </span>
-          <a href={monthlyReport.href} download={`SaveYoRupee-${monthlyReport.monthKey}-monthly-report.pdf`} className="reminder-action primary">
+          {/* Hidden after the click has started the download, not during it. */}
+          <a href={report.href} download={`SaveYoRupee-${report.monthKey}-monthly-report.pdf`} className="reminder-action primary" onClick={() => window.setTimeout(() => settleReport("downloaded"), 0)}>
             <DownloadSimple size={14} />Download
           </a>
+          <button type="button" className="icon-button monthly-report-dismiss" onClick={() => settleReport("dismissed")} aria-label={`Dismiss the ${report.monthLabel} report notice`}><X size={15} /></button>
         </section>}
 
         {(["overdue", "today", "later"] as DueUrgency[]).map((urgency) => {
@@ -196,7 +232,6 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
           <h3 id={`reminder-group-${urgency}`}>{groupLabels[urgency]} <span>{groupCount}</span></h3>
           <div className="reminder-list">
             {dueGroup.map((item) => {
-              const completing = pending?.id === item.id && pending.action === "complete";
               const snoozing = pending?.id === item.id && pending.action === "snooze";
               const disabled = pending?.id === item.id;
               const debt = item.kind === "lent" || item.kind === "borrowed";
@@ -212,12 +247,11 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
                   <b className="reminder-item-amount">{formatMoney(dueRemaining(item), currency)}</b>
                 </button>
                 <div className="reminder-actions">
-                  {debt
-                    ? <button className="reminder-action primary" disabled={disabled} onClick={() => openDue(item.id, "repay")}><HandCoins size={14} />Record repayment</button>
-                    : <button className="reminder-action primary" disabled={disabled} onClick={() => void runAction(item, "complete")}>
-                      {completing ? <ButtonSpinner /> : <Check size={14} />}{completing ? "Updating…" : completionLabel(item)}
-                    </button>}
-                  <button className="reminder-action" disabled={disabled} onClick={() => void runAction(item, "snooze")}>
+                  {/* Settling opens the Dues confirm step, so the real amount, date and account are checked before anything is booked. */}
+                  <button className="reminder-action primary" disabled={disabled} onClick={() => openDue(item.id, "repay")}>
+                    {debt ? <HandCoins size={14} /> : <Check size={14} />}{debt ? "Record repayment" : completionLabel(item)}
+                  </button>
+                  <button className="reminder-action" disabled={disabled} onClick={() => void snooze(item)}>
                     {snoozing ? <ButtonSpinner /> : <ClockCountdown size={14} />}{snoozing ? "Snoozing…" : "Tomorrow"}
                   </button>
                 </div>

@@ -1,8 +1,11 @@
+import { differenceInCalendarDays, parseISO } from "date-fns";
 import { z } from "zod";
+import { ACTIVITY_RETENTION_DAYS } from "./activity-log";
 import { CATEGORIES } from "./categories";
 import { CATEGORY_ICON_NAMES } from "./category-icons";
+import { dueOpeningRequestId } from "./dues";
 import { RECEIPT_MAX_BYTES, RECEIPT_TYPES } from "./receipts";
-import { STORAGE_PERIOD_KEY } from "./period";
+import { STORAGE_PERIOD_KEY, todayInAppZone } from "./period";
 
 export const BACKUP_VERSION = "1";
 export const BACKUP_HEADER = ["backup_version", "entity", "backup_id", "payload_json"] as const;
@@ -25,6 +28,11 @@ export const backupEntitySchemas = {
     hideAmounts: z.boolean(),
     autoLockMinutes: z.number().int().min(0).max(120),
     learningEnabled: z.boolean().default(false),
+    // Added later: optional so older backups still restore, keeping the current setting when absent.
+    calendarSystem: z.enum(["AD", "BS"]).optional(),
+    safeToSpendBufferMinor: z.number().int().min(0).max(1_000_000_000).optional(),
+    emailReminders: z.boolean().optional(),
+    browserReminders: z.boolean().optional(),
   }),
   custom_category: z.object({
     name: z.string().trim().min(1).max(30),
@@ -83,6 +91,8 @@ export const backupEntitySchemas = {
     locationSource: z.enum(["pin", "search", "current_location", "saved"]).nullable(),
     savedPlaceId: optionalRelation,
     receiptScanId: optionalRelation,
+    // Links a loan's opening movement to its due ("due-open:<due id>") and keeps split-bill rows idempotent.
+    clientRequestId: z.string().min(1).max(200).nullable().optional(),
     createdAt: dateTime,
     updatedAt: dateTime,
   }).superRefine((value, context) => {
@@ -168,6 +178,7 @@ export const backupEntitySchemas = {
     snoozedUntil: nullableDate,
     note: z.string().max(300),
     status: z.enum(["open", "completed"]),
+    annualRatePercent: z.number().min(0).max(200).nullable().optional(),
     completedOn: nullableDate,
     createdAt: dateTime,
     updatedAt: dateTime,
@@ -373,6 +384,28 @@ export function parseBackupCsv(input: string): ParsedBackup {
     counts,
   };
 }
+
+/**
+ * A restored transaction's request id. Every due gets a new id on restore, so a loan's opening movement
+ * ("due-open:<old due id>") is pointed at the new due; one whose due is not in the backup loses its link.
+ */
+export function restoredRequestId(value: string | null | undefined, dueIds: ReadonlyMap<string, string>) {
+  if (!value) return null;
+  const prefix = dueOpeningRequestId("");
+  if (!value.startsWith(prefix)) return value;
+  const dueId = dueIds.get(value.slice(prefix.length));
+  return dueId ? dueOpeningRequestId(dueId) : null;
+}
+
+/** "Last backup: 3 days ago", counted in Nepal calendar days. Downloads are known from Logs, which keep 90 days. */
+export function lastBackupSummary(lastBackupAt: string | null, now = new Date()): { label: string; stale: boolean } {
+  if (!lastBackupAt) return { label: `No backup downloaded in the last ${ACTIVITY_RETENTION_DAYS} days`, stale: true };
+  const days = Math.max(0, differenceInCalendarDays(parseISO(todayInAppZone(now)), parseISO(todayInAppZone(new Date(lastBackupAt)))));
+  return { label: days === 0 ? "Last backup: today" : days === 1 ? "Last backup: yesterday" : `Last backup: ${days} days ago`, stale: days >= 30 };
+}
+
+/** Festival envelopes are keyed `FEST:<season>-<year>`; every other budget is a month. */
+export const budgetScopeFor = (monthKey: string) => monthKey.startsWith("FEST:") ? "festival" : "month";
 
 export function isFullBackupCsv(input: string) {
   const firstLine = input.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0] ?? "";

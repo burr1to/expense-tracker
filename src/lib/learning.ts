@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isLoanCategory } from "./categories";
 import type { LearningState, LearningSuggestion, LedgerTransaction, PaymentMode, TransactionKind } from "../types";
 
 export const LEARNING_BATCH_SIZE = 500;
@@ -28,6 +29,8 @@ export function learningPlace(transaction: Pick<LedgerTransaction, "locationLabe
 export function aggregateLearningTransactions(transactions: readonly Pick<LedgerTransaction, "locationLabel" | "area" | "kind" | "category" | "subcategory" | "paymentMode">[]): LearningAggregate[] {
   const grouped = new Map<string, LearningAggregate>();
   for (const transaction of transactions) {
+    // Lending or repaying someone at a place is no habit to fill a category from.
+    if (isLoanCategory(transaction.category)) continue;
     const place = learningPlace(transaction);
     const normalizedPlace = normalize(place);
     if (!normalizedPlace) continue;
@@ -108,7 +111,7 @@ export function normalizeLearningOutput(raw: unknown, categories: readonly Learn
   const deduped = new Map<string, LearningSuggestion>();
   for (const suggestion of parsed.suggestions) {
     const subcategories = allowed.get(suggestion.category);
-    if (!subcategories) continue;
+    if (!subcategories || isLoanCategory(suggestion.category)) continue;
     const normalizedPlace = normalize(suggestion.place);
     if (!normalizedPlace) continue;
     const subcategory = suggestion.subcategory && subcategories.has(suggestion.subcategory) ? suggestion.subcategory : "";
@@ -125,6 +128,6 @@ export function matchLearningSuggestion(state: LearningState, place: string, kin
   const query = normalize(place);
   if (query.length < 2) return null;
   return state.suggestions
-    .filter((suggestion) => suggestion.kind === kind && normalize(suggestion.place) === query)
+    .filter((suggestion) => suggestion.kind === kind && !isLoanCategory(suggestion.category) && normalize(suggestion.place) === query)
     .sort((left, right) => right.confidence - left.confidence)[0] ?? null;
 }

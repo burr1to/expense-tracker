@@ -5,7 +5,7 @@ import { format, parseISO } from "date-fns";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
-import { allCategoriesFor, CATEGORIES, getCategory, subcategoriesFor, subcategoryOptionsFor } from "../lib/categories";
+import { allCategoriesFor, CATEGORIES, getCategory, pickerCategoriesFor, subcategoriesFor, subcategoryOptionsFor } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
 import { formatLedgerDate, todayInput } from "../lib/dates";
 import { entryDateLabel, newClientRequestId, pickTransactionDefaults, shiftDateKey } from "../lib/transaction-defaults";
@@ -46,6 +46,8 @@ interface TransactionFormProps {
   template?: LedgerTransaction | null;
   initialOccurredOn?: string;
   initialLocation?: TransactionLocationDraft | null;
+  /** The kind a brand-new entry starts as (home-screen shortcuts); defaults to expense. */
+  initialKind?: TransactionKind;
   transactions: LedgerTransaction[];
   customCategories: CustomCategory[];
   customSubcategories: CustomSubcategory[];
@@ -60,7 +62,8 @@ interface TransactionFormProps {
   onSave: (draft: TransactionDraft, id?: string) => Promise<void>;
   /** Capture shortcuts on a new entry: the sheet closes itself, then hands over. */
   onPasteSms?: () => void;
-  onScanReceipt?: () => void;
+  /** `occurredOn` is the date picked in the sheet, used for a receipt whose date cannot be read. */
+  onScanReceipt?: (occurredOn?: string) => void;
   onTransfer?: (prefill: { amount?: string; occurredOn?: string; note?: string }) => void;
   onSplitBill?: (prefill: { amount?: string; note?: string }) => void;
 }
@@ -88,7 +91,7 @@ function locationFromTransaction(transaction?: LedgerTransaction | null): Transa
   } : null;
 }
 
-export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, initialLocation, transactions, customCategories, customSubcategories, paymentAccounts, savedPlaces, learning, shareWithHousehold = false, calendarSystem = "AD", ownerId, onClose, onSave, onPasteSms, onScanReceipt, onTransfer, onSplitBill }: TransactionFormProps) {
+export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, initialLocation, initialKind = "expense", transactions, customCategories, customSubcategories, paymentAccounts, savedPlaces, learning, shareWithHousehold = false, calendarSystem = "AD", ownerId, onClose, onSave, onPasteSms, onScanReceipt, onTransfer, onSplitBill }: TransactionFormProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ReceiptUpload | undefined>();
   const [removeReceipt, setRemoveReceipt] = useState(false);
@@ -156,10 +159,11 @@ export function TransactionForm({ open, currency, transaction, template, initial
       setLocationPickerOpen(false);
       return;
     }
-    const picked = !transaction && !template && !initialLocation ? smartDefaults("expense") : null;
+    const startKind = source?.kind ?? initialKind;
+    const picked = !transaction && !template && !initialLocation ? smartDefaults(startKind) : null;
     reset({
-      kind: source?.kind ?? "expense",
-      category: source?.category ?? picked?.category ?? "food",
+      kind: startKind,
+      category: source?.category ?? picked?.category ?? (startKind === "expense" ? "food" : allCategoriesFor(startKind, customCategories)[0].id),
       amount: source ? String(source.amountMinor / 100) : "",
       occurredOn: transaction?.occurredOn ?? initialOccurredOn ?? todayInput(),
       note: source?.note ?? "",
@@ -186,7 +190,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
     setVoiceStatus(null);
     const recognition = window as typeof window & { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor };
     setVoiceSupported(Boolean(recognition.SpeechRecognition ?? recognition.webkitSpeechRecognition));
-  }, [open, transaction, template, initialOccurredOn, initialLocation]);
+  }, [open, transaction, template, initialOccurredOn, initialLocation, initialKind]);
   useEffect(() => () => { speechRef.current?.abort(); }, []);
   // Once a suggestion, voice or the user fills a detail, keep the section open: clearing that field must not hide it mid-edit.
   useEffect(() => { if (hasDetails) setDetailsOpen(true); }, [hasDetails]);
@@ -333,7 +337,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
           {voiceStatus && <p className="sheet-voice-status" role="status">{voiceStatus}</p>}
           {captureShortcuts && <div className="capture-shortcuts" role="group" aria-label="Other ways to add">
             {onPasteSms && <button type="button" className="capture-shortcut" disabled={receiptUploading} onClick={() => handOff(onPasteSms)}><ChatText size={17} />Paste SMS</button>}
-            {onScanReceipt && <button type="button" className="capture-shortcut" disabled={receiptUploading} onClick={() => handOff(onScanReceipt)}><Camera size={17} />Scan receipt</button>}
+            {onScanReceipt && <button type="button" className="capture-shortcut" disabled={receiptUploading} onClick={() => handOff(() => onScanReceipt(getValues("occurredOn") || undefined))}><Camera size={17} />Scan receipt</button>}
             {onTransfer && <button type="button" className="capture-shortcut" disabled={receiptUploading} onClick={() => handOff(() => onTransfer({ amount: typedAmount(), occurredOn: getValues("occurredOn") || undefined, note: getValues("note").trim() || undefined }))}><ArrowsLeftRight size={17} />Transfer</button>}
             {onSplitBill && <button type="button" className="capture-shortcut" disabled={receiptUploading} onClick={() => handOff(() => onSplitBill({ amount: typedAmount(), note: getValues("note").trim() || undefined }))}><UsersThree size={17} />Split bill</button>}
           </div>}
@@ -368,7 +372,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
           <fieldset className="category-fieldset">
             <legend>Category</legend>
             <div className="category-grid">
-              {allCategoriesFor(kind, customCategories).map((item) => (
+              {pickerCategoriesFor(kind, customCategories).map((item) => (
                 <button key={item.id} type="button" className={category === item.id ? "category-choice selected" : "category-choice"} onClick={() => { setValue("category", item.id, { shouldValidate: true }); setValue("subcategory", ""); }}>
                   <span style={{ "--category-color": item.color } as CSSProperties}><CategoryIcon category={item.id} icon={item.icon} /></span>
                   {item.label}

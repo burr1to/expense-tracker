@@ -1,22 +1,27 @@
 "use client";
 
 import { PasswordInput } from "@mantine/core";
-import { Eye, EyeSlash, LockKey, MagnifyingGlass } from "@phosphor-icons/react";
+import { ArrowClockwise, Eye, EyeSlash, LockKey, MagnifyingGlass, WifiSlash } from "@phosphor-icons/react";
 import { parseISO } from "date-fns";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useLedger } from "../context/LedgerContext";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { useToasts } from "../context/ToastContext";
 import { getCategory } from "../lib/categories";
-import { toDateInput, todayInput } from "../lib/dates";
+import { currentMonthMarker, toDateInput, todayInput } from "../lib/dates";
 import { buildReminderDigest } from "../lib/reminder-digest";
+import { BRAND_MARK_PATH } from "../lib/brand-mark";
+import { deliverNotification, readAddDeepLink, reminderNotificationText, reminderToastText, rolledOverMonth } from "../lib/app-shell";
 import { monthlyReportNotice } from "../lib/monthly-report";
+import { urgentReminderCount } from "../lib/reminder-badge";
+import { useToday } from "../lib/use-today";
+import { BalanceUnlockDialog } from "./BalancePrivacy";
 import { recurrenceLabel } from "../lib/recurrence";
 import { markOnboardingStep } from "../lib/onboarding";
 import { appRoutes, viewFromPathname } from "../lib/routes";
-import type { AppView, LedgerTransaction, SavedPlace, TransactionDraft, TransactionLocationDraft } from "../types";
+import type { AppView, LedgerTransaction, SavedPlace, TransactionDraft, TransactionKind, TransactionLocationDraft } from "../types";
 import { AuthPage } from "../views/AuthPage";
 import { AppShell } from "./AppShell";
 import { BrandIcon } from "./BrandIcon";
@@ -53,35 +58,70 @@ function RoutePanel({ pathname, children }: { pathname: string; children: ReactN
 }
 
 export function LedgerAppLayout({ children }: { children: ReactNode }) {
-  const { user, isDemo, loading: authLoading, signOut } = useAuth();
+  const { user, isDemo, loading: authLoading, sessionError, refreshSession, signOut } = useAuth();
   const ledger = useLedger();
   const { push: pushToast } = useToasts();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const view = viewFromPathname(pathname);
-  const [month, setMonth] = useState(new Date());
+  const [month, setMonth] = useState(currentMonthMarker);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<LedgerTransaction | null>(null);
   const [reusing, setReusing] = useState<LedgerTransaction | null>(null);
   const [newTransactionDate, setNewTransactionDate] = useState<string | undefined>();
   const [newTransactionLocation, setNewTransactionLocation] = useState<TransactionLocationDraft | null>(null);
+  // Set only by an "Add income" / "Add expense" shortcut; cleared when the sheet closes.
+  const [newTransactionKind, setNewTransactionKind] = useState<TransactionKind | undefined>();
   const [, setHomeSelectedDate] = useState(toDateInput);
   const [homeFocus, setHomeFocus] = useState<{ date: string; revision: number } | null>(null);
   const [recentlyAddedTransactionId, setRecentlyAddedTransactionId] = useState<string | null>(null);
   const [locked, setLocked] = useState(false);
+  // One balance unlock per session: the signed-in user it was unlocked for, cleared on lock and sign-out (and by a reload).
+  const [balancesUnlockedFor, setBalancesUnlockedFor] = useState<string | null>(null);
+  const [balanceUnlockOpen, setBalanceUnlockOpen] = useState(false);
+  const reminderToday = useToday();
+  const previousTodayRef = useRef(reminderToday);
+  // A tab left open across a month boundary moves on with it, if it was showing the month that just ended.
+  useEffect(() => {
+    const previous = previousTodayRef.current;
+    previousTodayRef.current = reminderToday;
+    if (previous.slice(0, 7) === reminderToday.slice(0, 7)) return;
+    setMonth((current) => toDateInput(current).slice(0, 7) === previous.slice(0, 7) ? currentMonthMarker() : current);
+  }, [reminderToday]);
   const [amountsHidden, setAmountsHidden] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [smsOpen, setSmsOpen] = useState(false);
   const [smsInitialText, setSmsInitialText] = useState<string | undefined>();
   const [receiptScanOpen, setReceiptScanOpen] = useState(false);
+  // The day a receipt with no readable date lands on: the opener's day, or today when it was opened.
+  const [receiptFallbackDate, setReceiptFallbackDate] = useState(todayInput);
   // Mounted by the transfer and split-bill sheets; null means closed.
   const [transferRequest, setTransferRequest] = useState<TransferRequest | null>(null);
   const [splitBillRequest, setSplitBillRequest] = useState<SplitBillRequest | null>(null);
-  const reportNotice = user && !isDemo ? monthlyReportNotice() : null;
+  const reportNotice = user && !isDemo ? monthlyReportNotice(ledger.transactions, { viewerId: user.id }) : null;
+  const urgentReminders = urgentReminderCount(ledger.dueItems, ledger.recurringEntries.filter((entry) => entry.active).map((entry) => ({ dueOn: entry.nextDueOn })), reminderToday);
+  const balanceSession = user?.id ?? (isDemo ? "demo" : null);
+  // Signing out keeps this layout mounted (it renders AuthPage), so the unlock must not carry over to the next sign-in.
+  if (!balanceSession && balancesUnlockedFor !== null) setBalancesUnlockedFor(null);
+  const balancesUnlocked = balanceSession !== null && balancesUnlockedFor === balanceSession;
+  const balancesVisible = !ledger.profile.hasPin || balancesUnlocked;
 
   useEffect(() => { setAmountsHidden(ledger.profile.hideAmounts); }, [ledger.profile.hideAmounts]);
-  useEffect(() => { window.scrollTo({ top: 0, behavior: "auto" }); }, [pathname]);
+  // A new page starts at the top; Back and Forward land where the page was left. The popstate
+  // listener runs before the pathname effect, so it records which path history traversed to.
+  const poppedPath = useRef<string | null>(null);
+  useEffect(() => {
+    const onPopState = () => { poppedPath.current = window.location.pathname; };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  useEffect(() => {
+    const traversed = poppedPath.current === pathname;
+    poppedPath.current = null;
+    if (!traversed) window.scrollTo({ top: 0, behavior: "auto" });
+  }, [pathname]);
   useEffect(() => { document.body.dataset.hideAmounts = String(amountsHidden); }, [amountsHidden]);
   useEffect(() => {
     if (!recentlyAddedTransactionId) return;
@@ -98,46 +138,97 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  // Once a day, the first time the app is open that day (a tab left open overnight counts: it re-runs when the date changes).
   useEffect(() => {
     if (!user || isDemo || ledger.loading || ledger.error || !ledger.profile.browserReminders) return;
     if (typeof Notification === "undefined") return;
-    const key = `syr-reminder-${user.id}-${todayInput()}`;
-    if (window.localStorage.getItem(key)) return;
+    const key = `syr-reminder-${user.id}-${reminderToday}`;
+    const storage = (() => { try { return window.localStorage; } catch { return null; } })();
+    if (storage?.getItem(key)) return;
     const notices = buildReminderDigest({
       dues: ledger.dueItems,
       recurring: ledger.recurringEntries,
-      today: todayInput(),
+      today: reminderToday,
+      currency: ledger.profile.currency,
       categoryLabel: (category) => getCategory(category, ledger.customCategories).label,
     });
     if (!notices.length) return;
-    const notify = () => {
-      const body = notices.slice(0, 3).map((notice) => `${notice.title}: ${notice.body}`).join("\n");
-      new Notification("SaveYoRupee reminders", { body });
-      window.localStorage.setItem(key, "1");
+    const notify = async () => {
+      // Mark the day first: if showing it fails or throws, it must not retry on every render.
+      try { storage?.setItem(key, "1"); } catch { /* private mode: at worst it shows again on the next load */ }
+      const { title, body } = reminderNotificationText(notices, ledger.profile.hideAmounts);
+      const delivered = await deliverNotification({
+        getRegistration: "serviceWorker" in navigator ? () => navigator.serviceWorker.getRegistration() : undefined,
+        createNotification: (heading, options) => new Notification(heading, options),
+      }, title, { body, tag: `syr-reminders-${reminderToday}`, icon: "/icons/icon-192.png", data: { url: "/" } });
+      if (delivered === "failed") pushToast({ ...reminderToastText(notices), tone: "neutral" });
     };
-    if (Notification.permission === "granted") notify();
-    else if (Notification.permission === "default" && !window.localStorage.getItem(`${key}:asked`)) {
-      window.localStorage.setItem(`${key}:asked`, "1");
-      void Notification.requestPermission().then((result) => { if (result === "granted") notify(); });
+    if (Notification.permission === "granted") void notify();
+    else if (Notification.permission === "default" && storage && !storage.getItem(`${key}:asked`)) {
+      try { storage.setItem(`${key}:asked`, "1"); } catch { return; }
+      void Notification.requestPermission().then((result) => { if (result === "granted") void notify(); }).catch(() => undefined);
     }
-  }, [isDemo, ledger.customCategories, ledger.dueItems, ledger.error, ledger.loading, ledger.profile.browserReminders, ledger.recurringEntries, user]);
+  }, [isDemo, ledger.customCategories, ledger.dueItems, ledger.error, ledger.loading, ledger.profile.browserReminders, ledger.profile.currency, ledger.profile.hideAmounts, ledger.recurringEntries, pushToast, reminderToday, user]);
+  // Fallback for the 07:00 reminder email (/api/cron/reminders): the server sends at most one a day either way.
   useEffect(() => {
     if (!user || isDemo || ledger.loading || ledger.error || !ledger.profile.emailReminders) return;
-    const key = `syr-email-reminder-${user.id}-${todayInput()}`;
-    if (window.sessionStorage.getItem(key)) return;
-    window.sessionStorage.setItem(key, "1");
+    const key = `syr-email-reminder-${user.id}-${reminderToday}`;
+    try {
+      if (window.sessionStorage.getItem(key)) return;
+      window.sessionStorage.setItem(key, "1");
+    } catch { /* storage blocked: the server's once-a-day guard still applies */ }
+    const retryLater = () => { try { window.sessionStorage.removeItem(key); } catch { /* ignore */ } };
     void fetch("/api/ledger", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "sendDueReminders" }),
-    }).then((response) => { if (!response.ok) window.sessionStorage.removeItem(key); }).catch(() => window.sessionStorage.removeItem(key));
-  }, [isDemo, ledger.error, ledger.loading, ledger.profile.emailReminders, user]);
+    }).then((response) => { if (!response.ok) retryLater(); }).catch(retryLater);
+  }, [isDemo, ledger.error, ledger.loading, ledger.profile.emailReminders, reminderToday, user]);
+  // A tab left open past midnight on the last day of a month moves on to the new month,
+  // unless another month was picked. The previous day is kept in a ref, so a remount starts fresh.
+  const monthRolloverDay = useRef(reminderToday);
+  useEffect(() => {
+    const previous = monthRolloverDay.current;
+    monthRolloverDay.current = reminderToday;
+    if (previous === reminderToday) return;
+    setMonth((shown) => rolledOverMonth(shown, previous, reminderToday) ?? shown);
+  }, [reminderToday]);
+  // Home-screen shortcuts (?add=expense|income|sms) and shared text (?sms=…&title=…), once signed in and loaded.
+  const deepLinkQuery = searchParams.toString();
+  const handledDeepLink = useRef<string | null>(null);
+  useEffect(() => {
+    if ((!user && !isDemo) || ledger.loading || ledger.error || locked || !deepLinkQuery || handledDeepLink.current === deepLinkQuery) return;
+    const { link, rest } = readAddDeepLink(new URLSearchParams(deepLinkQuery));
+    if (!link && rest === deepLinkQuery) return;
+    handledDeepLink.current = deepLinkQuery;
+    // Clean the address first (a shallow replace Next.js syncs), so the sheet's back-gesture entry and a reload never reopen it.
+    window.history.replaceState(null, "", `${pathname}${rest ? `?${rest}` : ""}${window.location.hash}`);
+    if (link?.type === "add") {
+      setEditing(null);
+      setReusing(null);
+      setNewTransactionDate(undefined);
+      setNewTransactionLocation(null);
+      setNewTransactionKind(link.kind);
+      setFormOpen(true);
+    } else if (link?.type === "sms") {
+      setSmsInitialText(link.text);
+      setSmsOpen(true);
+    }
+  }, [deepLinkQuery, isDemo, ledger.error, ledger.loading, locked, pathname, user]);
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) return;
+    const { protocol, hostname } = window.location;
+    if (protocol !== "https:" && hostname !== "localhost" && hostname !== "127.0.0.1") return;
+    void navigator.serviceWorker.register("/sw.js").catch((error) => console.warn("Could not register the service worker.", error));
+  }, []);
   useEffect(() => {
     if (!ledger.profile.hasPin || !ledger.profile.autoLockMinutes || locked || (!user && !isDemo)) return;
-    let timer = window.setTimeout(() => setLocked(true), ledger.profile.autoLockMinutes * 60_000);
+    // Locking also hides balances again until the PIN is entered for them.
+    const autoLock = () => { setLocked(true); setBalancesUnlockedFor(null); setBalanceUnlockOpen(false); };
+    let timer = window.setTimeout(autoLock, ledger.profile.autoLockMinutes * 60_000);
     const reset = () => {
       window.clearTimeout(timer);
-      timer = window.setTimeout(() => setLocked(true), ledger.profile.autoLockMinutes * 60_000);
+      timer = window.setTimeout(autoLock, ledger.profile.autoLockMinutes * 60_000);
     };
     window.addEventListener("pointerdown", reset);
     window.addEventListener("keydown", reset);
@@ -221,11 +312,16 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
       pushToast({ title: `Couldn’t delete “${transaction.note || getCategory(transaction.category, ledger.customCategories).label}”`, body: error instanceof Error ? error.message : "Check your connection and try again.", tone: "danger" });
     }
   };
+  const unlockBalances = async (pin: string) => {
+    await ledger.verifyPin(pin);
+    setBalancesUnlockedFor(balanceSession);
+  };
   const logOut = async () => {
     if (signingOut) return;
     setSigningOut(true);
     try {
       await signOut();
+      setBalancesUnlockedFor(null);
     } catch (caught) {
       window.alert(caught instanceof Error ? caught.message : "Could not sign out.");
     } finally {
@@ -248,19 +344,24 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     removeTransaction,
     navigate,
     completeOnboardingStep,
-    lock: () => { if (ledger.profile.hasPin) setLocked(true); },
+    lock: () => { if (ledger.profile.hasPin) { setLocked(true); setBalancesUnlockedFor(null); setBalanceUnlockOpen(false); } },
     openSms: (initialText?: string) => { setSmsInitialText(initialText); setSmsOpen(true); },
-    openReceiptScan: () => setReceiptScanOpen(true),
+    openReceiptScan: (fallbackDate?: string) => { setReceiptFallbackDate(fallbackDate || todayInput()); setReceiptScanOpen(true); },
     openTransfer: (options: TransferRequest = {}) => setTransferRequest(options),
     openSplitBill: (options: SplitBillRequest = {}) => setSplitBillRequest(options),
+    balancesVisible,
+    balancesUnlocked,
+    unlockBalances,
+    requestBalanceUnlock: () => { if (ledger.profile.hasPin && !balancesUnlocked) setBalanceUnlockOpen(true); },
   };
 
   if (authLoading) return <AppLoader className="boot-screen" message="Opening your ledger" />;
-  if (!user && !isDemo) return <AuthPage />;
+  // Only a real 401 means signed out; a weak signal or a struggling server gets a Retry instead of the sign-in page.
+  if (!user && !isDemo) return sessionError ? <RetryScreen className="boot-screen" title="Can’t reach SaveYoRupee right now" message="Check your connection. We’ll try again on our own as soon as you’re back online." onRetry={refreshSession} /> : <AuthPage />;
 
   let content = children;
   if (ledger.loading) content = <AppLoader className="page-loading" message="Loading your entries" />;
-  else if (ledger.error) content = <div className="page-error"><strong>We couldn’t load your ledger.</strong><p>{ledger.error}</p></div>;
+  else if (ledger.error) content = <RetryScreen className="page-error" title="We couldn’t load your ledger." message={ledger.error} onRetry={ledger.refresh} />;
 
   return (
     <LedgerWorkspaceContext.Provider value={workspace}>
@@ -277,7 +378,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         )}
         <RoutePanel pathname={pathname}>{content}</RoutePanel>
       </AppShell>
-      <FloatingActions closeSignal={`${pathname}:${searchOpen}`}>
+      <FloatingActions closeSignal={`${pathname}:${searchOpen}`} badgeCount={urgentReminders}>
         <button className="ledger-search" onClick={() => setSearchOpen(true)} aria-label="Search the ledger" title="Search (Ctrl+K)"><MagnifyingGlass size={18} /></button>
         <ReminderBell
           items={ledger.dueItems}
@@ -285,7 +386,6 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
           recurringEntries={ledger.recurringEntries.filter((entry) => entry.active).map((entry) => ({ id: entry.id, kind: entry.kind, title: entry.note || getCategory(entry.category, ledger.customCategories).label, amountMinor: entry.amountMinor, dueOn: entry.nextDueOn, scheduleLabel: recurrenceLabel(entry) }))}
           monthlyReport={reportNotice}
           onOpenDue={openDue}
-          onComplete={ledger.completeDueItem}
           onSnooze={ledger.snoozeDueItem}
           onConfirmRecurring={ledger.confirmRecurring}
         />
@@ -319,6 +419,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         template={reusing}
         initialOccurredOn={newTransactionDate}
         initialLocation={newTransactionLocation}
+        initialKind={newTransactionKind}
         transactions={ledger.transactions}
         customCategories={ledger.customCategories}
         customSubcategories={ledger.customSubcategories}
@@ -328,10 +429,10 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         shareWithHousehold={ledger.profile.household?.status === "active"}
         calendarSystem={ledger.profile.calendarSystem}
         ownerId={ledger.profile.id}
-        onClose={() => setFormOpen(false)}
+        onClose={() => { setFormOpen(false); setNewTransactionKind(undefined); }}
         onSave={saveTransaction}
         onPasteSms={() => workspace.openSms()}
-        onScanReceipt={() => workspace.openReceiptScan()}
+        onScanReceipt={(occurredOn) => workspace.openReceiptScan(occurredOn ?? newTransactionDate)}
         onTransfer={(prefill) => workspace.openTransfer(prefill)}
         onSplitBill={(prefill) => workspace.openSplitBill(prefill)}
       />
@@ -350,13 +451,14 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         ownerId={ledger.profile.id}
         onSave={async (draft) => { const savedId = await ledger.saveTransaction(draft); completeOnboardingStep("transaction"); return savedId; }}
         onSaveTransfer={(draft) => ledger.saveTransfer(draft)}
+        transfers={ledger.transfers}
       />
       <ReceiptScanner
         open={receiptScanOpen}
         onOpenChange={setReceiptScanOpen}
         showTrigger={false}
         currency={ledger.profile.currency}
-        fallbackOccurredOn={todayInput()}
+        fallbackOccurredOn={receiptFallbackDate}
         customCategories={ledger.customCategories}
         customSubcategories={ledger.customSubcategories}
         paymentAccounts={onlinePaymentAccounts(ledger.paymentAccounts)}
@@ -388,6 +490,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
           setLocked(false);
         }} />
       )}
+      <BalanceUnlockDialog opened={balanceUnlockOpen && !locked && ledger.profile.hasPin} onClose={() => setBalanceUnlockOpen(false)} onUnlock={unlockBalances} />
     </LedgerWorkspaceContext.Provider>
   );
 }
@@ -441,34 +544,33 @@ function AppLoader({ className, message }: { className: "boot-screen" | "page-lo
                     <circle cx="54" cy="54" r="18" /><circle cx="54" cy="54" r="14" /><circle cx="54" cy="54" r="10" />
                     <circle cx="186" cy="54" r="18" /><circle cx="186" cy="54" r="14" /><circle cx="186" cy="54" r="10" />
                   </g>
-                  {/* portrait vignette */}
+                  {/* centre medallion: a Himalayan ridge over rhododendron (lali gurans), in line work */}
                   <ellipse cx="120" cy="54" rx="24" ry="24" fill="#dbe8c9" stroke="#2b4a35" strokeWidth=".8" />
                   <ellipse cx="120" cy="54" rx="21" ry="21" fill="none" stroke="#2b4a35" strokeWidth=".4" opacity=".5" />
-                  <g clipPath={`url(#${id("oval")})`} fill="#2b4a35">
-                    {/* engraved bust, three-quarter facing left */}
-                    <path d="M97 78c2-11.5 9.5-16 23-16s21 4.5 23 16Z" />
-                    <rect x="115.2" y="53" width="9.6" height="10" />
-                    <ellipse cx="121" cy="46" rx="8.2" ry="9.4" />
-                    <path d="M113.2 43.6c-1.8.7-2.9 2-2.6 3.1.3 1.1 1.6 1.5 2.9 1.2Z" />
-                    <path d="M112.7 39.6c1.3-4.7 5.1-7.1 9.1-7.1 4.6 0 7.8 2.6 8.6 6.7.4 2-.2 3.4-.9 3.4-1.4-3.6-4-5.4-8-5.4-3.4 0-6 1.2-7.6 3.6-.7.9-1.5.4-1.2-1.2Z" />
-                    <circle cx="130.2" cy="51.4" r="2.7" />
-                    <path d="M113.6 63c3.6 3.2 10.8 3.2 14.4 0" fill="none" stroke="#dbe8c9" strokeWidth=".9" />
+                  <g clipPath={`url(#${id("oval")})`}>
+                    <circle cx="133.5" cy="41.5" r="3.2" fill="none" stroke="#2b4a35" strokeWidth=".6" opacity=".7" />
+                    <path d="M94 66 104.5 53.5l4.5 4.2 9.8-15.2 7.6 10.4 4.4-4.6L146 66Z" fill="#2b4a35" opacity=".86" />
+                    <path d="M115.6 47.6 118.8 42.5l3.4 4.7-1.9-.8-1.5 1.6-1.4-1.3Z M128.6 50.1l2.3-1.8 2.2 2.3-1.3-.2-1 .8Z" fill="#dbe8c9" />
+                    <path d="M95 69.5c8.5-3.6 16.5-3.8 25-.8s16.5 3 25 .2" fill="none" stroke="#2b4a35" strokeWidth=".7" opacity=".75" />
+                    <path d="M104.5 75c2.4-3.4 5.6-4.6 9.4-3.6-2.2 2.4-5.4 3.6-9.4 3.6ZM134 74.6c-2.3-3.3-5.4-4.4-9-3.4 2.1 2.3 5.2 3.4 9 3.4Z" fill="#2b4a35" opacity=".8" />
+                    {[{ x: 112, y: 69.4, s: 1 }, { x: 127.4, y: 70.2, s: .78 }].map((flower) => (
+                      <g key={flower.x} transform={`translate(${flower.x} ${flower.y}) scale(${flower.s})`}>
+                        {[0, 72, 144, 216, 288].map((angle) => <ellipse key={angle} cx="0" cy="-2.5" rx="1.65" ry="2.6" transform={`rotate(${angle})`} fill="#a8504a" stroke="#6e2f2b" strokeWidth=".25" />)}
+                        <circle r=".95" fill="#f1d9a0" />
+                      </g>
+                    ))}
                   </g>
-                  {/* federal reserve seal */}
+                  {/* seals: the SaveYoRupee mark */}
                   <g fill="none" stroke="#2f4a3a" opacity=".8">
                     <circle cx="54" cy="54" r="12.5" strokeWidth=".9" />
                     <circle cx="54" cy="54" r="10" strokeWidth=".45" strokeDasharray="1.5 1.4" />
                   </g>
-                  <text x="54" y="58" fill="#2f4a3a" fontSize="10" fontWeight="800" textAnchor="middle" opacity=".8">F</text>
-                  {/* treasury seal — balance scales */}
+                  <path d={BRAND_MARK_PATH} transform="translate(54 54) scale(.068) translate(-128 -128)" fill="#2f4a3a" opacity=".82" />
                   <g fill="none" stroke="#3f7a52" opacity=".9">
                     <circle cx="186" cy="54" r="12.5" strokeWidth=".9" />
                     <circle cx="186" cy="54" r="10" strokeWidth=".45" strokeDasharray="1.5 1.4" />
-                    <path d="M186 47v11" strokeWidth=".8" strokeLinecap="round" />
-                    <path d="M180.4 49.5h11.2" strokeWidth=".8" strokeLinecap="round" />
-                    <path d="M178.2 49.5a2.2 2.2 0 0 0 4.4 0M189.4 49.5a2.2 2.2 0 0 0 4.4 0" strokeWidth=".65" />
-                    <path d="M181.5 58.6h9" strokeWidth=".8" strokeLinecap="round" />
                   </g>
+                  <path d={BRAND_MARK_PATH} transform="translate(186 54) scale(.068) translate(-128 -128)" fill="#3f7a52" opacity=".9" />
                   {/* corner scrollwork */}
                   <g fill="none" stroke="#33573f" strokeWidth=".5" opacity=".4">
                     <path d="M12 12h14M12 12v10M228 12h-14M228 12v10M12 90h14M12 90v-10M228 90h-14M228 90v-10" />
@@ -476,17 +578,17 @@ function AppLoader({ className, message }: { className: "boot-screen" | "page-lo
                 </g>
                 <rect x="9" y="9" width="222" height="84" rx="1.5" fill="none" stroke="#33573f" strokeWidth=".7" opacity=".65" />
                 <rect x="11.5" y="11.5" width="217" height="79" rx="1" fill="none" stroke="#33573f" strokeWidth=".4" strokeDasharray="2 1.6" opacity=".45" />
-                <text x="120" y="19" fill="#245239" fontSize="4.6" fontWeight="700" letterSpacing="1.1" textAnchor="middle">FEDERAL RESERVE NOTE</text>
-                <text x="120" y="28" fill="#1e3d2b" fontSize="6.6" fontWeight="800" letterSpacing=".7" textAnchor="middle">THE UNITED STATES OF AMERICA</text>
-                <text x="20" y="30" fill="#1e3d2b" fontSize="12" fontWeight="800">1</text>
-                <text x="220" y="30" fill="#1e3d2b" fontSize="12" fontWeight="800" textAnchor="end">1</text>
-                <text x="20" y="88" fill="#1e3d2b" fontSize="12" fontWeight="800">1</text>
-                <text x="220" y="88" fill="#1e3d2b" fontSize="12" fontWeight="800" textAnchor="end">1</text>
-                <text x="214" y="40" fill="#3f7a52" fontSize="4.6" fontWeight="700" letterSpacing=".7" textAnchor="end">F 74210099 B</text>
-                <text x="26" y="80" fill="#3f7a52" fontSize="4.2" fontWeight="700" letterSpacing="1">SAVEYO RUPEE</text>
-                <text x="214" y="80" fill="#3f7a52" fontSize="4.2" fontWeight="700" letterSpacing="1" textAnchor="end">SERIES 2026</text>
-                <text x="120" y="82" fill="#245239" fontSize="4" fontWeight="700" letterSpacing=".9" textAnchor="middle">IN GOD WE TRUST</text>
-                <text x="120" y="90" fill="#1e3d2b" fontSize="8" fontWeight="800" letterSpacing="1.5" textAnchor="middle">ONE DOLLAR</text>
+                <text x="120" y="19" fill="#245239" fontSize="4.2" fontWeight="700" letterSpacing="1.1" textAnchor="middle">LEDGER NOTE · NOT LEGAL TENDER</text>
+                <text x="120" y="28" fill="#1e3d2b" fontSize="7.4" fontWeight="800" letterSpacing="1.6" textAnchor="middle">SAVEYO RUPEE</text>
+                <text x="19" y="30" fill="#1e3d2b" fontSize="10.5" fontWeight="700">रु</text>
+                <text x="221" y="30" fill="#1e3d2b" fontSize="10.5" fontWeight="700" textAnchor="end">रु</text>
+                <text x="19" y="88" fill="#1e3d2b" fontSize="10.5" fontWeight="700">रु</text>
+                <text x="221" y="88" fill="#1e3d2b" fontSize="10.5" fontWeight="700" textAnchor="end">रु</text>
+                <text x="214" y="40" fill="#3f7a52" fontSize="4.6" fontWeight="700" letterSpacing=".7" textAnchor="end">SYR 0207 2083</text>
+                <text x="32" y="80" fill="#3f7a52" fontSize="4.2" fontWeight="700" letterSpacing="1">SERIES 2083</text>
+                <text x="208" y="80" fill="#3f7a52" fontSize="4.2" fontWeight="700" letterSpacing="1" textAnchor="end">NO. 000001</text>
+                <text x="120" y="83" fill="#245239" fontSize="4" fontWeight="700" letterSpacing=".9" textAnchor="middle">SAVE A LITTLE, EVERY DAY</text>
+                <text x="120" y="91" fill="#1e3d2b" fontSize="7.4" fontWeight="800" letterSpacing="1.5" textAnchor="middle">ONE RUPEE</text>
               </g>
             </defs>
             {Array.from({ length: NOTE_STRIPS }, (_, i) => (
@@ -513,6 +615,13 @@ function AppLoader({ className, message }: { className: "boot-screen" | "page-lo
       <div className="loader-status"><i aria-hidden="true" /><span className="t-shimmer" data-text={message}>{message}</span></div>
     </div>
   </div>;
+}
+
+function RetryScreen({ className, title, message, onRetry }: { className: "boot-screen" | "page-error"; title: string; message: string; onRetry: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  // A failed retry leaves this screen up with its reason, so there is nothing more to report here.
+  const retry = async () => { if (busy) return; setBusy(true); try { await onRetry(); } catch { /* still unreachable */ } finally { setBusy(false); } };
+  return <div className={`${className} retry-screen`} role="alert"><div className="retry-card"><span className="retry-icon" aria-hidden="true"><WifiSlash size={26} weight="duotone" /></span><strong>{title}</strong><p>{message}</p><button type="button" className="primary-button" onClick={() => void retry()} disabled={busy} aria-busy={busy}>{busy ? <><ButtonSpinner />Trying again…</> : <><ArrowClockwise size={17} />Retry</>}</button></div></div>;
 }
 
 function PrivacyLock({ onUnlock }: { onUnlock: (pin: string) => Promise<void> }) {

@@ -1,4 +1,5 @@
-import type { DueItem, RecurringEntry } from "../types";
+import { formatMoney } from "./currency";
+import type { CurrencyCode, DueItem, RecurringEntry } from "../types";
 
 export interface ReminderNotice {
   id: string;
@@ -10,10 +11,6 @@ function shiftDate(iso: string, days: number) {
   const [year, month, day] = iso.split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day + days));
   return date.toISOString().slice(0, 10);
-}
-
-function money(amountMinor: number) {
-  return (amountMinor / 100).toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function dueRemainingMinor(item: Pick<DueItem, "amountMinor" | "payments">) {
@@ -29,10 +26,13 @@ export function buildReminderDigest(input: {
   dues: readonly DueItem[];
   recurring: readonly Pick<RecurringEntry, "id" | "active" | "kind" | "note" | "category" | "amountMinor" | "nextDueOn">[];
   today: string;
+  /** The ledger's currency, so an email or notification reads "NPR 1,500" rather than a bare number. */
+  currency: CurrencyCode;
   categoryLabel?: (category: string) => string;
 }): ReminderNotice[] {
   const tomorrow = shiftDate(input.today, 1);
   const label = input.categoryLabel ?? ((category: string) => category);
+  const money = (amountMinor: number) => formatMoney(amountMinor, input.currency);
   const notices: ReminderNotice[] = [];
 
   for (const due of input.dues) {

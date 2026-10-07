@@ -4,15 +4,16 @@ import { NumberInput, Select, Textarea, TextInput } from "@mantine/core";
 import { ArrowsLeftRight, CheckCircle, ClipboardText, Info, Sparkle, WarningCircle, X, ChatText } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { allCategoriesFor, subcategoryOptionsFor } from "../lib/categories";
+import { pickerCategoriesFor, spendingCategoriesFor, subcategoryOptionsFor } from "../lib/categories";
 import { majorToMinor } from "../lib/currency";
 import { formatLedgerDate, todayInput } from "../lib/dates";
-import { isCashAccount, onlinePaymentAccounts, paymentAccountLabel } from "../lib/payment-accounts";
+import { findSimilarTransfer, isCashAccount, onlinePaymentAccounts, paymentAccountLabel } from "../lib/payment-accounts";
 import { personalizeSmsAnalysis, smsDefaultCategory, smsResultToDraft, withSmsAccountMatch, type SmsAnalysis } from "../lib/sms-analysis";
-import { mentionsCurrencyAmount, parseBankSms, SMS_MAX_LENGTH } from "../lib/sms-templates";
+import { mentionsCurrencyAmount, mentionsOneTimeCode, parseBankSms, SMS_MAX_LENGTH } from "../lib/sms-templates";
 import { transactionWarnings } from "../lib/transaction-intelligence";
+import { readResponse, responseMessage, toUserMessage } from "../lib/user-messages";
 import type {
-  AccountTransferDraft, CalendarSystem, CurrencyCode, CustomCategory, CustomSubcategory, LearningState, LedgerTransaction,
+  AccountTransfer, AccountTransferDraft, CalendarSystem, CurrencyCode, CustomCategory, CustomSubcategory, LearningState, LedgerTransaction,
   PaymentAccount, PaymentMode, TransactionDraft, TransactionKind,
 } from "../types";
 import { AnimatedOverlay } from "./AnimatedOverlay";
@@ -41,13 +42,15 @@ interface SmsCaptureProps {
   ownerId?: string;
   /** Saves a "Transfer between my accounts" reading. Without it, review offers only Expense and Income. */
   onSaveTransfer?: (draft: AccountTransferDraft) => Promise<void>;
+  /** Recorded transfers, so the second alert for one wallet load or ATM withdrawal is flagged before it moves the money twice. */
+  transfers?: AccountTransfer[];
 }
 
 type Stage = "ready" | "parsing" | "reviewing" | "saving" | "saved";
 type ReviewType = TransactionKind | "transfer";
 interface TransferRoute { fromAccountId: string; toAccountId: string }
 
-export function SmsCapture({ currency, transactions, customCategories, customSubcategories, paymentAccounts, learning, onSave, open: openProp, onOpenChange, initialText, showTrigger = true, calendarSystem = "AD", ownerId, onSaveTransfer }: SmsCaptureProps) {
+export function SmsCapture({ currency, transactions, customCategories, customSubcategories, paymentAccounts, learning, onSave, open: openProp, onOpenChange, initialText, showTrigger = true, calendarSystem = "AD", ownerId, onSaveTransfer, transfers = [] }: SmsCaptureProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = openProp ?? uncontrolledOpen;
   const setOpen = (next: boolean) => {
@@ -77,7 +80,7 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
   const ownTransactions = useMemo(() => ownerId ? transactions.filter((transaction) => transaction.userId === ownerId) : transactions, [ownerId, transactions]);
   const transferOptions = useMemo(() => ownAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) })), [ownAccounts]);
   const categories = useMemo(
-    () => allCategoriesFor(draft?.kind ?? "expense", customCategories),
+    () => pickerCategoriesFor(draft?.kind ?? "expense", customCategories),
     [draft?.kind, customCategories],
   );
 
@@ -123,7 +126,8 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
 
   /** Fills what the message cannot state from the user's habits, and starts review on the right type. */
   const startReview = (reading: SmsAnalysis) => {
-    const categoryIds = allCategoriesFor(reading.draft.kind, customCategories).map((category) => category.id);
+    // Loans are recorded from Dues, so a past loan entry with this person never fills the category.
+    const categoryIds = spendingCategoriesFor(reading.draft.kind, customCategories).map((category) => category.id);
     const { analysis: result, note } = personalizeSmsAnalysis(reading, learning, ownTransactions, categoryIds);
     // Each reading gets its own request id, so a retried save records it once.
     const draftWithId = { ...result.draft, clientRequestId: crypto.randomUUID() };
@@ -135,7 +139,8 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
     setStage("reviewing");
   };
 
-  const read = async (input = message) => {
+  /** `askGemini` is false when the text came straight from the clipboard: only the on-device parser may read it then. */
+  const read = async (input = message, askGemini = true) => {
     const text = input.trim();
     if (!text) return;
     const operation = ++operationRef.current;
@@ -156,6 +161,12 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
       requestRef.current = null;
       return;
     }
+    if (!askGemini) {
+      requestRef.current = null;
+      setStage("ready");
+      setPasteHint("Pasted, but this could not be read on your device. Check it, then tap Read message to send it to Gemini.");
+      return;
+    }
 
     try {
       const response = await fetch("/api/imports/sms", {
@@ -164,15 +175,15 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
         body: JSON.stringify({ text }),
         signal: controller.signal,
       });
-      const body = await response.json() as { analysis?: SmsAnalysis; error?: string };
+      const parsed = await readResponse<{ analysis?: SmsAnalysis; error?: string }>(response);
       if (operation !== operationRef.current) return;
-      if (!response.ok || !body.analysis) throw new Error(body.error ?? "Could not read this message.");
+      if (!response.ok || !parsed.body?.analysis) throw new Error(responseMessage(parsed, "Could not read this message."));
       // Gemini reads amount, date and category; the account still comes from the message itself.
-      startReview(withSmsAccountMatch(body.analysis, text, ownAccounts));
+      startReview(withSmsAccountMatch(parsed.body.analysis, text, ownAccounts));
     } catch (caught) {
       const cancelled = caught instanceof Error && caught.name === "AbortError";
       if (!cancelled && operation === operationRef.current) {
-        setError(caught instanceof Error ? caught.message : "Could not read this message.");
+        setError(toUserMessage(caught, null, "Could not read this message."));
         setStage("ready");
       }
     } finally {
@@ -189,6 +200,9 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
   const accountIsMissing = !asTransfer && draft?.paymentMode === "online" && !draft.paymentAccountId;
   const routeIsMissing = asTransfer && (!route.fromAccountId || !route.toAccountId || route.fromAccountId === route.toAccountId);
   const canSave = Boolean(draft && amountIsValid && !accountIsMissing && !routeIsMissing && stage === "reviewing");
+  // The bank and the wallet each send an alert for one load, so the second one often names a transfer already saved.
+  const similarTransfer = asTransfer && draft && !routeIsMissing ? findSimilarTransfer(transfers, { ...route, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn }) : null;
+  const routeLabel = (id: string) => transferOptions.find((option) => option.value === id)?.label ?? "the account";
 
   const changeReviewType = (value: ReviewType) => {
     setReviewType(value);
@@ -221,9 +235,11 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
       const text = typeof navigator !== "undefined" && navigator.clipboard?.readText ? (await navigator.clipboard.readText()).slice(0, SMS_MAX_LENGTH) : null;
       if (text === null) throw new Error("Clipboard reading is not available.");
       if (!text.trim()) { setPasteHint("Your clipboard is empty. Copy the bank SMS first, or long-press the box below to paste."); return; }
+      // A one-time code is never pasted, even when its message names the amount it approves.
+      if (mentionsOneTimeCode(text)) { setPasteHint("Your clipboard holds a one-time code, not a bank alert, so nothing was pasted. Copy the transaction SMS instead."); return; }
       setMessage(text);
-      // Anything without an amount (an OTP, a password) stays on the device until the user reads it on purpose.
-      if (mentionsCurrencyAmount(text)) await read(text);
+      // Clipboard text is read on the device only; Gemini sees it only after the user taps Read message.
+      if (mentionsCurrencyAmount(text)) await read(text, false);
       else setPasteHint("Pasted, but this does not look like a bank alert. Check it, then tap Read message.");
     } catch {
       setPasteHint("This browser did not share the clipboard. Long-press the box below to paste.");
@@ -285,6 +301,7 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
           {analysis.warnings.map((warning) => (
             <div className="sms-review-warning" key={warning}><WarningCircle size={18} /><span>{warning}</span></div>
           ))}
+          {similarTransfer && <div className="sms-review-warning"><WarningCircle size={18} /><span><strong>Already recorded?</strong> A transfer of this amount from {routeLabel(similarTransfer.fromAccountId)} to {routeLabel(similarTransfer.toAccountId)} is saved for {formatLedgerDate(similarTransfer.occurredOn, calendarSystem)}. Your bank and wallet often both send an alert for one load; save this only if you moved the money twice.</span></div>}
           {!asTransfer && duplicateWarnings.map((warning) => (
             <div className={`sms-review-warning ${warning.tone}`} key={warning.type + warning.title}>
               <WarningCircle size={18} /><span><strong>{warning.title}.</strong> {warning.detail}</span>

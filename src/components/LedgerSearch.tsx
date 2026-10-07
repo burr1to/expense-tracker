@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import { getCategory } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
 import { searchLedger, type LedgerSearchHit } from "../lib/ledger-search";
+import { navigateFromOverlay, useBackToClose } from "../lib/use-back-to-close";
 import type { AccountTransfer, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount, SavedPlace } from "../types";
 
 interface LedgerSearchProps {
@@ -46,10 +47,15 @@ export function LedgerSearch({ open, currency, transactions, transfers, dues, pl
   const openHit = (hit: LedgerSearchHit) => {
     const transaction = hit.kind === "transaction" ? transactions.find((item) => item.id === hit.id) : undefined;
     // The edit sheet takes focus; returning it to the search button would pull it back out.
-    if (transaction && onOpenTransaction?.(transaction)) setReturnFocus(false);
-    else router.push(hit.href);
-    onClose();
+    if (transaction && onOpenTransaction?.(transaction)) {
+      setReturnFocus(false);
+      onClose();
+    } else {
+      onClose();
+      navigateFromOverlay(() => router.push(hit.href));
+    }
   };
+  useBackToClose(open, onClose);
 
   return (
     <Modal opened={open} onClose={onClose} returnFocus={returnFocus} title="Search the ledger" centered size="lg" classNames={{ body: "ledger-search-body" }}>

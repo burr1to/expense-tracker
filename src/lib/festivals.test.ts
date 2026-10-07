@@ -51,7 +51,8 @@ describe("verified main days", () => {
     ["dashain-tihar", 2083, "2026-10-11", "2083-6-25", "2026-11-11", "2083-7-25"],
     ["dashain-tihar", 2077, "2020-10-17", "2077-7-1", "2020-11-16", "2077-8-1"],
     ["holi", 2080, "2024-03-24", "2080-12-11", "2024-03-24", "2080-12-11"],
-    ["holi", 2083, "2027-03-22", "2083-12-8", "2027-03-22", "2083-12-8"],
+    // Hill Holi (Fagu Purnima) 2083 is Chaitra 7; the Terai plays a day later.
+    ["holi", 2083, "2027-03-21", "2083-12-7", "2027-03-21", "2083-12-7"],
     ["teej", 2080, "2023-09-18", "2080-6-1", "2023-09-18", "2080-6-1"],
     ["teej", 2083, "2026-09-14", "2083-5-29", "2026-09-14", "2083-5-29"],
   ])("%s %i runs %s (%s) to %s (%s)", (id, year, start, startBs, end, endBs) => {
@@ -75,6 +76,14 @@ describe("festival seasons", () => {
     expect(STORAGE_PERIOD_KEY.test(festivalPeriodKey(dashainTihar, 2083))).toBe(true);
     expect(parseFestivalPeriodKey("FEST:dashain-tihar-2083")).toMatchObject({ bsYear: 2083, festival: { id: "dashain-tihar" } });
     expect(parseFestivalPeriodKey("FEST:dashain-2083")).toBeNull();
+  });
+
+  it("refuses a festival key whose season the calendar cannot resolve", () => {
+    // Holi 2090 would end in Baishakh 2091 and Teej 1999 predates the supported range, so festivalBounds throws for both.
+    expect(parseFestivalPeriodKey("FEST:holi-2090")).toBeNull();
+    expect(parseFestivalPeriodKey("FEST:teej-1999")).toBeNull();
+    expect(parseFestivalPeriodKey("FEST:dashain-tihar-9999")).toBeNull();
+    expect(parseFestivalPeriodKey("FEST:dashain-tihar-2090")).toMatchObject({ bsYear: 2090 });
   });
 
   it("spans Ashwin 1 to the end of Kartik for Dashain–Tihar 2083, containing Ghatasthapana through Bhai Tika", () => {

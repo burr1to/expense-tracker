@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isFullBackupCsv, parseBackupCsv, serializeBackupCsv, type BackupRecord } from "./backup";
+import { budgetScopeFor, isFullBackupCsv, lastBackupSummary, parseBackupCsv, restoredRequestId, serializeBackupCsv, type BackupRecord } from "./backup";
 
 const exportedAt = "2026-07-26T08:00:00.000Z";
 const baseRecords: BackupRecord[] = [
@@ -91,5 +91,60 @@ describe("full backup CSV", () => {
     expect(recurring).toHaveLength(2);
     expect(recurring[0].payload).not.toHaveProperty("recurrenceUnit");
     expect(recurring[1].payload).toMatchObject({ recurrenceUnit: "week", recurrenceInterval: 2, anchorDate: "2026-07-27", paymentAccountId: "account-1" });
+  });
+});
+
+describe("later backup fields", () => {
+  const dueRecord = (backupId: string, extra: Record<string, unknown> = {}): BackupRecord => ({ entity: "due_item", backupId, payload: { kind: "lent", title: "Bike repair", person: "Ram", amountMinor: 500000, category: "loan", occurredOn: "2026-07-20", dueOn: "2026-08-20", remindOn: null, snoozedUntil: null, note: "", status: "open", completedOn: null, createdAt: exportedAt, updatedAt: exportedAt, ...extra } });
+  const loanMovement = (clientRequestId: string | null): BackupRecord => ({ entity: "transaction", backupId: "transaction-1", payload: { kind: "expense", category: "loan", amountMinor: 500000, occurredOn: "2026-07-20", note: "Lent to Ram", subcategory: "Lent", area: null, paymentMode: "cash", paymentAccountId: null, locationLabel: null, locationAddress: null, locationLatitude: null, locationLongitude: null, locationAccuracy: null, locationSource: null, savedPlaceId: null, receiptScanId: null, clientRequestId, createdAt: exportedAt, updatedAt: exportedAt } });
+
+  it("keeps the newer profile settings, interest rates and loan links through the CSV", () => {
+    const profile: BackupRecord = { entity: "profile", backupId: "profile", payload: { displayName: "Personal ledger", currency: "NPR", hideAmounts: true, autoLockMinutes: 5, learningEnabled: true, calendarSystem: "BS", safeToSpendBufferMinor: 250000, emailReminders: true, browserReminders: false } };
+    const parsed = parseBackupCsv(serializeBackupCsv([baseRecords[0], profile, dueRecord("due-1", { annualRatePercent: 12.5 }), loanMovement("due-open:due-1")]));
+
+    expect(parsed.records.find((record) => record.entity === "profile")?.payload).toEqual(profile.payload);
+    expect(parsed.records.find((record) => record.entity === "due_item")?.payload).toMatchObject({ annualRatePercent: 12.5 });
+    expect(parsed.records.find((record) => record.entity === "transaction")?.payload).toMatchObject({ clientRequestId: "due-open:due-1" });
+  });
+
+  it("still accepts a backup made before those fields existed", () => {
+    const parsed = parseBackupCsv(serializeBackupCsv([...baseRecords, dueRecord("due-1"), { ...loanMovement(null), payload: { ...(loanMovement(null).payload as Record<string, unknown>), clientRequestId: undefined } }]));
+
+    expect(parsed.records.find((record) => record.entity === "profile")?.payload).not.toHaveProperty("calendarSystem");
+    expect(parsed.counts).toEqual({ due_item: 1, transaction: 1 });
+  });
+
+  it("points a loan's opening movement at its due's new id and drops links to dues that are gone", () => {
+    const dueIds = new Map([["due-1", "new-due-1"]]);
+
+    expect(restoredRequestId("due-open:due-1", dueIds)).toBe("due-open:new-due-1");
+    expect(restoredRequestId("due-open:due-missing", dueIds)).toBeNull();
+    expect(restoredRequestId("split:abc12345:lent", dueIds)).toBe("split:abc12345:lent");
+    expect(restoredRequestId("7f9c2d1e-0000-4000-8000-000000000000", dueIds)).toBe("7f9c2d1e-0000-4000-8000-000000000000");
+    expect(restoredRequestId(null, dueIds)).toBeNull();
+    expect(restoredRequestId(undefined, dueIds)).toBeNull();
+  });
+
+  it("restores festival budgets as festival envelopes", () => {
+    expect(budgetScopeFor("FEST:dashain-2083")).toBe("festival");
+    expect(budgetScopeFor("2026-10")).toBe("month");
+    expect(budgetScopeFor("BS:2083-06")).toBe("month");
+  });
+});
+
+describe("lastBackupSummary", () => {
+  const now = new Date("2026-10-07T12:00:00.000Z");
+
+  it("counts Nepal calendar days since the last download", () => {
+    expect(lastBackupSummary("2026-10-07T03:00:00.000Z", now)).toEqual({ label: "Last backup: today", stale: false });
+    // 20:00 UTC on 6 Oct is already 7 Oct in Kathmandu.
+    expect(lastBackupSummary("2026-10-06T20:00:00.000Z", now)).toEqual({ label: "Last backup: today", stale: false });
+    expect(lastBackupSummary("2026-10-06T10:00:00.000Z", now)).toEqual({ label: "Last backup: yesterday", stale: false });
+    expect(lastBackupSummary("2026-09-30T10:00:00.000Z", now)).toEqual({ label: "Last backup: 7 days ago", stale: false });
+    expect(lastBackupSummary("2026-09-01T10:00:00.000Z", now)).toEqual({ label: "Last backup: 36 days ago", stale: true });
+  });
+
+  it("is honest when Logs hold no download", () => {
+    expect(lastBackupSummary(null, now)).toEqual({ label: "No backup downloaded in the last 90 days", stale: true });
   });
 });

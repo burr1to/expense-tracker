@@ -15,9 +15,11 @@ import { TransactionRow } from "../components/TransactionRow";
 import { TransferRow } from "../components/TransferRow";
 import { CategoryIconPicker } from "../components/CategoryIconPicker";
 import { isFullBackupCsv } from "../lib/backup";
-import { allCategoriesFor, CATEGORIES, getCategory } from "../lib/categories";
+import { allCategoriesFor, CATEGORIES, getCategory, pickerCategoriesFor } from "../lib/categories";
 import { parseTransactionCsv, TRANSACTION_CSV_TEMPLATE, type CsvCategoryDraft, type CsvSubcategoryDraft } from "../lib/csv";
 import { formatLedgerDay, todayInput } from "../lib/dates";
+import { useToday } from "../lib/use-today";
+import { onlinePaymentAccounts, paymentAccountLabel } from "../lib/payment-accounts";
 import { listLedgerActivity, transferAccountLabel, type TransactionHistoryScope } from "../lib/transaction-history";
 import { analyzeStatementFile } from "../lib/statement-import";
 import { countImportDuplicates } from "../lib/transaction-intelligence";
@@ -52,11 +54,26 @@ export function TransactionsPage({ month, currency, transactions, transfers, cus
   const templateHref = `data:text/csv;charset=utf-8,${encodeURIComponent(`\uFEFF${TRANSACTION_CSV_TEMPLATE}`)}`;
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [scope, setScope] = useState<TransactionHistoryScope>("history");
-  const [selectedDay, setSelectedDay] = useState<Date>(() => isSameMonth(month, new Date()) ? new Date() : startOfMonth(month));
+  const today = useToday();
+  const [selectedDay, setSelectedDay] = useState<Date>(() => isSameMonth(month, parseISO(today)) ? parseISO(today) : startOfMonth(month));
   const [visibleCount, setVisibleCount] = useState(50);
   const selectedDayKey = format(selectedDay, "yyyy-MM-dd");
+  // When the date changes under an open tab, a day view sitting on "today" follows it to the new day (and month).
+  const followedToday = useRef(today);
+  useEffect(() => {
+    const previous = followedToday.current;
+    if (previous === today) return;
+    followedToday.current = today;
+    if (selectedDayKey !== previous) return;
+    const next = parseISO(today);
+    setSelectedDay(next);
+    if (!isSameMonth(month, next)) onMonthChange(next);
+  }, [month, onMonthChange, selectedDayKey, today]);
   // Read at tap time, so a tab left open overnight still adds to the real today.
   const activeOccurredOn = () => scope === "day" ? selectedDayKey : todayInput();
+  // A statement's rows are online payments, so Cash in hand is not a statement account; imports land only in your own accounts.
+  const ownerId = workspace?.ledger.profile.id;
+  const importAccounts = useMemo(() => onlinePaymentAccounts(paymentAccounts).filter((account) => !ownerId || account.userId === ownerId), [ownerId, paymentAccounts]);
   const filterCategories = useMemo(() => kind === "all" || kind === "transfer" ? [...CATEGORIES, ...customCategories] : [...allCategoriesFor(kind, customCategories)], [kind, customCategories]);
   useEffect(() => { if (category !== "all" && !filterCategories.some((item) => item.id === category)) setCategory("all"); }, [category, filterCategories]);
   useEffect(() => {
@@ -125,7 +142,7 @@ export function TransactionsPage({ month, currency, transactions, transfers, cus
   const hasActiveFilters = category !== "all" || Boolean(from || to || min || max) || paymentMode !== "all";
   const changeMonth = (nextMonth: Date) => {
     onMonthChange(nextMonth);
-    if (!isSameMonth(selectedDay, nextMonth)) setSelectedDay(isSameMonth(nextMonth, new Date()) ? new Date() : startOfMonth(nextMonth));
+    if (!isSameMonth(selectedDay, nextMonth)) setSelectedDay(isSameMonth(nextMonth, parseISO(today)) ? parseISO(today) : startOfMonth(nextMonth));
   };
   const selectDay = (value: string | null) => {
     if (!value) return;
@@ -135,7 +152,7 @@ export function TransactionsPage({ month, currency, transactions, transfers, cus
   };
 
   return <div className="page list-page">
-    <header className="page-header"><div><span className="eyebrow">Your ledger</span><h1>Transactions</h1><p>Income, expenses, and transfers between your accounts, in one timeline.</p></div><div className="transaction-actions"><div className="header-actions"><input ref={fileRef} className="visually-hidden" type="file" accept=".csv,.txt,.pdf,text/csv,text/plain,application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ""; if (file) void readFile(file); }} /><button className="secondary-button receipt-scan-trigger" onClick={() => workspace?.openReceiptScan()}><Camera size={18} />Scan receipt <span>AI</span></button><button className="secondary-button sms-capture-trigger" onClick={() => workspace?.openSms()}><ChatText size={18} />Paste bank SMS</button><button id="csv-import-trigger" className="secondary-button csv-import-trigger" disabled={analyzingImport} onClick={() => fileRef.current?.click()}>{analyzingImport ? <ButtonSpinner /> : <UploadSimple size={18} />}{analyzingImport ? "Reading statement…" : "Import statement"}</button><button className="primary-button" onClick={() => onAdd(activeOccurredOn())}><Plus size={18} />Add transaction</button></div><div className="csv-template-help"><span>CSV, PDF, image, or text · always review before import</span><a href={templateHref} download="transaction-import-template.csv"><DownloadSimple size={14} />Download CSV template</a></div></div></header>
+    <header className="page-header"><div><span className="eyebrow">Your ledger</span><h1>Transactions</h1><p>Income, expenses, and transfers between your accounts, in one timeline.</p></div><div className="transaction-actions"><div className="header-actions"><input ref={fileRef} className="visually-hidden" type="file" accept=".csv,.txt,.pdf,text/csv,text/plain,application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ""; if (file) void readFile(file); }} /><button className="secondary-button receipt-scan-trigger" onClick={() => workspace?.openReceiptScan(activeOccurredOn())}><Camera size={18} />Scan receipt <span>AI</span></button><button className="secondary-button sms-capture-trigger" onClick={() => workspace?.openSms()}><ChatText size={18} />Paste bank SMS</button><button id="csv-import-trigger" className="secondary-button csv-import-trigger" disabled={analyzingImport} onClick={() => fileRef.current?.click()}>{analyzingImport ? <ButtonSpinner /> : <UploadSimple size={18} />}{analyzingImport ? "Reading statement…" : "Import statement"}</button><button className="primary-button" onClick={() => onAdd(activeOccurredOn())}><Plus size={18} />Add transaction</button></div><div className="csv-template-help"><span>CSV, PDF, image, or text · always review before import</span><a href={templateHref} download="transaction-import-template.csv"><DownloadSimple size={14} />Download CSV template</a></div></div></header>
     {importJobs.length > 0 && <section className="import-progress-stack" aria-label="CSV import progress" aria-live="polite">{importJobs.map((job) => {
       const percent = job.totalRows ? Math.round(job.processedRows / job.totalRows * 100) : 0;
       const completed = job.status === "completed";
@@ -170,13 +187,13 @@ export function TransactionsPage({ month, currency, transactions, transfers, cus
         {importErrors.length > 0 && <div className="import-errors"><strong>Import needs attention</strong>{importErrors.slice(0, 5).map((error) => <span key={error}>{error}</span>)}</div>}
         {importWarnings.length > 0 && <div className="import-warnings"><strong>Review these extraction notes</strong>{importWarnings.slice(0, 8).map((warning) => <span key={warning}>{warning}</span>)}</div>}
         {possibleImportDuplicates > 0 && <div className="import-warnings duplicate"><strong><WarningCircle size={16} />{possibleImportDuplicates} possible {possibleImportDuplicates === 1 ? "duplicate" : "duplicates"}</strong><span>Matching existing or repeated rows are still included. Review them before importing.</span></div>}
-        {importSource?.kind === "statement" && paymentAccounts.length > 0 && <Select label="Statement account" description="Optional. Assign all extracted rows to one tracked account." placeholder="Leave as cash / untracked" value={importAccountId || null} data={paymentAccounts.map((account) => ({ value: account.id, label: account.label || account.provider }))} onChange={chooseImportAccount} clearable searchable disabled={importing} />}
+        {importSource?.kind === "statement" && importAccounts.length > 0 && <Select label="Statement account" description="Optional. Assign all extracted rows to one tracked account." placeholder="Leave as cash / untracked" value={importAccountId || null} data={importAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))} onChange={chooseImportAccount} clearable searchable disabled={importing} />}
         {newImportCategories.length > 0 && <div className="import-new-categories"><div><strong>{newImportCategories.length} new {newImportCategories.length === 1 ? "category" : "categories"}</strong><span>Choose an icon now. They will be saved with the valid rows.</span></div>{newImportCategories.map((category) => <div key={category.key}><span><strong>{category.name}</strong><small>{category.kind}</small></span><CategoryIconPicker legend={`Icon for ${category.name}`} value={category.icon} disabled={importing} onChange={(icon) => setNewImportCategories((current) => current.map((item) => item.key === category.key ? { ...item, icon } : item))} /></div>)}</div>}
         {newImportSubcategories.length > 0 && <div className="import-new-categories"><div><strong>{newImportSubcategories.length} new {newImportSubcategories.length === 1 ? "subcategory" : "subcategories"}</strong><span>These will remain available beneath their parent categories after import.</span></div>{newImportSubcategories.map((subcategory) => <div key={subcategory.key}><span><strong>{subcategory.name}</strong><small>{newImportCategories.find((category) => category.key === subcategory.category)?.name ?? getCategory(subcategory.category, customCategories).label}</small></span><CategoryIconPicker legend={`Icon for ${subcategory.name}`} value={subcategory.icon} disabled={importing} onChange={(icon) => setNewImportSubcategories((current) => current.map((item) => item.key === subcategory.key ? { ...item, icon } : item))} /></div>)}</div>}
         {importSource?.kind === "statement" ? <div className="statement-review-list" aria-label="Editable extracted statement rows">{preview.map((row, index) => <article key={`${row.occurredOn}-${index}`}>
           <DatePickerInput label="Date" value={row.occurredOn} onChange={(value) => value && updatePreviewRow(index, { occurredOn: value })} valueFormat="MMM D, YYYY" firstDayOfWeek={0} required disabled={importing} />
           <Select label="Type" value={row.kind} data={[{ value: "expense", label: "Expense" }, { value: "income", label: "Income" }]} onChange={(value) => { if (!value) return; const nextKind = value as TransactionKind; updatePreviewRow(index, { kind: nextKind, category: allCategoriesFor(nextKind, customCategories)[0].id, subcategory: "" }); }} allowDeselect={false} disabled={importing} />
-          <Select label="Category" value={row.category} data={allCategoriesFor(row.kind, customCategories).map((item) => ({ value: item.id, label: item.label }))} onChange={(value) => value && updatePreviewRow(index, { category: value, subcategory: "" })} searchable allowDeselect={false} disabled={importing} />
+          <Select label="Category" value={row.category} data={pickerCategoriesFor(row.kind, customCategories).map((item) => ({ value: item.id, label: item.label }))} onChange={(value) => value && updatePreviewRow(index, { category: value, subcategory: "" })} searchable allowDeselect={false} disabled={importing} />
           <NumberInput label={`Amount in ${currency}`} value={row.amount} onChange={(value) => updatePreviewRow(index, { amount: String(value) })} min={0.01} thousandSeparator="," decimalScale={2} disabled={importing} />
           <TextInput label="Description" value={row.note} onChange={(event) => updatePreviewRow(index, { note: event.currentTarget.value.slice(0, 80) })} maxLength={80} disabled={importing} />
           <button type="button" className="icon-button danger" disabled={importing} onClick={() => setPreview((current) => current?.filter((_, rowIndex) => rowIndex !== index) ?? null)} aria-label={`Remove statement row ${index + 1}`}><X size={16} /></button>

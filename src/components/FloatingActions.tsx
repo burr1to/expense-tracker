@@ -2,17 +2,20 @@
 
 import { DotsThree, X } from "@phosphor-icons/react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { reminderBadgeText } from "../lib/reminder-badge";
+import { useBackToClose } from "../lib/use-back-to-close";
 
 /**
  * The top-right quick actions. On wide screens they sit in a row; on phones they fold behind a
  * single "…" button and pop out to its left when opened, so they stop covering page content.
  */
-export function FloatingActions({ children, closeSignal }: { children: ReactNode; closeSignal?: unknown }) {
+export function FloatingActions({ children, closeSignal, badgeCount = 0 }: { children: ReactNode; closeSignal?: unknown; /** Urgent reminders, shown on the folded "…" button so they are never hidden on phones. */ badgeCount?: number }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => { setOpen(false); }, [closeSignal]);
+  useBackToClose(open, () => setOpen(false));
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
@@ -42,13 +45,14 @@ export function FloatingActions({ children, closeSignal }: { children: ReactNode
         className="floating-actions-toggle"
         aria-expanded={open}
         aria-controls="floating-actions-items"
-        aria-label={open ? "Hide quick actions" : "Show quick actions"}
+        aria-label={open ? "Hide quick actions" : badgeCount > 0 ? `Show quick actions, ${badgeCount} urgent ${badgeCount === 1 ? "reminder" : "reminders"}` : "Show quick actions"}
         onClick={() => setOpen((value) => !value)}
       >
         <span className="t-icon-swap" data-state={open ? "b" : "a"} aria-hidden="true">
           <span className="t-icon" data-icon="a"><DotsThree size={22} weight="bold" /></span>
           <span className="t-icon" data-icon="b"><X size={18} weight="bold" /></span>
         </span>
+        {badgeCount > 0 && !open && <span className="floating-actions-badge" aria-hidden="true">{reminderBadgeText(badgeCount)}</span>}
       </button>
     </div>
   );

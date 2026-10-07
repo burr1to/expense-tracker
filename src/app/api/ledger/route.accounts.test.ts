@@ -103,6 +103,8 @@ describe("saveTransfer", () => {
     expect(response.status).toBe(400);
     expect((await response.json()).error).toBe("Both transfer accounts must belong to you.");
     expect(mocks.db.accountTransfer.create).not.toHaveBeenCalled();
+    // Another person's reconciliation dates are never looked up for them.
+    expect(mocks.db.accountReconciliation.findMany).not.toHaveBeenCalled();
   });
 
   it("edits a transfer by id and logs what changed", async () => {

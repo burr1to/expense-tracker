@@ -107,6 +107,39 @@ describe("confirmRecurring with adjustments", () => {
     expect(mocks.tx.transaction.create).toHaveBeenCalledWith({ data: expect.objectContaining({ amountMinor: 250000, occurredOn: day("2026-09-07"), paymentMode: "cash", paymentAccountId: null }) });
   });
 
+  it("records a schedule linked to Cash in hand as a cash entry without an account, like the confirm sheet", async () => {
+    mocks.tx.recurringEntry.findFirstOrThrow.mockResolvedValueOnce(electricity({ paymentAccountId: "cash-account" }));
+    mocks.tx.paymentAccount.findFirstOrThrow.mockResolvedValueOnce({ id: "cash-account", userId: "user-1", type: "cash" });
+
+    const response = await POST(action("confirmRecurring", { dueOn: "2026-09-07" }, "recurring-1"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.tx.paymentAccount.findFirstOrThrow).toHaveBeenCalledTimes(1);
+    expect(mocks.tx.paymentAccount.findFirstOrThrow).toHaveBeenCalledWith({ where: { id: "cash-account", userId: "user-1" } });
+    expect(mocks.tx.transaction.create).toHaveBeenCalledWith({ data: expect.objectContaining({ amountMinor: 250000, occurredOn: day("2026-09-07"), paymentMode: "cash", paymentAccountId: null }) });
+  });
+
+  it("records a schedule linked to an online account in that account when nothing is adjusted", async () => {
+    mocks.tx.recurringEntry.findFirstOrThrow.mockResolvedValueOnce(electricity());
+    mocks.tx.paymentAccount.findFirstOrThrow.mockResolvedValueOnce({ id: "account-1", userId: "user-1", type: "esewa" });
+
+    const response = await POST(action("confirmRecurring", { dueOn: "2026-09-07" }, "recurring-1"));
+
+    expect(response.status).toBe(200);
+    expect(mocks.tx.paymentAccount.findFirstOrThrow).toHaveBeenCalledTimes(1);
+    expect(mocks.tx.transaction.create).toHaveBeenCalledWith({ data: expect.objectContaining({ paymentMode: "online", paymentAccountId: "account-1" }) });
+  });
+
+  it("refuses a default confirm whose linked account is not the user's", async () => {
+    mocks.tx.recurringEntry.findFirstOrThrow.mockResolvedValueOnce(electricity());
+    mocks.tx.paymentAccount.findFirstOrThrow.mockRejectedValueOnce(new Error("No PaymentAccount found"));
+
+    const response = await POST(action("confirmRecurring", { dueOn: "2026-09-07" }, "recurring-1"));
+
+    expect(response.status).toBe(400);
+    expect(mocks.tx.transaction.create).not.toHaveBeenCalled();
+  });
+
   it("refuses an occurrence that was already recorded or skipped elsewhere", async () => {
     mocks.tx.recurringEntry.findFirstOrThrow.mockResolvedValueOnce(electricity({ nextDueOn: day("2026-10-07") }));
 

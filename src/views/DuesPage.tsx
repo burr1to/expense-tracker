@@ -2,7 +2,7 @@ import { ArrowCounterClockwise, ArrowSquareOut, CalendarBlank, CaretDown, ChatCi
 import { Autocomplete, NumberInput, SegmentedControl, Select, TextInput, Textarea } from "@mantine/core";
 import { addDays, format, parseISO } from "date-fns";
 import { formatLedgerDate, formatLedgerMonth, todayInput } from "../lib/dates";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { SlidingTabs } from "../components/SlidingTabs";
 import { EmptyState } from "../components/EmptyState";
@@ -89,8 +89,13 @@ export function DuesPage({ currency, items, customCategories, transactions, paym
     return { openCount, toReceive, toPay };
   }, [items]);
   const focusedItem = items.find((item) => item.id === focusedId);
+  // Each link (a bell tap, a search hit) moves to its due once. After that the tabs and scroll are the user's again,
+  // so settling the due, switching tabs or a ledger refresh never pulls the page back to it.
+  const focusRequest = focusedItem ? `${focusedItem.id}:${focusedAction ?? ""}` : null;
+  const handledFocus = useRef<string | null>(null);
   useEffect(() => {
-    if (!focusedItem) return;
+    if (!focusedItem || !focusRequest) { handledFocus.current = null; return; }
+    if (handledFocus.current === focusRequest) return;
     const nextTab: DuesTab = focusedItem.status === "completed"
       ? "settled"
       : focusedItem.kind === "lent" || focusedItem.kind === "borrowed"
@@ -101,12 +106,13 @@ export function DuesPage({ currency, items, customCategories, transactions, paym
       return;
     }
     const frame = window.requestAnimationFrame(() => {
+      handledFocus.current = focusRequest;
       const node = document.getElementById(`due-${focusedItem.id}`);
       node?.scrollIntoView({ behavior: "smooth", block: "center" });
       node?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [focusedItem, tab]);
+  }, [focusedItem, focusRequest, tab]);
   return <div className="page dues-page">
     <header className="page-header"><div><span className="eyebrow">Promises your money needs to keep</span><h1>Dues</h1><p>Remember upcoming payments and keep track of money between people.</p></div><button className="primary-button" onClick={() => showForm && !editing && newKind === dueKindForTab(tab) ? closeForm() : addDue()}><Plus size={18} />Add due</button></header>
     <section className="dues-summary"><div><span>Open items</span><strong>{openSummary.openCount}</strong></div><div><span>To receive</span><strong className="income">{formatMoney(openSummary.toReceive, currency)}</strong></div><div><span>To pay</span><strong className="expense">{formatMoney(openSummary.toPay, currency)}</strong></div></section>
@@ -164,7 +170,7 @@ function DueForm({ item, initialKind, currency, customCategories, calendarSystem
   const [kind, setKind] = useState<DueKind>(item?.kind ?? initialKind); const [title, setTitle] = useState(item?.title ?? ""); const [person, setPerson] = useState(item?.person ?? ""); const [amount, setAmount] = useState<string | number>(item ? item.amountMinor / 100 : "");
   const [category, setCategory] = useState(() => item?.category ?? dueCategoryForKind(initialKind, "other", customCategories)); const [occurredOn, setOccurredOn] = useState(item?.occurredOn ?? today()); const [dueOn, setDueOn] = useState(item?.dueOn ?? dueDefault()); const [remindOn, setRemindOn] = useState(item ? item.remindOn ?? "" : reminderDefault()); const [note, setNote] = useState(item?.note ?? ""); const [annualRate, setAnnualRate] = useState<string | number>(item?.annualRatePercent ?? ""); const [saving, setSaving] = useState(false); const [error, setError] = useState<string | null>(null);
   // Where lent money left from or borrowed money arrived in. An edited loan without a recorded movement starts at "none" so saving never records it twice.
-  const initialMovement = item ? opening ? opening.paymentAccountId ?? "cash" : "none" : "cash";
+  const initialMovement = item ? opening ? movementAccountOf(opening) : "none" : "cash";
   const [movement, setMovement] = useState(initialMovement);
   const [receipt, setReceipt] = useState<ReceiptUpload | undefined>();
   const [receiptUploading, setReceiptUploading] = useState(false);
@@ -195,10 +201,15 @@ function DueForm({ item, initialKind, currency, customCategories, calendarSystem
   </form></aside>;
 }
 
+// The picker value for where a movement went: Cash for cash entries and anything booked to Cash in hand, which the pickers offer as Cash.
+const movementAccountOf = (transaction: LedgerTransaction) => transaction.paymentAccountId && transaction.paymentAccount?.type !== "cash" ? transaction.paymentAccountId : "cash";
 const accountLabelOf = (transaction: LedgerTransaction) => transaction.paymentAccount ? paymentAccountLabel(transaction.paymentAccount) : transaction.paymentAccountId ? "Removed account" : "Cash";
 
 function DueCard({ item, currency, customCategories, calendarSystem, accountOptions, opening, transactionsById, focused, startRepayment, onEdit, onDelete, onRecordPayment, onComplete, onUndoPayment }: { item: DueItem; currency: CurrencyCode; customCategories: CustomCategory[]; calendarSystem: CalendarSystem; accountOptions: AccountOption[]; opening?: LedgerTransaction; transactionsById: Map<string, LedgerTransaction>; focused: boolean; startRepayment: boolean; onEdit: () => void; onDelete: (id: string) => Promise<void>; onRecordPayment: Props["onRecordPayment"]; onComplete: Props["onComplete"]; onUndoPayment: Props["onUndoPayment"] }) {
   const [panel, setPanel] = useState<"settle" | "remind" | null>(startRepayment && item.status === "open" ? "settle" : null); const [showHistory, setShowHistory] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null);
+  // A bell tap while this card is already on screen asks for the confirm step too, once per tap (an Undo that reopens the due does not).
+  const repayAsked = useRef(startRepayment);
+  useEffect(() => { if (startRepayment && !repayAsked.current && item.status === "open") setPanel("settle"); repayAsked.current = startRepayment; }, [startRepayment, item.status]);
   const isDebt = isDebtKind(item.kind); const remaining = dueRemaining(item); const paid = duePaid(item); const overdue = item.status === "open" && item.dueOn < today();
   const canRemind = item.status === "open" && (item.kind === "lent" || item.kind === "receivable") && remaining > 0;
   const history = duePaymentHistory(item); const latest = latestDuePayment(item);
@@ -219,7 +230,7 @@ function DueCard({ item, currency, customCategories, calendarSystem, accountOpti
       {item.note && <p>{item.note}</p>}
       {item.receipt && <a className="receipt-link" href={`/api/receipts/${item.receipt.id}`} target="_blank" rel="noreferrer"><Paperclip size={14} />{item.receipt.name}<ArrowSquareOut size={13} /></a>}
       {item.status === "open" && <div className="due-actions"><button type="button" className="primary-button small" disabled={busy} aria-expanded={panel === "settle"} onClick={() => togglePanel("settle")}>{isDebt ? <HandCoins size={16} /> : <Check size={16} />}{isDebt ? "Record repayment" : item.kind === "payment" ? "Mark paid" : "Mark received"}</button>{!isDebt && <button type="button" className="secondary-button small" disabled={busy} onClick={() => void completeOnly()} title="Settle it without adding anything to the ledger">{busy && panel !== "settle" ? <ButtonSpinner /> : null}Complete only</button>}{canRemind && <button type="button" className="secondary-button small" disabled={busy} aria-expanded={panel === "remind"} onClick={() => togglePanel("remind")}><ChatCircleText size={16} />{item.person.trim() ? `Remind ${item.person.trim()}` : "Send a reminder"}</button>}<button type="button" className="icon-button" disabled={busy} onClick={onEdit} aria-label={`Edit ${item.title}`}><PencilSimple size={16} /></button><button type="button" className="icon-button danger" disabled={busy} onClick={() => void remove()} aria-label={`Delete ${item.title}`}><Trash size={16} /></button></div>}
-      {panel === "settle" && item.status === "open" && <SettleForm item={item} currency={currency} calendarSystem={calendarSystem} accountOptions={accountOptions} defaultAccount={opening?.paymentAccountId ?? "cash"} onRecordPayment={onRecordPayment} onComplete={onComplete} onDone={() => setPanel(null)} />}
+      {panel === "settle" && item.status === "open" && <SettleForm item={item} currency={currency} calendarSystem={calendarSystem} accountOptions={accountOptions} defaultAccount={opening ? movementAccountOf(opening) : "cash"} onRecordPayment={onRecordPayment} onComplete={onComplete} onDone={() => setPanel(null)} />}
       {panel === "remind" && canRemind && <ReminderPanel item={item} currency={currency} calendarSystem={calendarSystem} />}
       {history.length > 0 && <div className="due-history">
         <button type="button" className="text-button due-history-toggle" aria-expanded={showHistory} onClick={() => setShowHistory((value) => !value)}><CaretDown size={14} aria-hidden />History · {history.length} {history.length === 1 ? "payment" : "payments"}</button>

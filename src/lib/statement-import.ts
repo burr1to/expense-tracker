@@ -1,5 +1,6 @@
 import { STATEMENT_MAX_IMAGES, statementAnalysisRequestSchema } from "./statement-analysis";
 import { prepareReceiptPhoto } from "./receipts";
+import { readResponse, responseMessage, toUserMessage } from "./user-messages";
 
 export interface StatementSourcePayload {
   name: string;
@@ -76,8 +77,9 @@ export async function prepareStatementSource(file: File): Promise<StatementSourc
 export async function analyzeStatementFile(file: File) {
   const source = await prepareStatementSource(file);
   const payload = statementAnalysisRequestSchema.parse(source);
-  const response = await fetch("/api/imports/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-  const body = await response.json() as { analysis?: { rows: import("../types").TransactionDraft[]; warnings: string[] }; error?: string };
-  if (!response.ok || !body.analysis) throw new Error(body.error ?? "Could not analyze this statement.");
-  return { ...body.analysis, warnings: [...source.warnings, ...body.analysis.warnings] };
+  const response = await fetch("/api/imports/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch((caught: unknown) => { throw new Error(toUserMessage(caught)); });
+  const parsed = await readResponse<{ analysis?: { rows: import("../types").TransactionDraft[]; warnings: string[] }; error?: string }>(response);
+  const analysis = parsed.body?.analysis;
+  if (!response.ok || !analysis) throw new Error(responseMessage(parsed, "Could not analyze this statement."));
+  return { ...analysis, warnings: [...source.warnings, ...analysis.warnings] };
 }

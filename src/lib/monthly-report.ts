@@ -5,6 +5,7 @@ import {
   monthLabel,
   periodBounds,
   toStorageKey,
+  todayInAppZone,
 } from "./period";
 import { countsAsIncomeOrSpending } from "./categories";
 import { ALL_SPENDING_CATEGORY, ALL_SPENDING_LABEL } from "./budgets";
@@ -125,9 +126,25 @@ export function isCompletedReportMonth(monthKey: string, now = new Date()) {
   return MONTH_KEY.test(monthKey) && monthKey < currentMonthKey(now);
 }
 
-export function monthlyReportNotice(now = new Date()) {
+/** How many days into a month the bell keeps offering last month's report. */
+export const MONTHLY_REPORT_NOTICE_DAYS = 7;
+
+/** localStorage key that remembers a dismissed or downloaded report notice, per user and month. */
+export function monthlyReportNoticeStorageKey(userId: string, monthKey: string) {
+  return `syr:monthly-report-notice:${userId}:${monthKey}`;
+}
+
+/**
+ * "Last month's report is ready": only during the first week of a Kathmandu
+ * month, and only when the viewer logged something last month (the PDF covers
+ * their own entries). Dismissal is remembered with `monthlyReportNoticeStorageKey`.
+ */
+export function monthlyReportNotice(transactions: readonly { occurredOn: string; userId?: string }[], { now = new Date(), viewerId }: { now?: Date; viewerId?: string } = {}) {
+  if (Number(todayInAppZone(now).slice(8, 10)) > MONTHLY_REPORT_NOTICE_DAYS) return null;
   const monthKey = previousMonthKey(now);
-  return { monthKey, monthLabel: formatMonthLabel(monthKey), href: `/api/reports/monthly?month=${monthKey}` };
+  const { start, endExclusive } = periodBounds(monthKey);
+  if (!transactions.some((item) => (!viewerId || item.userId === viewerId) && item.occurredOn >= start && item.occurredOn < endExclusive)) return null;
+  return { monthKey, monthLabel: formatMonthLabel(monthKey), href: `/api/reports/monthly?month=${monthKey}`, storageKey: viewerId ? monthlyReportNoticeStorageKey(viewerId, monthKey) : null };
 }
 
 export function reportMonthBounds(monthKey: string) {

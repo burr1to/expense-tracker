@@ -20,16 +20,6 @@ export default function TransactionsRoute() {
     completeOnboardingStep("import");
     return job;
   };
-  const saveTransaction = async (...args: Parameters<typeof ledger.saveTransaction>) => {
-    const id = await ledger.saveTransaction(...args);
-    completeOnboardingStep("transaction");
-    return id;
-  };
-  const saveReceiptSplit = async (...args: Parameters<typeof ledger.saveReceiptSplit>) => {
-    const count = await ledger.saveReceiptSplit(...args);
-    completeOnboardingStep("transaction");
-    return count;
-  };
 
   return <TransactionsPage
     month={month}
@@ -49,8 +39,5 @@ export default function TransactionsRoute() {
     onImport={importPastTransactions}
     importJobs={ledger.importJobs}
     onDismissImportJob={ledger.dismissImportJob}
-    onSaveReceiptSplit={saveReceiptSplit}
-    learning={ledger.profile.learning}
-    onSaveTransaction={saveTransaction}
   />;
 }

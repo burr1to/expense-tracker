@@ -55,7 +55,8 @@ export function transactionSearchParts(item: LedgerTransaction, categoryLabel: s
 function accountLabel(accounts: readonly PaymentAccount[], id: string) {
   const account = accounts.find((item) => item.id === id);
   if (!account) return "Account";
-  return account.label || account.provider;
+  // The nickname keeps a transfer title short; without one, the type's name (IME Pay, never "ime_pay").
+  return account.label || paymentAccountLabel(account);
 }
 
 export function searchLedger(query: string, input: {

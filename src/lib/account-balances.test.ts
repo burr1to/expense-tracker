@@ -185,11 +185,20 @@ describe("transferRemovalEffects", () => {
       transfer({ id: "back", fromAccountId: "khalti", toAccountId: "bank", amountMinor: 3_000 }),
       transfer({ id: "unrelated", fromAccountId: "bank", toAccountId: "other", amountMinor: 100 }),
     ]);
-    expect(effects).toEqual([{ accountId: "bank", transferCount: 2, changeMinor: 15_000 }]);
+    expect(effects).toEqual([{ accountId: "bank", transferCount: 2, changeMinor: 15_000, countedCount: 2 }]);
+  });
+
+  it("tells transfers that cancel out apart from transfers the other balance never counted", () => {
+    const bank = account({ id: "bank", balanceAsOf: "2026-07-01", balanceRecordedAt: "2026-07-01T00:00:00.000Z" });
+    const effects = transferRemovalEffects("khalti", [bank], [
+      transfer({ id: "load", fromAccountId: "bank", toAccountId: "khalti", amountMinor: 500 }),
+      transfer({ id: "back", fromAccountId: "khalti", toAccountId: "bank", amountMinor: 500 }),
+    ]);
+    expect(effects).toEqual([{ accountId: "bank", transferCount: 2, changeMinor: 0, countedCount: 2 }]);
   });
 
   it("ignores transfers already inside the other account's confirmed balance", () => {
     const bank = account({ id: "bank", balanceAsOf: "2026-08-01", balanceRecordedAt: "2026-08-01T00:00:00.000Z" });
-    expect(transferRemovalEffects("khalti", [bank], [transfer({ fromAccountId: "bank", toAccountId: "khalti", amountMinor: 500 })])).toEqual([{ accountId: "bank", transferCount: 1, changeMinor: 0 }]);
+    expect(transferRemovalEffects("khalti", [bank], [transfer({ fromAccountId: "bank", toAccountId: "khalti", amountMinor: 500 })])).toEqual([{ accountId: "bank", transferCount: 1, changeMinor: 0, countedCount: 0 }]);
   });
 });

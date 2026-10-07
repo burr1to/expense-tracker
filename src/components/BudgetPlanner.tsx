@@ -12,11 +12,12 @@ import { minorToMajorInput } from "../lib/allocation-calculator";
 import { ALL_SPENDING_CATEGORY, ALL_SPENDING_LABEL, budgetAllowanceText, buildBudgetCarryForward, isAllSpendingBudget, type BudgetCarryForward } from "../lib/budgets";
 import { getCategory, spendingCategoriesFor } from "../lib/categories";
 import { formatMoney, majorToMinor } from "../lib/currency";
-import { formatLedgerMonth, monthKey, todayInput } from "../lib/dates";
+import { formatLedgerMonth, monthKey } from "../lib/dates";
 import { compareFestivalSpending, expensesBetween, festivalBounds, festivalLabel, festivalMonthLabel, festivalSeasonsFrom, parseFestivalPeriodKey, type UpcomingFestival } from "../lib/festivals";
 import { averagingWindowLabel, calculateCategoryMonthlyAverages } from "../lib/financial-calculators";
 import { transactionCountsTowardBudget } from "../lib/household";
 import { calculateBudgetPacing, calculatePeriodBudgetPacing, calculateUnbudgetedSpending, type BudgetPacing } from "../lib/planning-insights";
+import { useToday } from "../lib/use-today";
 import type { Budget, CalendarSystem, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, RecurringEntry } from "../types";
 
 interface BudgetPlannerProps {
@@ -52,7 +53,7 @@ export function BudgetPlanner({ month, calendarSystem, currency, transactions, b
   const { profile, saveBudgets } = useLedger();
   const searchParams = useSearchParams();
   const focusFestival = searchParams.get("festival");
-  const today = todayInput();
+  const today = useToday();
   const selectedKey = monthKey(month);
   const [category, setCategory] = useState("food"); const [amount, setAmount] = useState(""); const [sharedBudget, setSharedBudget] = useState(false); const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false); const [preview, setPreview] = useState<{ category: string; amount: string } | null>(null); const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -61,7 +62,8 @@ export function BudgetPlanner({ month, calendarSystem, currency, transactions, b
   const editing = editingBudget && editingBudget.monthKey === selectedKey ? editingBudget : null;
 
   const currentBudgets = useMemo(() => budgets.filter((item) => item.monthKey === selectedKey), [budgets, selectedKey]);
-  const pacing = useMemo(() => calculateBudgetPacing(currentBudgets, transactions, recurringEntries, dueItems, month), [currentBudgets, dueItems, month, recurringEntries, transactions]);
+  // Paced against Kathmandu's today, so days left and the daily allowance roll over at midnight there.
+  const pacing = useMemo(() => calculateBudgetPacing(currentBudgets, transactions, recurringEntries, dueItems, month, parseISO(today)), [currentBudgets, dueItems, month, recurringEntries, today, transactions]);
   const totalPacing = pacing.filter((item) => isAllSpendingBudget(item.budget));
   const categoryPacing = pacing.filter((item) => !isAllSpendingBudget(item.budget));
   const alerts = pacing.filter((item) => item.tone !== "healthy");
@@ -117,7 +119,7 @@ export function BudgetPlanner({ month, calendarSystem, currency, transactions, b
       {alerts.length > 0 && <div className="budget-alert-list" role="status" aria-label="Budget alerts">{alerts.map((item) => <div className={`budget-alert ${item.tone}`} key={item.budget.id}><WarningCircle size={17} weight="fill" /><span><strong>{budgetLook(item.budget.category, customCategories).label}: {item.alertTitle}</strong><small>{item.alertDetail}</small></span></div>)}</div>}
       {totalPacing.map((item) => { const look = budgetLook(item.budget.category, customCategories); return <BudgetPacingRow key={item.budget.id} item={item} label={look.label} color={look.color} icon={look.icon} currency={currency} allowance={budgetAllowanceText(item, currency)} busy={deletingId === item.budget.id} className="all-spending" actions={rowActions(item.budget, look.label, () => edit(item.budget))} />; })}
       {!totalPacing.length && currentBudgets.length > 0 && <div className="budget-total-prompt"><Wallet size={20} weight="duotone" /><div><strong>{ALL_SPENDING_LABEL}</strong><small>Add one overall limit to see what is left per day across everything you spend.</small></div><button type="button" className="secondary-button small" disabled={saving} onClick={() => startBudget(ALL_SPENDING_CATEGORY, roundUpMinor(averageTotalMinor, 100_000))}><Plus size={15} />Set a limit</button></div>}
-      {preview && previewLook && <div className="budget-row pending-preview" role="status">{previewLook.icon}<div><div><strong>{previewLook.label}</strong><span>{formatMoney(0, currency)} of {formatMoney(previewMinor(preview.amount), currency)}</span></div><div className="bar-track"><span style={{ width: "0%", backgroundColor: previewLook.color }} /></div><small className="pending-label"><ButtonSpinner />Adding budget…</small></div><span /></div>}
+      {preview && previewLook && <div className="budget-row pending-preview" role="status">{previewLook.icon}<div><div><strong>{previewLook.label}</strong><span className="budget-money">{formatMoney(0, currency)} of {formatMoney(previewMinor(preview.amount), currency)}</span></div><div className="bar-track"><span style={{ width: "0%", backgroundColor: previewLook.color }} /></div><small className="pending-label"><ButtonSpinner />Adding budget…</small></div><span /></div>}
       {categoryPacing.map((item) => { const look = budgetLook(item.budget.category, customCategories); return <BudgetPacingRow key={item.budget.id} item={item} label={look.label} color={look.color} icon={look.icon} currency={currency} busy={deletingId === item.budget.id} actions={rowActions(item.budget, look.label, () => edit(item.budget))} />; })}
       {categoryPacing.length > 0 && unbudgeted.totalMinor > 0 && <div className="budget-unbudgeted">
         <div><strong>Unbudgeted spending: <span className="budget-money">{formatMoney(unbudgeted.totalMinor, currency)}</span></strong><small>{unbudgeted.categories.slice(0, 3).map((item, index) => <span key={item.category}>{index ? " · " : ""}{getCategory(item.category, customCategories).label} <span className="budget-money">{formatMoney(item.totalMinor, currency)}</span></span>)}{unbudgeted.categories.length > 3 ? ` · +${unbudgeted.categories.length - 3} more` : ""}</small></div>
@@ -246,7 +248,7 @@ function FestivalBudgets({ focusFestival, today, month, currency, transactions, 
   if (!seasons.length && !rows.length) return null;
 
   return <section className="festival-budgets" id="festival-budgets" aria-labelledby="festival-budgets-heading">
-    <div className="section-heading"><div><span className="section-label">Festival seasons</span><h2 id="festival-budgets-heading">Festival budgets</h2></div>{!open && seasons.length > 0 && <button type="button" className="secondary-button small" onClick={() => openFor(seasons[0].periodKey)}><Confetti size={16} />Festival budget</button>}</div>
+    <div className="section-heading"><div><span className="section-label">Festival seasons</span><h2 id="festival-budgets-heading">Festival budgets</h2></div>{(!open || !season) && seasons.length > 0 && <button type="button" className="secondary-button small" onClick={() => openFor(seasons[0].periodKey)}><Confetti size={16} />Festival budget</button>}</div>
     {open && season && <form className="festival-budget-form" onSubmit={save} aria-busy={saving}>
       <Select label="Season" value={seasonKey} onChange={(value) => { if (value) { setSeasonKey(value); setAmountEdit(null); } }} data={seasons.map((item) => ({ value: item.periodKey, label: `${festivalLabel(item.festival, item.bsYear)} · ${item.daysAway === 0 ? "on now" : `from ${format(parseISO(item.bounds.start), "MMM d")}`}` }))} allowDeselect={false} disabled={saving} />
       <NumberInput label={`Limit for the season in ${currency}`} description={suggestedMinor > 0 ? <>Last year’s season: <span className="budget-money">{formatMoney(suggestedMinor, currency)}</span></> : "Nothing logged for last year’s season yet."} value={amount} onChange={(value) => setAmountEdit(String(value))} min={0} thousandSeparator="," decimalScale={2} required disabled={saving} />

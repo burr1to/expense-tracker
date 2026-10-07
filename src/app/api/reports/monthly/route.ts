@@ -10,9 +10,10 @@ import {
   type MonthlyReportTransaction,
 } from "../../../../lib/monthly-report";
 import { generateMonthlyReportPdf } from "../../../../lib/monthly-report-pdf";
+import { paymentAccountLabel } from "../../../../lib/payment-accounts";
 import { getPrisma } from "../../../../lib/prisma";
 import { recurrenceLabel } from "../../../../lib/recurrence";
-import type { CurrencyCode, RecurrenceUnit } from "../../../../types";
+import type { CurrencyCode, PaymentAccountType, RecurrenceUnit } from "../../../../types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -69,7 +70,7 @@ export async function GET(request: Request) {
     const occurredOn = dateOnly(item.occurredOn);
     return occurredOn >= start && occurredOn < endExclusive;
   });
-  const accountLabels = new Map(accounts.map((account) => [account.id, account.label || account.provider]));
+  const accountLabels = new Map(accounts.map((account) => [account.id, paymentAccountLabel({ type: account.type as PaymentAccountType, provider: account.provider, label: account.label })]));
 
   const report = buildMonthlyReport({
     monthKey,

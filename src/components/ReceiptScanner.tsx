@@ -3,7 +3,7 @@
 import { NumberInput, Select, TextInput } from "@mantine/core";
 import { Camera, Plus, Sparkle, Trash, WarningCircle, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { allCategoriesFor, getCategory, subcategoryOptionsFor } from "../lib/categories";
+import { getCategory, spendingCategoriesFor, subcategoryOptionsFor } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
 import { discardReceipt, prepareReceiptPhoto, uploadReceipt } from "../lib/receipts";
 import { analysisToDrafts, draftTotalMinor, type ReceiptAnalysis } from "../lib/receipt-analysis";
@@ -13,6 +13,7 @@ import { AnimatedOverlay } from "./AnimatedOverlay";
 import { LedgerDatePickerInput as DatePickerInput } from "./LedgerDatePickerInput";
 import { paymentAccountLabel } from "../lib/payment-accounts";
 import { FormError } from "./FormError";
+import { readResponse, responseMessage, toUserMessage } from "../lib/user-messages";
 
 interface ReceiptScannerProps {
   currency: CurrencyCode;
@@ -47,7 +48,8 @@ export function ReceiptScanner({ currency, fallbackOccurredOn, customCategories,
   const requestRef = useRef<AbortController | null>(null);
   const operationRef = useRef(0);
   const receiptRef = useRef<ReceiptUpload | null>(null);
-  const categories = useMemo(() => allCategoriesFor("expense", customCategories), [customCategories]);
+  // A receipt is spending: its splits never go to the loan category.
+  const categories = useMemo(() => spendingCategoriesFor("expense", customCategories), [customCategories]);
   const splitTotal = draftTotalMinor(drafts);
   const currencyMismatch = Boolean(analysis && analysis.currency !== "UNKNOWN" && analysis.currency !== currency);
   const everySplitIsPositive = drafts.every((draft) => {
@@ -94,9 +96,9 @@ export function ReceiptScanner({ currency, fallbackOccurredOn, customCategories,
       body: JSON.stringify({ receipt: uploaded, fallbackOccurredOn }),
       signal,
     });
-    const body = await response.json() as { analysis?: ReceiptAnalysis; error?: string };
-    if (!response.ok || !body.analysis) throw new Error(body.error ?? "Could not analyze this receipt.");
-    return body.analysis;
+    const parsed = await readResponse<{ analysis?: ReceiptAnalysis; error?: string }>(response);
+    if (!response.ok || !parsed.body?.analysis) throw new Error(responseMessage(parsed, "Could not analyze this receipt."));
+    return parsed.body.analysis;
   };
 
   const chooseFile = async (file: File) => {
@@ -128,7 +130,7 @@ export function ReceiptScanner({ currency, fallbackOccurredOn, customCategories,
     } catch (caught) {
       const cancelled = caught instanceof Error && caught.name === "AbortError";
       if (!cancelled && operation === operationRef.current) {
-        setError(caught instanceof Error ? caught.message : "Could not scan this receipt.");
+        setError(toUserMessage(caught, null, "Could not scan this receipt."));
         setStage("ready");
       }
       if (uploaded) {

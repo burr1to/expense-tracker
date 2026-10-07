@@ -1,12 +1,12 @@
 "use client";
 
 import { NumberInput, Select, TextInput } from "@mantine/core";
-import { ArrowsDownUp, ArrowsLeftRight, X } from "@phosphor-icons/react";
+import { ArrowsDownUp, ArrowsLeftRight, WarningCircle, X } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { majorToMinor } from "../lib/currency";
 import { formatLedgerDate, todayInput } from "../lib/dates";
-import { isCashAccount, paymentAccountLabel, transferAccountDefaults, type TransferAccounts } from "../lib/payment-accounts";
+import { findSimilarTransfer, isCashAccount, paymentAccountLabel, transferAccountDefaults, type TransferAccounts } from "../lib/payment-accounts";
 import type { AccountTransfer, AccountTransferDraft, CalendarSystem, CurrencyCode, PaymentAccount } from "../types";
 import { AnimatedOverlay } from "./AnimatedOverlay";
 import { ButtonSpinner } from "./ButtonSpinner";
@@ -67,6 +67,9 @@ function TransferForm({ request, currency, calendarSystem = "AD", accounts, tran
   const amountMinor = majorToMinor(String(amount ?? ""));
   const sameAccount = Boolean(route.fromAccountId && route.fromAccountId === route.toAccountId);
   const canSave = !saving && amountMinor > 0 && Boolean(route.fromAccountId && route.toAccountId) && !sameAccount && Boolean(occurredOn) && !(request.transferId && !editing);
+  const [saved, setSaved] = useState(false);
+  // Once saved, the closing sheet would otherwise find the transfer it just recorded.
+  const similar = saved || sameAccount ? null : findSimilarTransfer(transfers, { ...route, amountMinor, occurredOn }, editing?.id);
   const close = () => { if (!saving) onClose(); };
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -74,6 +77,7 @@ function TransferForm({ request, currency, calendarSystem = "AD", accounts, tran
     setSaving(true); onBusyChange(true); setError(null);
     try {
       await onSave({ ...route, amount: String(amount), occurredOn, note: note.trim(), clientRequestId }, editing?.id);
+      setSaved(true);
       if (!editing) rememberRoute(route);
       onClose();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not record the transfer."); }
@@ -100,6 +104,7 @@ function TransferForm({ request, currency, calendarSystem = "AD", accounts, tran
       </div>
       <TextInput label="Note" value={note} onChange={(event) => setNote(event.currentTarget.value)} placeholder="Optional, e.g. eSewa load" maxLength={240} disabled={saving} />
       <p className="field-hint transfer-sheet-hint"><ArrowsLeftRight size={14} aria-hidden /> {route.fromAccountId && route.toAccountId && !sameAccount ? `${label(route.fromAccountId)} goes down and ${label(route.toAccountId)} goes up by the same amount.` : "Moving money is not counted as income or spending."}</p>
+      {similar && <p className="field-hint transfer-sheet-similar" role="status"><WarningCircle size={14} aria-hidden /> A transfer of this amount from {label(similar.fromAccountId)} to {label(similar.toAccountId)} is already saved for {formatLedgerDate(similar.occurredOn, calendarSystem)}. Save this only if you moved the money twice.</p>}
       {!accounts.some(isCashAccount) && <p className="field-hint">Took cash from an ATM? <Link href="/accounts#add-account" onClick={onClose}>Add Cash in hand</Link> to record it here.</p>}
       <FormError message={error} />
       <div className="dialog-actions">

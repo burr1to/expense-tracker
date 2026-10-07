@@ -2,6 +2,7 @@
 
 import { FocusTrap } from "@mantine/core";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type TransitionEvent } from "react";
+import { useBackToClose } from "../lib/use-back-to-close";
 
 const activeOverlays: HTMLDivElement[] = [];
 let previousOverflow = "";
@@ -33,6 +34,12 @@ export function AnimatedOverlay({ open, children, className, dismissOnBackdrop =
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  // The phone back gesture closes the sheet like Escape does: not while it is busy saving.
+  // Sheets stay open when an overlay above them starts a page change, as they always have.
+  useBackToClose(open && Boolean(onClose), useCallback(() => {
+    if (containerRef.current?.querySelector('[aria-busy="true"]')) return;
+    void onCloseRef.current?.();
+  }, []), { leaveOnNavigate: false });
 
   useEffect(() => {
     const container = containerRef.current;

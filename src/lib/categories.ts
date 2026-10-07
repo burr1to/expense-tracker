@@ -37,6 +37,27 @@ export function spendingCategoriesFor(kind: "income" | "expense", custom: readon
   return allCategoriesFor(kind, custom).filter((category) => !isLoanCategory(category.id));
 }
 
+/** Categories for a manual entry picker: loans stay pickable but sit last, after custom categories, so they never lead the list. */
+export function pickerCategoriesFor(kind: "income" | "expense", custom: readonly CustomCategory[] = []): readonly CategoryDefinition[] {
+  const all = allCategoriesFor(kind, custom);
+  return [...all.filter((category) => !isLoanCategory(category.id)), ...all.filter((category) => isLoanCategory(category.id))];
+}
+
+export interface AiCategoryChoice { id: string; label: string; subcategories: string[] }
+
+/**
+ * The categories an AI reader (receipts, statements, bank SMS, learning) may choose from, with their subcategories.
+ * Loans are recorded from Dues, never guessed, so the loan category is left out. `kind` keeps only that kind's categories.
+ */
+export function aiCategoryChoices(custom: readonly { id: string; name: string; kind?: string }[], customSubcategories: readonly { categoryId: string; name: string }[], kind?: "income" | "expense"): AiCategoryChoice[] {
+  const fits = (categoryKind: string | undefined) => !kind || !categoryKind || categoryKind === kind || categoryKind === "both";
+  const extra = (categoryId: string) => customSubcategories.filter((item) => item.categoryId === categoryId).map((item) => item.name);
+  return [
+    ...CATEGORIES.filter((category) => fits(category.kind) && !isLoanCategory(category.id)).map((category) => ({ id: category.id, label: category.label, subcategories: [...(SUBCATEGORIES[category.id]?.options ?? []), ...extra(category.id)] })),
+    ...custom.filter((category) => fits(category.kind) && !isLoanCategory(category.id)).map((category) => ({ id: category.id, label: category.name, subcategories: extra(category.id) })),
+  ];
+}
+
 export function getCategory(category: TransactionCategory, custom: readonly CustomCategory[] = []): CategoryDefinition {
   return custom.find((item) => item.id === category) ?? CATEGORIES.find((item) => item.id === category) ?? { ...CATEGORIES[CATEGORIES.length - 1], label: category };
 }

@@ -40,9 +40,38 @@ describe("monthly report availability", () => {
   it("rolls over at the start of a Kathmandu calendar month", () => {
     const now = new Date("2026-07-31T18:15:00.000Z");
     expect(currentMonthKey(now)).toBe("2026-08");
-    expect(monthlyReportNotice(now)).toMatchObject({ monthKey: "2026-07", monthLabel: "July 2026" });
+    expect(monthlyReportNotice([{ occurredOn: "2026-07-31" }], { now })).toMatchObject({ monthKey: "2026-07", monthLabel: "July 2026" });
     expect(isCompletedReportMonth("2026-07", now)).toBe(true);
     expect(isCompletedReportMonth("2026-08", now)).toBe(false);
+  });
+});
+
+describe("monthly report notice", () => {
+  const julyEntries = [{ occurredOn: "2026-07-10", userId: "user-1" }];
+
+  it("is offered through the 7th of the Kathmandu month, then goes away", () => {
+    expect(monthlyReportNotice(julyEntries, { now: new Date("2026-08-07T12:00:00.000Z") })).toMatchObject({ monthKey: "2026-07", href: "/api/reports/monthly?month=2026-07" });
+    // 18:15 UTC on Aug 7 is already Aug 8 in Kathmandu.
+    expect(monthlyReportNotice(julyEntries, { now: new Date("2026-08-07T18:15:00.000Z") })).toBeNull();
+    expect(monthlyReportNotice(julyEntries, { now: new Date("2026-08-20T06:00:00.000Z") })).toBeNull();
+  });
+
+  it("needs something logged last month", () => {
+    const now = new Date("2026-08-02T06:00:00.000Z");
+    expect(monthlyReportNotice([], { now })).toBeNull();
+    expect(monthlyReportNotice([{ occurredOn: "2026-06-30" }, { occurredOn: "2026-08-01" }], { now })).toBeNull();
+    expect(monthlyReportNotice([{ occurredOn: "2026-07-01" }], { now })).not.toBeNull();
+  });
+
+  it("counts only the viewer's own entries and names a per-user, per-month storage key", () => {
+    const now = new Date("2026-08-02T06:00:00.000Z");
+    expect(monthlyReportNotice([{ occurredOn: "2026-07-10", userId: "partner" }], { now, viewerId: "user-1" })).toBeNull();
+    expect(monthlyReportNotice(julyEntries, { now, viewerId: "user-1" })?.storageKey).toBe("syr:monthly-report-notice:user-1:2026-07");
+    expect(monthlyReportNotice(julyEntries, { now })?.storageKey).toBeNull();
+  });
+
+  it("rolls over the year in January", () => {
+    expect(monthlyReportNotice([{ occurredOn: "2026-12-31" }], { now: new Date("2027-01-03T06:00:00.000Z") })).toMatchObject({ monthKey: "2026-12", monthLabel: "December 2026" });
   });
 });
 

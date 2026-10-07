@@ -2869,7 +2869,7 @@ body[data-hide-amounts="true"] .payment-account-money::after { content: "*****";
 .festival-progress { color: var(--muted); font-size: var(--text-meta); }
 body[data-hide-amounts="true"] :is(.budget-money, .festival-amount, .fiscal-year-kpis > div:not(:last-child) strong) { position: relative; color: transparent !important; text-shadow: none; user-select: none; }
 body[data-hide-amounts="true"] :is(.budget-money, .festival-amount, .fiscal-year-kpis > div:not(:last-child) strong)::after { content: "*****"; position: absolute; inset: 0; color: var(--ink); text-align: inherit; white-space: nowrap; }
-body[data-hide-amounts="true"] :is(.budget-carry-row, .smart-budget-row) input:not(:focus) { filter: blur(5px); user-select: none; }
+body[data-hide-amounts="true"] :is(.budget-carry-row, .smart-budget-row, .festival-heads-up-goal, .festival-budget-form .mantine-NumberInput-root, #add-budget .mantine-NumberInput-root) input:not(:focus) { filter: blur(5px); user-select: none; }
 @media (max-width: 640px) {
   .budget-row.has-actions { grid-template-columns: 38px minmax(0, 1fr) auto; }
   .budget-row-actions { flex-direction: column; gap: 0; }
@@ -2882,4 +2882,103 @@ body[data-hide-amounts="true"] :is(.budget-carry-row, .smart-budget-row) input:n
   .budget-carry-actions > button, .festival-budget-actions > button, .festival-heads-up-actions > button { flex: 1; justify-content: center; }
   .festival-heads-up { grid-template-columns: minmax(0, 1fr) auto; margin-bottom: 18px; padding: 13px; }
   .festival-heads-up-icon { display: none; }
+}
+
+/* sms: review fixes — a transfer that looks already recorded, in the move-money sheet */
+.transfer-sheet-body > .transfer-sheet-similar { color: var(--ink); }
+.transfer-sheet-body > .transfer-sheet-similar svg { color: var(--coral); }
+
+/* dashboard: "This month" card, shared balance lock + PIN hint, report-notice dismiss, urgent count on the folded quick actions */
+.month-card { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px 28px; margin: 0 0 30px; padding: 20px 22px; border: 1px solid color-mix(in srgb, var(--blue) 24%, var(--line)); border-radius: 16px; background: color-mix(in srgb, var(--blue) 5%, var(--paper-strong)); }
+.month-card-main { min-width: 0; display: grid; align-content: start; gap: 3px; }
+.month-card-main .section-label { margin-bottom: 6px; }
+.month-card-kicker { color: var(--muted); font-size: var(--text-small); font-weight: 650; }
+.month-card-main h2 { margin: 0; font-size: 40px; line-height: 1.08; letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.month-card-bar { margin: 10px 0 2px; }
+.month-card-bar span { background: var(--blue); }
+.month-card-bar.warning span { background: color-mix(in srgb, var(--coral) 60%, var(--blue)); }
+.month-card-bar.over span { background: var(--coral); }
+.month-card-target { margin: 4px 0 0; color: var(--muted); font-size: var(--text-small); line-height: 1.45; }
+.month-card-figures { min-width: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); border-left: 1px solid color-mix(in srgb, var(--blue) 18%, var(--line)); }
+.month-card-figure { min-width: 0; display: grid; align-content: start; gap: 4px; padding: 2px 0 2px 20px; }
+.month-card-figure + .month-card-figure { border-left: 1px solid color-mix(in srgb, var(--blue) 14%, var(--line)); }
+.month-card-figure > small { color: var(--muted); font-size: var(--text-meta); font-weight: 750; }
+.month-card-figure > strong { overflow: hidden; color: var(--blue-dark); font-size: 22px; font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
+.month-card-figure > strong em { margin-left: 2px; font-size: .55em; font-style: normal; font-weight: 700; opacity: .7; }
+.month-card-figure > span { color: var(--muted); font-size: var(--text-meta); line-height: 1.45; }
+.month-card-figure > .text-button { justify-self: start; min-height: 32px; font-size: var(--text-meta); }
+.month-card > .safe-to-spend-waiting, .month-card > .month-card-risk { grid-column: 1 / -1; }
+.month-card > .safe-to-spend-waiting { margin: 0; color: var(--ink); font-size: var(--text-small); line-height: 1.45; }
+.month-card-risk { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--coral) 28%, var(--line)); border-radius: 11px; background: color-mix(in srgb, var(--coral) 6%, var(--paper-strong)); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.month-card-risk.watch { border-color: color-mix(in srgb, var(--blue) 30%, var(--line)); background: color-mix(in srgb, var(--blue) 7%, var(--paper-strong)); }
+.month-card-risk > svg:first-child { color: var(--coral); }
+.month-card-risk.watch > svg:first-child { color: var(--blue-dark); }
+.month-card-risk > svg:last-child { color: var(--muted); }
+.month-card-risk > span { min-width: 0; display: grid; gap: 2px; }
+.month-card-risk strong { font-size: var(--text-small); }
+.month-card-risk small { color: var(--muted); font-size: var(--text-meta); line-height: 1.4; }
+.balance-locked { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 14px; border: 1px dashed color-mix(in srgb, var(--blue) 36%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--blue) 4%, var(--paper-strong)); }
+.balance-locked-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; color: var(--blue-dark); background: color-mix(in srgb, var(--blue) 12%, transparent); }
+.balance-locked strong { display: block; font-size: var(--text-body); }
+.balance-locked p { margin: 2px 0 0; color: var(--muted); font-size: var(--text-small); line-height: 1.45; }
+.balance-locked .secondary-button { min-height: 38px; padding: 0 14px; font-size: var(--text-small); }
+.balance-locked.compact { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding: 0; border: 0; background: none; color: var(--muted); font-size: var(--text-small); font-weight: 650; }
+.balance-locked.compact > svg { color: var(--blue-dark); }
+.balance-locked.compact .text-button { min-height: 32px; padding: 0 2px; font-size: var(--text-small); }
+.balance-hidden { color: var(--muted); font-weight: 700; letter-spacing: .12em; }
+.balance-pin-hint { display: inline-flex; align-items: center; gap: 5px; margin-top: 12px; color: var(--muted); font-size: var(--text-meta); font-weight: 700; text-decoration: none; }
+.balance-pin-hint:hover, .balance-pin-hint:focus-visible { color: var(--blue-dark); text-decoration: underline; }
+.account-balance-card > .section-label { margin-bottom: 10px; }
+.accounts-overview > .balance-locked { margin-bottom: 14px; }
+.accounts-overview > .balance-pin-hint { margin: 0 0 12px; }
+.cash-forecast-card > .balance-locked.compact { justify-self: start; }
+.month-card-figure > .balance-locked.compact { margin-top: 2px; }
+.monthly-report-notification.has-dismiss { grid-template-columns: 34px minmax(0, 1fr) auto auto; }
+.monthly-report-dismiss { width: 32px; height: 32px; color: var(--muted); }
+.monthly-report-dismiss:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); }
+@media (max-width: 640px) {
+  .month-card { grid-template-columns: minmax(0, 1fr); gap: 14px; margin: 0 -14px 18px; padding: 16px 20px; border-right: 0; border-left: 0; border-radius: 0; }
+  .month-card-main h2 { font-size: 34px; }
+  .month-card-figures { padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--blue) 18%, var(--line)); border-left: 0; }
+  .month-card-figure { padding: 0 12px 0 0; }
+  .month-card-figure + .month-card-figure { padding: 0 0 0 12px; }
+  .month-card-figure > strong { font-size: 19px; }
+  .balance-locked { grid-template-columns: auto minmax(0, 1fr); }
+  .balance-locked:not(.compact) > .balance-locked-action { grid-column: 2; justify-self: start; }
+  .monthly-report-notification.has-dismiss { grid-template-columns: 34px minmax(0, 1fr) auto; }
+  .monthly-report-notification.has-dismiss .monthly-report-dismiss { grid-column: 3; grid-row: 1; }
+  /* The folded "…" shows how many reminders are urgent (nothing at zero) instead of a bare dot. */
+  .floating-actions[data-open="false"]:has(.t-badge[data-open="true"]) .floating-actions-toggle::after { content: none; }
+  .floating-actions-badge { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; display: grid; place-items: center; padding: 0 4px; border: 2px solid var(--paper); border-radius: 20px; background: var(--coral); color: white; font-size: 11px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; pointer-events: none; }
+}
+
+/* resilience: retry screens for a weak signal on open, and the last-backup line */
+.retry-screen { text-align: center; }
+.page-error.retry-screen { min-height: calc(100svh - 55px); padding: 24px 16px; }
+.retry-card { width: min(100%, 340px); display: grid; justify-items: center; gap: 10px; padding: 24px 20px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper-strong); box-shadow: 0 18px 48px rgba(36,51,43,.1); }
+.retry-card strong { color: var(--ink); font-size: 17px; line-height: 1.3; }
+.retry-card p { margin: 0 0 6px; color: var(--muted); font-size: var(--text-small); line-height: 1.5; }
+.retry-card .primary-button { min-height: var(--control-size); border-radius: var(--control-radius); }
+.retry-icon { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 14px; background: rgba(85,127,105,.12); color: var(--blue); }
+.backup-last { margin: 4px 0 0; color: var(--muted); font-size: var(--text-meta); font-weight: 650; }
+.backup-last.is-stale { color: var(--coral); }
+@media (max-width: 640px) {
+  .retry-card { padding: 20px 16px; }
+  .retry-card .primary-button { width: 100%; justify-content: center; }
+}
+/* shell: error screens, reminder settings note */
+.app-error-screen { min-height: 100svh; display: grid; place-items: center; padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+.app-error-card { width: min(100%, 380px); display: grid; gap: 10px; padding: 24px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper-strong); box-shadow: 0 18px 48px rgba(36,51,43,.1); }
+.app-error-card .loader-brand { margin-bottom: 10px; }
+.app-error-icon { width: var(--control-size); height: var(--control-size); display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--coral) 12%, var(--paper)); color: var(--coral); }
+.app-error-card h1 { margin: 0; color: var(--ink); font-size: 22px; font-weight: 650; }
+.app-error-card p { margin: 0; color: var(--muted); font-size: var(--text-body); line-height: 1.55; }
+.app-error-code { color: var(--muted); font-size: var(--text-meta); overflow-wrap: anywhere; }
+.app-error-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.app-error-actions > button { flex: 1 1 140px; }
+.reminder-settings-note { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); color: var(--muted); font-size: var(--text-small); line-height: 1.5; }
+.reminder-settings-note svg { flex: 0 0 auto; margin-top: 2px; color: var(--blue); }
+@media (max-width: 640px) {
+  .app-error-card { padding: 20px 16px; }
+  .app-error-actions > button { width: 100%; }
 }

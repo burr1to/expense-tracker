@@ -105,6 +105,18 @@ describe("pickTransactionDefaults", () => {
     expect(pickTransactionDefaults({ ...base, transactions }).category).toBe("groceries-custom");
     expect(pickTransactionDefaults({ ...base, transactions, categoryIds: ["food", "transport"] }).category).toBe("transport");
   });
+
+  it("never learns a default from loan movements recorded in Dues", () => {
+    const transactions = [
+      entry({ category: "loan", paymentMode: "online", paymentAccountId: "nabil" }),
+      entry({ category: "loan", paymentMode: "online", paymentAccountId: "nabil" }),
+      entry({ category: "loan", paymentMode: "online", paymentAccountId: "nabil" }),
+      entry({ category: "transport", paymentMode: "cash" }),
+    ];
+    expect(pickTransactionDefaults({ ...base, transactions, categoryIds: ["food", "transport", "loan"] })).toEqual({ category: "transport", paymentMode: "cash", paymentAccountId: "" });
+    const repayments = [entry({ kind: "income", category: "loan", paymentMode: "online", paymentAccountId: "esewa" }), entry({ kind: "income", category: "loan", paymentMode: "online", paymentAccountId: "esewa" })];
+    expect(pickTransactionDefaults({ ...base, kind: "income", fallbackCategory: "salary", transactions: repayments })).toEqual({ category: "salary", paymentMode: "cash", paymentAccountId: "" });
+  });
 });
 
 describe("shiftDateKey", () => {

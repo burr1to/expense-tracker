@@ -16,7 +16,7 @@ import { dailyCashFlow } from "../lib/calendar";
 import { formatMoney } from "../lib/currency";
 import { formatLedgerDay, todayInput } from "../lib/dates";
 import { recurrenceLabel } from "../lib/recurrence";
-import { paymentAccountLabel } from "../lib/payment-accounts";
+import { onlinePaymentAccounts, paymentAccountLabel } from "../lib/payment-accounts";
 import { detectRecurringPatterns, type RecurringPatternSuggestion } from "../lib/transaction-intelligence";
 import type { CalendarSystem, Budget, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount, RecurrenceUnit, RecurringDraft, RecurringEntry, SavingsGoal, TransactionKind } from "../types";
 import { FormError } from "../components/FormError";
@@ -88,6 +88,10 @@ function RecurringSection({ currency, transactions, recurringEntries, customCate
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false); const [pendingEntry, setPendingEntry] = useState<{ id: string; action: "toggle" | "delete" } | null>(null);
   const suggestions = useMemo(() => detectRecurringPatterns(transactions, recurringEntries), [recurringEntries, transactions]);
+  // Cash in hand collects cash entries on its own, so a schedule paid from it is simply a cash schedule.
+  const onlineAccounts = useMemo(() => onlinePaymentAccounts(paymentAccounts), [paymentAccounts]);
+  // Only an account the picker offers is kept, so a suggestion from a partner's shared entry never links their account.
+  const linkedAccountId = (accountId: string | null | undefined) => accountId && onlineAccounts.some((account) => account.id === accountId) ? accountId : "";
   const resetForm = () => {
     setAmount("");
     setPaymentAccountId("");
@@ -116,7 +120,7 @@ function RecurringSection({ currency, transactions, recurringEntries, customCate
     setKind(entry.kind);
     setCategory(entry.category);
     setAmount(String(entry.amountMinor / 100));
-    setPaymentAccountId(entry.paymentAccountId ?? "");
+    setPaymentAccountId(linkedAccountId(entry.paymentAccountId));
     setNote(entry.note);
     setSchedule(`${entry.recurrenceUnit}:${entry.recurrenceInterval}`);
     setStartOn(entry.anchorDate);
@@ -127,7 +131,7 @@ function RecurringSection({ currency, transactions, recurringEntries, customCate
     setKind(suggestion.kind);
     setCategory(suggestion.category);
     setAmount(String(suggestion.amountMinor / 100));
-    setPaymentAccountId(suggestion.paymentAccountId ?? "");
+    setPaymentAccountId(linkedAccountId(suggestion.paymentAccountId));
     setNote(suggestion.note);
     setSchedule(`${suggestion.recurrenceUnit}:${suggestion.recurrenceInterval}`);
     setStartOn(suggestion.startOn);
@@ -151,7 +155,7 @@ function RecurringSection({ currency, transactions, recurringEntries, customCate
         <RecurringKindToggle value={kind} disabled={saving} onChange={(next) => { setKind(next); setCategory(next === "expense" ? "housing" : "salary"); }} />
         <Select label="Category" value={category} disabled={saving} onChange={(value) => value && setCategory(value)} data={allCategoriesFor(kind, customCategories).map((item) => ({ value: item.id, label: item.label }))} searchable allowDeselect={false} />
         <NumberInput label={`Amount in ${currency}`} value={amount} disabled={saving} onChange={(value) => setAmount(String(value))} required min={0} thousandSeparator="," decimalScale={2} />
-        <Select label={kind === "expense" ? "Money from" : "Money to"} description={paymentAccounts.length ? "Leave blank for cash, or choose a tracked account." : "Optional — add a tracked account on Accounts to link this plan."} placeholder={paymentAccounts.length ? "Cash / choose an account" : "Cash / untracked"} value={paymentAccountId || null} disabled={saving} onChange={(value) => setPaymentAccountId(value ?? "")} data={paymentAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))} searchable clearable />
+        <Select label={kind === "expense" ? "Money from" : "Money to"} description={onlineAccounts.length ? "Leave blank for cash, or choose a tracked account." : "Optional — add a tracked account on Accounts to link this plan."} placeholder={onlineAccounts.length ? "Cash / choose an account" : "Cash / untracked"} value={paymentAccountId || null} disabled={saving} onChange={(value) => setPaymentAccountId(value ?? "")} data={onlineAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))} searchable clearable />
         <TextInput label="Note" value={note} disabled={saving} onChange={(event) => setNote(event.target.value)} placeholder={kind === "expense" ? "Rent, subscription, or bill" : "Salary or regular income"} />
         <Select label="Repeats" value={schedule} disabled={saving} onChange={(value) => value && setSchedule(value)} data={scheduleOptions} allowDeselect={false} />
         <DatePickerInput label="First due date" description="The schedule advances from this date" value={startOn} onChange={(value) => setStartOn(value ?? "")} disabled={saving} valueFormat="MMM D, YYYY" firstDayOfWeek={0} required />

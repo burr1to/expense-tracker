@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectProvider, detectProviders, extractSmsDate, mentionsCurrencyAmount, parseBankSms, SMS_REVIEW_THRESHOLD } from "./sms-templates";
+import { detectProvider, detectProviders, extractSmsDate, mentionsCurrencyAmount, mentionsOneTimeCode, parseBankSms, SMS_REVIEW_THRESHOLD } from "./sms-templates";
 
 // These fixtures are synthetic messages written in the shapes providers
 // commonly use. They are not captured from any real sender — replace them with
@@ -119,6 +119,13 @@ describe("account tails", () => {
     expect(parseBankSms("Your A/C XXXXXX4821 is debited by NPR 100.00", TODAY)?.accountTail).toBe("4821");
   });
 
+  it("reads 'ending with' tails and never takes the amount after the account word", () => {
+    expect(parseBankSms("Your card ending with 1234 was debited for NPR 500.00 at DARAZ", TODAY)?.accountTail).toBe("1234");
+    expect(parseBankSms("Your Nabil Bank account no. ending with 4821 is credited with NPR 2,000.00", TODAY)?.accountTail).toBe("4821");
+    expect(parseBankSms("A/C Cr. NPR 1500.00 on 05/10/2026. Info: REFUND", TODAY)?.accountTail).toBeNull();
+    expect(parseBankSms("Your A/C Dr Rs.750 at CAFE SOMA", TODAY)?.accountTail).toBeNull();
+  });
+
   it("does not read a masked phone number as an account", () => {
     expect(parseBankSms("NPR 1,000.00 has been sent to 98XXXXXX12 from your eSewa wallet", TODAY)?.accountTail).toBeNull();
   });
@@ -136,6 +143,13 @@ describe("merchant reading", () => {
   it("strips a trailing 'via <provider>' and a leading 'QR PAYMENT TO'", () => {
     expect(parseBankSms("paid Rs. 200 to Nepal Telecom via Khalti", TODAY)).toMatchObject({ merchant: "Nepal Telecom", provider: "Khalti" });
     expect(parseBankSms("NPR 350.00 debited. Info: QR PAYMENT TO CAFE SOMA", TODAY)?.merchant).toBe("CAFE SOMA");
+  });
+
+  it("reads the payee after a generic lead such as 'QR payment' or 'POS purchase at'", () => {
+    expect(parseBankSms("Your A/C ###1234 is debited by NPR 500.00 for QR payment via Fonepay at Himalayan Java on 05/10/2026. -Nabil Bank", TODAY)).toMatchObject({ merchant: "Himalayan Java", merchantIsPlace: true });
+    expect(parseBankSms("NPR 1,500.00 debited from your A/C 0123XXXX9876 for POS purchase at BHAT-BHATENI SUPERMARKET on 05-Oct-2026", TODAY)).toMatchObject({ merchant: "BHAT-BHATENI SUPERMARKET", merchantIsPlace: true });
+    expect(parseBankSms("Your A/C XXXX1234 is debited by NPR 3,000.00 on 05/10/2026. Remarks: Fund Transfer to SITA KC. Nabil Bank", TODAY)?.merchant).toBe("SITA KC");
+    expect(parseBankSms("Your A/C XXXX1234 is debited by NPR 3,000.00 for fund transfer to own A/C XXXX5678", TODAY)).toMatchObject({ merchant: null, transferHint: "own_account" });
   });
 
   it("marks only an 'at' merchant that reads like a place", () => {
@@ -163,6 +177,22 @@ describe("provider outside the merchant", () => {
     expect(parseBankSms("NPR 5,000.00 transferred to your own account on 12/08/2026", TODAY)?.transferHint).toBe("own_account");
   });
 
+  it("takes the bank beside 'via Fonepay' as the account, since Fonepay never holds money", () => {
+    expect(parseBankSms("Fonepay: NPR 750 paid to ABC Store from your Nabil Bank A/C on 05-10-2026", TODAY)).toMatchObject({ provider: "Nabil Bank", otherProvider: null });
+  });
+
+  it("knows the development banks by name without mistaking places or plain words for them", () => {
+    expect(parseBankSms("NPR 1,500.00 debited on 05/10/2026 at BHATBHATENI. Jyoti Bikas Bank", TODAY)?.provider).toBe("Jyoti Bikas Bank");
+    expect(parseBankSms("Shine Resunga Dev. Bank: A/C ###4821 credited by NPR 900", TODAY)?.provider).toBe("Shine Resunga Development Bank");
+    expect(detectProviders("Lumbini Bikas Bank")).toEqual(["Lumbini Bikas Bank"]);
+    expect(detectProviders("Lumbini Momo Center, green tea, Excel sheet")).toEqual([]);
+  });
+
+  it("reads 'your wallet has been loaded' as a wallet load into the wallet", () => {
+    expect(parseBankSms("Your IME Pay wallet has been loaded with Rs 1,000 from NIC Asia on 05/10/2026", TODAY)).toMatchObject({ kind: "income", provider: "IME Pay", otherProvider: "NIC Asia", transferHint: "wallet_load" });
+    expect(parseBankSms("Rs 2000 has been loaded to your eSewa wallet from Nabil Bank A/C ###1234 on 2026-10-05", TODAY)).toMatchObject({ kind: "income", transferHint: "wallet_load", accountTail: "1234" });
+  });
+
   it("does not read a mobile top-up paid by wallet as a wallet load", () => {
     expect(parseBankSms("Topup of NTC Rs 100 paid via eSewa", TODAY)?.transferHint).toBeNull();
   });
@@ -179,5 +209,11 @@ describe("mentionsCurrencyAmount", () => {
     expect(mentionsCurrencyAmount("रू 500 received")).toBe(true);
     expect(mentionsCurrencyAmount("Your OTP is 482193. Do not share it.")).toBe(false);
     expect(mentionsCurrencyAmount("hunter2")).toBe(false);
+  });
+
+  it("recognises a one-time code even when it names the amount it approves", () => {
+    expect(mentionsOneTimeCode("Your OTP for payment of NPR 1,500.00 at DARAZ is 482193. Do not share it.")).toBe(true);
+    expect(mentionsOneTimeCode("Use verification code 1234 to confirm Rs 500 transfer")).toBe(true);
+    expect(mentionsOneTimeCode("Your A/C XXXX4821 is debited by NPR 1,250.00 at HOTEL")).toBe(false);
   });
 });

@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { CurrencyCode, LearningState, LedgerTransaction, PaymentAccount, TransactionDraft, TransactionKind } from "../types";
 import { matchLearningSuggestion, type LearningCategory } from "./learning";
 import { accountProviderName, accountTailsMatch, isCashAccount, paymentAccountLabel, providersMatch } from "./payment-accounts";
-import { isWalletProvider, readSmsHints, SMS_MAX_LENGTH, type SmsHints, type SmsParseResult, type SmsTransferHint } from "./sms-templates";
+import { isWalletProvider, readSmsHints, SMS_MAX_LENGTH, wordsOf, type SmsHints, type SmsParseResult, type SmsTransferHint } from "./sms-templates";
 
 export const smsAnalysisRequestSchema = z.object({
   text: z.string().trim().min(1).max(SMS_MAX_LENGTH),
@@ -220,14 +220,16 @@ export interface SmsAccountMatch {
  * in the nickname, then the normalised bank or wallet name. When several
  * accounts share the provider and no digits tell them apart, none is picked.
  */
-export function matchSmsAccount(hints: Pick<SmsHints, "accountTail" | "provider">, accounts: readonly PaymentAccount[]): SmsAccountMatch {
+export function matchSmsAccount(hints: Pick<SmsHints, "accountTail" | "provider"> & Partial<Pick<SmsHints, "outsideText">>, accounts: readonly PaymentAccount[]): SmsAccountMatch {
   const pool = accounts.filter((account) => !isCashAccount(account));
   const none: SmsAccountMatch = { account: null, candidates: [], via: null, ambiguousBy: null };
   const atProvider = (account: PaymentAccount) => Boolean(hints.provider && providersMatch(accountProviderName(account), hints.provider));
   const tail = hints.accountTail;
   if (tail) {
     const byTail = pool.filter((account) => account.accountTail && accountTailsMatch(account.accountTail, tail));
-    const narrowed = byTail.length > 1 ? byTail.filter(atProvider) : byTail;
+    // The same digits at another bank than the one the message names, where you also have an account, are a coincidence.
+    const tailElsewhere = byTail.length === 1 && Boolean(hints.provider) && !atProvider(byTail[0]) && pool.some(atProvider);
+    const narrowed = byTail.length > 1 ? byTail.filter(atProvider) : tailElsewhere ? [] : byTail;
     if (narrowed.length === 1) return { account: narrowed[0], candidates: narrowed, via: "tail", ambiguousBy: null };
     if (byTail.length > 1) return { account: null, candidates: narrowed.length ? narrowed : byTail, via: null, ambiguousBy: "tail" };
     const byLabel = pool.filter((account) => {
@@ -236,11 +238,24 @@ export function matchSmsAccount(hints: Pick<SmsHints, "accountTail" | "provider"
     });
     if (byLabel.length === 1) return { account: byLabel[0], candidates: byLabel, via: "label", ambiguousBy: null };
   }
-  if (!hints.provider) return none;
   // Stored digits that differ from the message's mean a different account at the same bank.
-  const byProvider = pool.filter((account) => atProvider(account) && !(tail && account.accountTail && !accountTailsMatch(account.accountTail, tail)));
+  const tailFits = (account: PaymentAccount) => !(tail && account.accountTail && !accountTailsMatch(account.accountTail, tail));
+  const byProvider = hints.provider ? pool.filter((account) => atProvider(account) && tailFits(account)) : [];
   if (byProvider.length === 1) return { account: byProvider[0], candidates: byProvider, via: "provider", ambiguousBy: null };
-  return { account: null, candidates: byProvider, via: null, ambiguousBy: byProvider.length > 1 ? "provider" : null };
+  if (byProvider.length > 1) return { account: null, candidates: byProvider, via: null, ambiguousBy: "provider" };
+  // A co-op or finance company has no keyword in the parser, so its own name in the message finds it.
+  const byName = hints.outsideText ? pool.filter((account) => account.type === "other" && tailFits(account) && namesProvider(hints.outsideText!, account.provider)) : [];
+  if (byName.length === 1) return { account: byName[0], candidates: byName, via: "provider", ambiguousBy: null };
+  return byName.length > 1 ? { account: null, candidates: byName, via: null, ambiguousBy: "provider" } : none;
+}
+
+const GENERIC_ORGANISATION_WORDS = new Set(["and", "the", "of", "co", "op", "coop", "cooperative", "saving", "savings", "credit", "multipurpose", "sahakari", "sanstha", "saccos", "finance", "financial", "microfinance", "laghubitta", "company", "bank", "bikas", "development", "limited", "ltd", "pvt", "private", "card", "nepal"]);
+
+/** Every distinctive word of a provider's name (Sahara, not Saving or Co-op) appears in the message. */
+function namesProvider(messageWords: string, provider: string) {
+  const distinctive = wordsOf(provider).split(" ").filter((word) => word.length >= 3 && !GENERIC_ORGANISATION_WORDS.has(word));
+  const haystack = ` ${messageWords} `;
+  return distinctive.length > 0 && distinctive.every((word) => haystack.includes(` ${word} `));
 }
 
 function accountFields(hints: SmsHints, kind: TransactionKind, accounts: readonly PaymentAccount[]) {

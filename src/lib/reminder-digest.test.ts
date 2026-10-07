@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { formatMoney } from "./currency";
 import { buildReminderDigest } from "./reminder-digest";
 import type { DueItem, RecurringEntry } from "../types";
 
@@ -16,6 +17,7 @@ describe("buildReminderDigest", () => {
   it("includes tomorrow and overdue items, and skips snoozed or later ones", () => {
     const notices = buildReminderDigest({
       today: "2026-09-25",
+      currency: "NPR",
       dues: [
         due({}),
         due({ id: "later", title: "Far away", dueOn: "2026-10-20" }),
@@ -28,5 +30,19 @@ describe("buildReminderDigest", () => {
     expect(notices.map((item) => item.title)).toEqual(["Internet", "Overdue EMI", "Rent"]);
     expect(notices[0].body).toContain("due tomorrow");
     expect(notices[1].body).toContain("overdue");
+  });
+
+  it("writes amounts in the ledger's currency and counts only what is still owed", () => {
+    const [internet, rent] = buildReminderDigest({
+      today: "2026-09-25",
+      currency: "NPR",
+      dues: [due({ payments: [{ id: "p1", userId: "user-1", dueItemId: "d1", amountMinor: 50000, occurredOn: "2026-09-20", note: "", transactionId: null, createdAt: "2026-09-20T00:00:00.000Z" }] })],
+      recurring: [recurring({ nextDueOn: "2026-09-25" })],
+    });
+    expect(internet.body).toBe(`WorldLink · ${formatMoney(100000, "NPR")} due tomorrow`);
+    expect(internet.body).toMatch(/^WorldLink · NPR\s1,000 due tomorrow$/);
+    expect(rent.body).toMatch(/^NPR\s20,000 expense is due today$/);
+    const [dollars] = buildReminderDigest({ today: "2026-09-25", currency: "USD", dues: [], recurring: [recurring({ amountMinor: 1250 })] });
+    expect(dollars.body).toMatch(/^USD\s12\.5 expense is due tomorrow$/);
   });
 });

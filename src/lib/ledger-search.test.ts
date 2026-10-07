@@ -39,6 +39,12 @@ describe("searchLedger", () => {
     expect(searchLedger("esewa", input)[0]).toMatchObject({ kind: "transfer", title: "Salary → eSewa" });
   });
 
+  it("names an account without a nickname by its type, never its raw id", () => {
+    const imePay: PaymentAccount = { ...accounts[1], id: "a3", type: "ime_pay", provider: "ime_pay", label: "" };
+    const hits = searchLedger("ime pay", { ...input, transfers: [{ ...transfer, toAccountId: "a3" }], accounts: [...accounts, imePay] });
+    expect(hits[0]).toMatchObject({ kind: "transfer", title: "Salary → IME Pay" });
+  });
+
   it("only treats numeric queries as amounts", () => {
     expect(amountMatches("1500", 150000)).toBe(true);
     expect(amountMatches("NPR 1,500", 150000)).toBe(true);
