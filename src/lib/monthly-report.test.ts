@@ -62,6 +62,16 @@ describe("monthly report model", () => {
     expect(report.incomeCategories[0]).toMatchObject({ label: "Salary", amountMinor: 100_000 });
   });
 
+  it("measures an All spending budget against every counted expense, with a readable label", () => {
+    const report = buildMonthlyReport(input({
+      transactions: [transaction({ amountMinor: 25_000 }), transaction({ category: "transport", categoryLabel: "Transport", amountMinor: 5_000 }), transaction({ category: "loan", categoryLabel: "Loans & repayments", amountMinor: 50_000 })],
+      budgets: [{ category: "__total", categoryLabel: "Uncategorised", amountMinor: 40_000 }, { category: "food", categoryLabel: "Food & Dining", amountMinor: 30_000 }],
+    }));
+
+    expect(report.budgets.find((budget) => budget.category === "__total")).toMatchObject({ categoryLabel: "All spending", spentMinor: 30_000, remainingMinor: 10_000, usedPercentage: 75 });
+    expect(report.budgets.find((budget) => budget.category === "food")).toMatchObject({ spentMinor: 25_000 });
+  });
+
   it("produces a downloadable multi-section PDF", () => {
     const report = buildMonthlyReport(input({ transactions: Array.from({ length: 90 }, (_, index) => transaction({ id: String(index), note: `Expense ${index}` })) }));
     const pdf = generateMonthlyReportPdf(report);

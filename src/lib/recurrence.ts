@@ -85,6 +85,40 @@ export function recurringOccurrencesBetween(
   return occurrences;
 }
 
+/**
+ * Occurrences of the bare schedule (walked from its anchor, ignoring
+ * `nextDueOn`) that fall between `start` and `end` inclusive.
+ */
+export function scheduledOccurrencesBetween(schedule: RecurrenceSchedule, start: string, end: string) {
+  if (start > end) return [];
+  const occurrences: string[] = [];
+  let occurrence = schedule.anchorDate;
+  let guard = 0;
+  while (occurrence <= end && guard < 10_000) {
+    if (occurrence >= start) occurrences.push(occurrence);
+    occurrence = nextRecurringOccurrence(schedule, occurrence);
+    guard += 1;
+  }
+  return occurrences;
+}
+
+/**
+ * Where a resumed schedule picks up. Occurrences missed while paused are
+ * dropped, except the latest one already due, so nothing disappears silently
+ * yet a long pause never leaves a pile of entries waiting.
+ */
+export function latestDueOccurrence(schedule: RecurrenceSchedule, nextDueOn: string, today: string) {
+  let occurrence = nextDueOn;
+  let guard = 0;
+  while (guard < 10_000) {
+    const following = nextRecurringOccurrence(schedule, occurrence);
+    if (following > today) return occurrence;
+    occurrence = following;
+    guard += 1;
+  }
+  throw new Error("Could not calculate recurring dates.");
+}
+
 export function recurrenceLabel(schedule: Pick<RecurrenceSchedule, "recurrenceUnit" | "recurrenceInterval">) {
   const count = schedule.recurrenceInterval;
   const unit = schedule.recurrenceUnit;

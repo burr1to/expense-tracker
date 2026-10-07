@@ -1,19 +1,20 @@
-import { CalendarDots, Check, Flag, PencilSimple, Plus, Repeat, Sparkle, Trash, WarningCircle } from "@phosphor-icons/react";
-import { NumberInput, Select, Switch, TextInput } from "@mantine/core";
+import { CalendarDots, Check, Flag, PauseCircle, PencilSimple, PlayCircle, Plus, Repeat, Sparkle, Trash } from "@phosphor-icons/react";
+import { NumberInput, Select, TextInput } from "@mantine/core";
 import { eachDayOfInterval, endOfMonth, format, getDay, isSameDay, isSameMonth, parseISO, startOfMonth } from "date-fns";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { BudgetPlanner } from "../components/BudgetPlanner";
 import { CategoryIcon } from "../components/CategoryIcon";
 import { SlidingTabs } from "../components/SlidingTabs";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { EmptyState } from "../components/EmptyState";
 import { LedgerDatePickerInput as DatePickerInput } from "../components/LedgerDatePickerInput";
 import { MonthPicker } from "../components/MonthPicker";
+import { RecurringConfirmSheet } from "../components/RecurringConfirmSheet";
 import { useLedger } from "../context/LedgerContext";
 import { allCategoriesFor, getCategory } from "../lib/categories";
 import { dailyCashFlow } from "../lib/calendar";
 import { formatMoney } from "../lib/currency";
-import { formatLedgerDay, formatLedgerMonth, monthKey, todayInput } from "../lib/dates";
-import { calculateBudgetPacing } from "../lib/planning-insights";
+import { formatLedgerDay, todayInput } from "../lib/dates";
 import { recurrenceLabel } from "../lib/recurrence";
 import { paymentAccountLabel } from "../lib/payment-accounts";
 import { detectRecurringPatterns, type RecurringPatternSuggestion } from "../lib/transaction-intelligence";
@@ -31,7 +32,6 @@ interface PlanningPageProps {
   onDeleteBudget: (id: string) => Promise<void>;
   onSaveRecurring: (draft: RecurringDraft, id?: string) => Promise<void>;
   onDeleteRecurring: (id: string) => Promise<void>;
-  onConfirmRecurring: (id: string) => Promise<void>;
   onSaveGoal: (draft: { name: string; target: string; saved: string; targetDate: string }, id?: string) => Promise<void>;
   onContribute: (id: string, amount: string) => Promise<void>;
   onDeleteGoal: (id: string) => Promise<void>;
@@ -56,51 +56,8 @@ export function PlanningPage(props: PlanningPageProps) {
   );
 }
 
-function BudgetsSection({ month, currency, transactions, budgets, recurringEntries, dueItems, customCategories, calendarSystem, onSaveBudget, onDeleteBudget }: PlanningPageProps) {
-  const { profile } = useLedger();
-  const [category, setCategory] = useState("food"); const [amount, setAmount] = useState(""); const [sharedBudget, setSharedBudget] = useState(false); const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false); const [preview, setPreview] = useState<{ category: string; amount: string } | null>(null); const [deletingId, setDeletingId] = useState<string | null>(null);
-  const currentBudgets = useMemo(() => budgets.filter((item) => item.monthKey === monthKey(month)), [budgets, month]);
-  const pacing = useMemo(() => calculateBudgetPacing(currentBudgets, transactions, recurringEntries, dueItems, month), [currentBudgets, dueItems, month, recurringEntries, transactions]);
-  const alerts = pacing.filter((item) => item.tone !== "healthy");
-  const save = async (event: React.FormEvent) => { event.preventDefault(); if (saving) return; const draft = { category, amount }; setSaving(true); setPreview(draft); try { setError(null); await onSaveBudget({ ...draft, monthKey: monthKey(month), shared: sharedBudget }); setAmount(""); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not save budget."); } finally { setSaving(false); setPreview(null); } };
-  const remove = async (id: string) => { if (deletingId) return; setDeletingId(id); try { setError(null); await onDeleteBudget(id); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not delete budget."); } finally { setDeletingId(null); } };
-  const previewDefinition = preview ? getCategory(preview.category, customCategories) : null;
-  return <section className="planner-layout">
-    <article className="planner-form-panel" id="add-budget"><span className="section-label">New monthly limit</span><h2>Add a category budget</h2><form onSubmit={save} className="stack-form" aria-busy={saving}><Select label="Category" value={category} onChange={(value) => value && setCategory(value)} disabled={saving} data={allCategoriesFor("expense", customCategories).map((item) => ({ value: item.id, label: item.label }))} searchable allowDeselect={false} /><NumberInput label={`Amount in ${currency}`} value={amount} onChange={(value) => setAmount(String(value))} placeholder="15,000" required disabled={saving} min={0} thousandSeparator="," decimalScale={2} />{profile.household?.status === "active" && <Switch label="Ours" description="Counts entries marked Ours. Your private spending stays on a personal budget." checked={sharedBudget} onChange={(event) => setSharedBudget(event.currentTarget.checked)} disabled={saving} />}<button className="primary-button" disabled={saving}>{saving ? <><ButtonSpinner />Saving budget…</> : <><Plus size={17} />Save budget</>}</button><FormError message={error} /></form></article>
-    <article className="planner-content"><div className="section-heading"><div><span className="section-label">{formatLedgerMonth(month, calendarSystem)} budgets</span><h2>Category guardrails</h2></div></div>
-      {alerts.length > 0 && <div className="budget-alert-list" role="status" aria-label="Budget alerts">{alerts.map((item) => {
-        const definition = getCategory(item.budget.category, customCategories);
-        return <div className={`budget-alert ${item.tone}`} key={item.budget.id}><WarningCircle size={17} weight="fill" /><span><strong>{definition.label}: {item.alertTitle}</strong><small>{item.alertDetail}</small></span></div>;
-      })}</div>}
-      {preview && previewDefinition && <div className="budget-row pending-preview" role="status"><div className="transaction-icon" style={{ "--category-color": previewDefinition.color } as CSSProperties}><CategoryIcon category={preview.category} icon={previewDefinition.icon} /></div><div><div><strong>{previewDefinition.label}</strong><span>{formatMoney(0, currency)} of {formatMoney(previewMinor(preview.amount), currency)}</span></div><div className="bar-track"><span style={{ width: "0%", backgroundColor: previewDefinition.color }} /></div><small className="pending-label"><ButtonSpinner />Adding budget…</small></div><span /></div>}
-      {pacing.map((item) => {
-        const budget = item.budget;
-        const definition = getCategory(budget.category, customCategories);
-        const deleting = deletingId === budget.id;
-        const spentWidth = Math.min(100, item.spentPercentage);
-        const upcomingWidth = Math.max(0, Math.min(100 - spentWidth, item.projectedPercentage - item.spentPercentage));
-        return <div className={`budget-row pacing-${item.tone}`} key={budget.id} aria-busy={deleting}>
-          <div className="transaction-icon" style={{ "--category-color": definition.color } as CSSProperties}><CategoryIcon category={budget.category} icon={definition.icon} /></div>
-          <div className="budget-pacing-copy">
-            <div><strong>{definition.label}{budget.shared ? <span className="ours-chip">Ours</span> : null}</strong><span>{formatMoney(item.spentMinor, currency)} of {formatMoney(budget.amountMinor, currency)}</span></div>
-            <div className="budget-progress" aria-label={`${item.spentPercentage}% spent${item.upcomingMinor ? `, ${item.projectedPercentage}% projected with upcoming expenses` : ""}`}>
-              <span className="spent" style={{ width: `${spentWidth}%`, backgroundColor: definition.color }} />
-              <span className="upcoming" style={{ width: `${upcomingWidth}%` }} />
-            </div>
-            <div className="budget-pacing-meta">
-              <span>{item.spentPercentage}% spent</span>
-              {item.upcomingMinor > 0 && <span>{formatMoney(item.upcomingMinor, currency)} upcoming · {item.projectedPercentage}% projected</span>}
-              <span>{item.dailyAllowanceMinor > 0 ? `${formatMoney(item.dailyAllowanceMinor, currency)}/day available` : item.remainingMinor > 0 ? `${formatMoney(item.remainingMinor, currency)} remaining` : "No budget remaining"}</span>
-            </div>
-            <small className={`budget-status ${item.tone}`}>{deleting ? "Removing…" : item.alertTitle}</small>
-          </div>
-          {budget.userId === profile.id ? <button className="icon-button danger" disabled={deleting} onClick={() => void remove(budget.id)} aria-label={`Delete ${definition.label} budget`}>{deleting ? <ButtonSpinner /> : <Trash size={17} />}</button> : <span />}
-        </div>;
-      })}
-      {!currentBudgets.length && !preview && <EmptyState title="No budgets for this month" message="Add a category limit to see spending progress here." />}
-    </article>
-  </section>;
+function BudgetsSection({ month, calendarSystem, currency, transactions, budgets, recurringEntries, dueItems, customCategories, onSaveBudget, onDeleteBudget }: PlanningPageProps) {
+  return <BudgetPlanner month={month} calendarSystem={calendarSystem} currency={currency} transactions={transactions} budgets={budgets} recurringEntries={recurringEntries} dueItems={dueItems} customCategories={customCategories} onSaveBudget={onSaveBudget} onDeleteBudget={onDeleteBudget} />;
 }
 
 function GoalsSection({ currency, goals, onSaveGoal, onContribute, onDeleteGoal }: PlanningPageProps) {
@@ -116,7 +73,9 @@ function RecurringKindToggle({ value, disabled, onChange }: { value: Transaction
   return <div className="recurring-kind-control"><SlidingTabs label="Recurring entry type" value={value} disabled={disabled} onChange={onChange} options={[{ id: "expense", label: "Expense" }, { id: "income", label: "Income" }]} /></div>;
 }
 
-function RecurringSection({ currency, transactions, recurringEntries, customCategories, paymentAccounts, onSaveRecurring, onDeleteRecurring, onConfirmRecurring }: PlanningPageProps) {
+function RecurringSection({ currency, transactions, recurringEntries, customCategories, paymentAccounts, onSaveRecurring, onDeleteRecurring }: PlanningPageProps) {
+  const { setRecurringActive } = useLedger();
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
   const today = todayInput();
   const [kind, setKind] = useState<TransactionKind>("expense");
   const [category, setCategory] = useState("housing");
@@ -127,7 +86,7 @@ function RecurringSection({ currency, transactions, recurringEntries, customCate
   const [startOn, setStartOn] = useState(today);
   const [editing, setEditing] = useState<RecurringEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false); const [pendingEntry, setPendingEntry] = useState<{ id: string; action: "confirm" | "delete" } | null>(null);
+  const [saving, setSaving] = useState(false); const [pendingEntry, setPendingEntry] = useState<{ id: string; action: "toggle" | "delete" } | null>(null);
   const suggestions = useMemo(() => detectRecurringPatterns(transactions, recurringEntries), [recurringEntries, transactions]);
   const resetForm = () => {
     setAmount("");
@@ -175,7 +134,7 @@ function RecurringSection({ currency, transactions, recurringEntries, customCate
     setError(null);
     document.getElementById("recurring-entry-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
-  const runEntryAction = async (id: string, action: "confirm" | "delete") => { if (pendingEntry) return; setPendingEntry({ id, action }); try { setError(null); await (action === "confirm" ? onConfirmRecurring(id) : onDeleteRecurring(id)); } catch (caught) { setError(caught instanceof Error ? caught.message : `Could not ${action} recurring entry.`); } finally { setPendingEntry(null); } };
+  const runEntryAction = async (entry: RecurringEntry, action: "toggle" | "delete") => { if (pendingEntry) return; setPendingEntry({ id: entry.id, action }); try { setError(null); await (action === "toggle" ? setRecurringActive(entry.id, !entry.active) : onDeleteRecurring(entry.id)); } catch (caught) { setError(caught instanceof Error ? caught.message : `Could not ${action === "toggle" ? (entry.active ? "pause" : "resume") : "delete"} recurring entry.`); } finally { setPendingEntry(null); } };
   const scheduleOptions = [
     { value: "day:1", label: "Daily" },
     { value: "week:1", label: "Weekly" },
@@ -205,26 +164,30 @@ function RecurringSection({ currency, transactions, recurringEntries, customCate
       {suggestions.length > 0 && <section className="recurring-suggestions" aria-labelledby="recurring-suggestions-heading"><div className="section-heading"><div><span className="section-label">Detected from your history</span><h2 id="recurring-suggestions-heading">Possible repeating entries</h2></div><Sparkle size={21} weight="duotone" /></div><div>{suggestions.map((suggestion) => <article key={suggestion.id}><span className="transaction-icon"><Sparkle size={17} /></span><div><strong>{suggestion.note || getCategory(suggestion.category, customCategories).label}</strong><small>{formatMoney(suggestion.amountMinor, currency)} · {suggestion.evidenceCount} matching entries · {Math.round(suggestion.confidence * 100)}% confidence</small><span>{suggestion.recurrenceInterval === 1 ? suggestion.recurrenceUnit[0].toUpperCase() + suggestion.recurrenceUnit.slice(1) + "ly" : `Every ${suggestion.recurrenceInterval} ${suggestion.recurrenceUnit}s`}</span></div><button type="button" className="secondary-button small" onClick={() => useSuggestion(suggestion)}>Review schedule</button></article>)}</div></section>}
       <div className="section-heading"><div><span className="section-label">Confirm before logging</span><h2>Recurring entries</h2></div></div>
       <div className="recurring-list">{recurringEntries.map((entry) => {
-        const ready = entry.nextDueOn <= today;
-        const confirming = pendingEntry?.id === entry.id && pendingEntry.action === "confirm";
+        const ready = entry.active && entry.nextDueOn <= today;
+        const toggling = pendingEntry?.id === entry.id && pendingEntry.action === "toggle";
         const deleting = pendingEntry?.id === entry.id && pendingEntry.action === "delete";
+        const busy = toggling || deleting;
         const definition = getCategory(entry.category, customCategories);
+        const label = entry.note || definition.label;
         const account = entry.paymentAccountId ? paymentAccounts.find((item) => item.id === entry.paymentAccountId) : null;
         const accountText = `${entry.kind === "expense" ? "From" : "To"}: ${account ? paymentAccountLabel(account) : "Cash / untracked"}`;
-        return <article key={entry.id} aria-busy={confirming || deleting}>
+        return <article key={entry.id} className={entry.active ? undefined : "paused"} aria-busy={busy}>
           <div className="transaction-icon"><CategoryIcon category={entry.category} icon={definition.icon} /></div>
           <div>
-            <strong>{entry.note || getCategory(entry.category, customCategories).label}</strong>
+            <strong>{label}</strong>
             <span>{formatMoney(entry.amountMinor, currency)} · {recurrenceLabel(entry)}</span>
             <small>{accountText}</small>
-            <small>{deleting ? "Removing…" : `Next: ${format(parseISO(entry.nextDueOn), "MMM d, yyyy")}`}</small>
+            <small>{deleting ? "Removing…" : toggling ? (entry.active ? "Pausing…" : "Resuming…") : entry.active ? `Next: ${format(parseISO(entry.nextDueOn), "MMM d, yyyy")}` : "Paused · nothing will be due until you resume"}</small>
           </div>
-          <button className="secondary-button small" disabled={!ready || confirming || deleting} onClick={() => void runEntryAction(entry.id, "confirm")}>{confirming ? <><ButtonSpinner />Confirming…</> : ready ? <><Check size={15} />Confirm</> : "Scheduled"}</button>
-          <button className="icon-button" disabled={confirming || deleting || saving} onClick={() => edit(entry)} aria-label={`Edit ${entry.note || "recurring entry"}`}><PencilSimple size={16} /></button>
-          <button className="icon-button danger" disabled={confirming || deleting} onClick={() => void runEntryAction(entry.id, "delete")} aria-label={`Delete ${entry.note || "recurring entry"}`}>{deleting ? <ButtonSpinner /> : <Trash size={16} />}</button>
+          <button className="secondary-button small" disabled={!ready || busy} onClick={() => setReviewingId(entry.id)}>{ready ? <><Check size={15} />Confirm</> : entry.active ? "Scheduled" : "Paused"}</button>
+          <button className="icon-button pause-toggle" disabled={busy || saving} onClick={() => void runEntryAction(entry, "toggle")} aria-label={`${entry.active ? "Pause" : "Resume"} ${label}`} title={entry.active ? "Pause" : "Resume"}>{toggling ? <ButtonSpinner /> : entry.active ? <PauseCircle size={16} /> : <PlayCircle size={16} />}</button>
+          <button className="icon-button" disabled={busy || saving} onClick={() => edit(entry)} aria-label={`Edit ${entry.note || "recurring entry"}`}><PencilSimple size={16} /></button>
+          <button className="icon-button danger" disabled={busy} onClick={() => void runEntryAction(entry, "delete")} aria-label={`Delete ${entry.note || "recurring entry"}`}>{deleting ? <ButtonSpinner /> : <Trash size={16} />}</button>
         </article>;
       })}</div>
       {!recurringEntries.length && <EmptyState title="Nothing repeats yet" />}
+      <RecurringConfirmSheet entryId={reviewingId} onClose={() => setReviewingId(null)} />
     </article>
   </section>;
 }

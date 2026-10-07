@@ -6,6 +6,8 @@ import {
   periodBounds,
   toStorageKey,
 } from "./period";
+import { countsAsIncomeOrSpending } from "./categories";
+import { ALL_SPENDING_CATEGORY, ALL_SPENDING_LABEL } from "./budgets";
 import type { CurrencyCode } from "../types";
 
 const MONTH_KEY = /^(\d{4})-(0[1-9]|1[0-2])$/;
@@ -165,11 +167,14 @@ function groupAmounts(items: readonly MonthlyReportTransaction[], key: (item: Mo
 }
 
 export function buildMonthlyReport(input: MonthlyReportInput, now = new Date()): MonthlyReport {
-  const incomeMinor = sumKind(input.transactions, "income");
-  const expenseMinor = sumKind(input.transactions, "expense");
-  const previousIncomeMinor = sumKind(input.previousTransactions, "income");
-  const previousExpenseMinor = sumKind(input.previousTransactions, "expense");
-  const expenseTransactions = input.transactions.filter((item) => item.kind === "expense");
+  // Loans and repayments move account balances (kept below) but are never income or spending.
+  const counted = input.transactions.filter(countsAsIncomeOrSpending);
+  const previousCounted = input.previousTransactions.filter(countsAsIncomeOrSpending);
+  const incomeMinor = sumKind(counted, "income");
+  const expenseMinor = sumKind(counted, "expense");
+  const previousIncomeMinor = sumKind(previousCounted, "income");
+  const previousExpenseMinor = sumKind(previousCounted, "expense");
+  const expenseTransactions = counted.filter((item) => item.kind === "expense");
   const spentByCategory = new Map(groupAmounts(expenseTransactions, (item) => item.category).map((item) => [item.label, item.amountMinor]));
 
   return {
@@ -188,12 +193,15 @@ export function buildMonthlyReport(input: MonthlyReportInput, now = new Date()):
       expenseChangePercentage: percentageChange(expenseMinor, previousExpenseMinor),
     },
     categories: groupAmounts(expenseTransactions, (item) => item.categoryLabel),
-    incomeCategories: groupAmounts(input.transactions.filter((item) => item.kind === "income"), (item) => item.categoryLabel),
+    incomeCategories: groupAmounts(counted.filter((item) => item.kind === "income"), (item) => item.categoryLabel),
     subcategories: groupAmounts(expenseTransactions, (item) => item.subcategory?.trim() || "Unspecified"),
     budgets: input.budgets.map((budget) => {
-      const spentMinor = spentByCategory.get(budget.category) ?? 0;
+      // An "All spending" limit counts every expense the report counts.
+      const allSpending = budget.category === ALL_SPENDING_CATEGORY;
+      const spentMinor = allSpending ? expenseMinor : spentByCategory.get(budget.category) ?? 0;
       return {
         ...budget,
+        ...(allSpending ? { categoryLabel: ALL_SPENDING_LABEL } : {}),
         spentMinor,
         remainingMinor: budget.amountMinor - spentMinor,
         usedPercentage: Math.round((spentMinor / budget.amountMinor) * 100),

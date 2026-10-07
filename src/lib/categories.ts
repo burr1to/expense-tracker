@@ -13,8 +13,29 @@ export const CATEGORIES: readonly CategoryDefinition[] = [
   { id: "entertainment", label: "Entertainment", kind: "expense", color: "#826a5d", icon: "entertainment" },
   { id: "education", label: "Education", kind: "expense", color: "#916b61", icon: "education" },
   { id: "travel", label: "Travel", kind: "expense", color: "#a48470", icon: "travel" },
+  { id: "loan", label: "Loans & repayments", kind: "both", color: "#5f6f73", icon: "loan" },
   { id: "other", label: "Other", kind: "both", color: "#6c7069", icon: "tag" },
 ] as const;
+
+/**
+ * Money lent, borrowed or repaid moves real balances but is neither income nor
+ * spending: lending Rs 5,000 and getting it back must net to zero in every total.
+ */
+export const LOAN_CATEGORY_ID = "loan";
+
+export function isLoanCategory(category: TransactionCategory | null | undefined): boolean {
+  return category === LOAN_CATEGORY_ID;
+}
+
+/** Whether a row belongs in income, spending, savings-rate and budget totals. Balances and cash forecasts still count every row. */
+export function countsAsIncomeOrSpending(transaction: { category: TransactionCategory }): boolean {
+  return !isLoanCategory(transaction.category);
+}
+
+/** Categories a person can budget or split a bill into: everything except loan movements. */
+export function spendingCategoriesFor(kind: "income" | "expense", custom: readonly CustomCategory[] = []): readonly CategoryDefinition[] {
+  return allCategoriesFor(kind, custom).filter((category) => !isLoanCategory(category.id));
+}
 
 export function getCategory(category: TransactionCategory, custom: readonly CustomCategory[] = []): CategoryDefinition {
   return custom.find((item) => item.id === category) ?? CATEGORIES.find((item) => item.id === category) ?? { ...CATEGORIES[CATEGORIES.length - 1], label: category };
@@ -43,6 +64,7 @@ export const SUBCATEGORIES: Readonly<Record<string, SubcategoryDefinition>> = {
   entertainment: { label: "Entertainment type", options: ["Movies", "Music", "Games", "Events", "Subscriptions"] },
   education: { label: "Education type", options: ["Tuition", "Books", "Courses", "Supplies", "Exam fees"] },
   travel: { label: "Travel type", options: ["Transport", "Stay", "Food", "Activities", "Visa / fees"] },
+  loan: { label: "Loan type", options: ["Lent", "Borrowed", "Repayment", "Split bill"] },
   other: { label: "Subcategory", options: [] },
 };
 

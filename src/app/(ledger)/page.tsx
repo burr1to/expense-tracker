@@ -37,7 +37,6 @@ export default function DashboardRoute() {
     onSelectedDayChange={setHomeSelectedDate}
     onNavigate={navigate}
     onOpenPlace={(placeKey) => router.push(`/maps?place=${encodeURIComponent(placeKey)}`)}
-    onConfirmRecurring={ledger.confirmRecurring}
     onVerifyPin={ledger.verifyPin}
   />;
 }

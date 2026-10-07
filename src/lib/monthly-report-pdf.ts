@@ -1,4 +1,5 @@
 import { formatMoney } from "./currency";
+import { countsAsIncomeOrSpending } from "./categories";
 import type { MonthlyReport } from "./monthly-report";
 
 const PAGE_WIDTH = 595;
@@ -224,7 +225,7 @@ function drawFocusStrip(page: PdfPage, report: MonthlyReport, x: number, y: numb
   const dayCount = reportMonthDayCount(report);
   const activeDays = new Set(report.transactions.map((item) => item.occurredOn)).size;
   const largestExpense = report.transactions
-    .filter((item) => item.kind === "expense")
+    .filter((item) => item.kind === "expense" && countsAsIncomeOrSpending(item))
     .reduce<MonthlyReport["transactions"][number] | null>((largest, item) => !largest || item.amountMinor > largest.amountMinor ? item : largest, null);
   const topCategory = report.categories[0];
   const overBudgetCount = report.budgets.filter((item) => item.remainingMinor < 0).length;

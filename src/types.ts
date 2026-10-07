@@ -4,8 +4,8 @@ export type TransactionKind = "income" | "expense";
 export type AppView = "home" | "plan" | "calculator" | "dues" | "reports" | "transactions" | "accounts" | "maps" | "logs" | "settings";
 export type TransactionCategory = string;
 export type PaymentMode = "cash" | "cheque" | "online";
-export type PaymentAccountType = "mobile_banking" | "esewa" | "khalti" | "connect_ips";
-export type CategoryIconName = "tag" | "money" | "work" | "gift" | "home" | "food" | "transport" | "utilities" | "shopping" | "health" | "entertainment" | "education" | "travel";
+export type PaymentAccountType = "mobile_banking" | "esewa" | "khalti" | "connect_ips" | "ime_pay" | "cash" | "other";
+export type CategoryIconName = "tag" | "money" | "work" | "gift" | "home" | "food" | "transport" | "utilities" | "shopping" | "health" | "entertainment" | "education" | "travel" | "loan";
 export type RecurrenceUnit = "day" | "week" | "month" | "year";
 export type ImportJobStatus = "queued" | "processing" | "completed" | "failed";
 
@@ -108,6 +108,8 @@ export interface TransactionDraft {
   location?: TransactionLocationDraft | null;
   receipt?: ReceiptUpload;
   removeReceipt?: boolean;
+  /** Generated once when a new-entry sheet opens; the server dedupes retries of the same save on it. */
+  clientRequestId?: string;
 }
 
 export type LocationSource = "pin" | "search" | "current_location" | "saved";
@@ -154,6 +156,8 @@ export interface PaymentAccount {
   type: PaymentAccountType;
   provider: string;
   label: string;
+  /** Last 3-4 digits of the account number as printed in bank SMS. */
+  accountTail?: string | null;
   shared?: boolean;
   balanceMinor: number;
   balanceAsOf: string;
@@ -171,6 +175,16 @@ export interface AccountTransfer {
   occurredOn: string;
   note: string;
   createdAt: string;
+}
+
+export interface AccountTransferDraft {
+  fromAccountId: string;
+  toAccountId: string;
+  amount: string;
+  occurredOn: string;
+  note: string;
+  /** Generated once per open sheet; the server dedupes retries of the same save on it. */
+  clientRequestId?: string;
 }
 
 export interface AccountReconciliation {
@@ -229,6 +243,8 @@ export interface RecurringDraft {
   recurrenceUnit: RecurrenceUnit;
   recurrenceInterval: number;
   startOn: string;
+  /** Left out to keep the current state; false pauses the schedule. */
+  active?: boolean;
 }
 
 export interface SavingsGoal {
@@ -271,6 +287,8 @@ export interface Insight {
   tone: "positive" | "attention" | "neutral";
   title: string;
   detail: string;
+  /** Shown after the title, kept separate so hide-amounts can mask it. */
+  amountMinor?: number;
 }
 
 export type DueKind = "payment" | "receivable" | "lent" | "borrowed";
@@ -320,6 +338,8 @@ export interface DueDraft {
   note: string;
   annualRatePercent: string;
   receipt?: ReceiptUpload;
+  /** Lent/Borrowed only: where the money left from or arrived in — "cash", a payment account id, or "none" to record no movement. Omitted leaves any linked movement as it is. */
+  movement?: string;
 }
 
 export interface ReceiptMeta {

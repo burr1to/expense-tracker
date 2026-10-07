@@ -8,6 +8,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } f
 import { useAuth } from "../context/AuthContext";
 import { useLedger } from "../context/LedgerContext";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
+import { useToasts } from "../context/ToastContext";
 import { getCategory } from "../lib/categories";
 import { toDateInput, todayInput } from "../lib/dates";
 import { buildReminderDigest } from "../lib/reminder-digest";
@@ -26,6 +27,17 @@ import { TransactionForm } from "./TransactionForm";
 import { OnboardingGuide } from "./OnboardingGuide";
 import type { OnboardingStepId } from "../lib/onboarding";
 import { FormError } from "./FormError";
+import { FloatingActions } from "./FloatingActions";
+import { SmsCapture } from "./SmsCapture";
+import { ReceiptScanner } from "./ReceiptScanner";
+import { SplitBillSheet } from "./SplitBillSheet";
+import { TransferSheet } from "./TransferSheet";
+import { onlinePaymentAccounts } from "../lib/payment-accounts";
+
+/** What a caller asked the move-money sheet to prefill. */
+export interface TransferRequest { fromAccountId?: string; toAccountId?: string; amount?: string; occurredOn?: string; note?: string; /** Opens that transfer for editing; the other fields are ignored. */ transferId?: string }
+/** What a caller asked the split-a-bill sheet to prefill. */
+export interface SplitBillRequest { amount?: string; people?: string[]; note?: string }
 
 function RoutePanel({ pathname, children }: { pathname: string; children: ReactNode }) {
   const [open, setOpen] = useState(true);
@@ -43,6 +55,7 @@ function RoutePanel({ pathname, children }: { pathname: string; children: ReactN
 export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const { user, isDemo, loading: authLoading, signOut } = useAuth();
   const ledger = useLedger();
+  const { push: pushToast } = useToasts();
   const pathname = usePathname();
   const router = useRouter();
   const view = viewFromPathname(pathname);
@@ -52,13 +65,19 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const [reusing, setReusing] = useState<LedgerTransaction | null>(null);
   const [newTransactionDate, setNewTransactionDate] = useState<string | undefined>();
   const [newTransactionLocation, setNewTransactionLocation] = useState<TransactionLocationDraft | null>(null);
-  const [homeSelectedDate, setHomeSelectedDate] = useState(toDateInput);
+  const [, setHomeSelectedDate] = useState(toDateInput);
   const [homeFocus, setHomeFocus] = useState<{ date: string; revision: number } | null>(null);
   const [recentlyAddedTransactionId, setRecentlyAddedTransactionId] = useState<string | null>(null);
   const [locked, setLocked] = useState(false);
   const [amountsHidden, setAmountsHidden] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [smsOpen, setSmsOpen] = useState(false);
+  const [smsInitialText, setSmsInitialText] = useState<string | undefined>();
+  const [receiptScanOpen, setReceiptScanOpen] = useState(false);
+  // Mounted by the transfer and split-bill sheets; null means closed.
+  const [transferRequest, setTransferRequest] = useState<TransferRequest | null>(null);
+  const [splitBillRequest, setSplitBillRequest] = useState<SplitBillRequest | null>(null);
   const reportNotice = user && !isDemo ? monthlyReportNotice() : null;
 
   useEffect(() => { setAmountsHidden(ledger.profile.hideAmounts); }, [ledger.profile.hideAmounts]);
@@ -149,7 +168,8 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const openAdd = () => {
     setEditing(null);
     setReusing(null);
-    setNewTransactionDate(view === "home" ? homeSelectedDate : undefined);
+    // The global + always means "now": the sheet dates it today when it opens. Per-day buttons use openAddForDate.
+    setNewTransactionDate(undefined);
     setNewTransactionLocation(null);
     setFormOpen(true);
   };
@@ -192,9 +212,14 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
       setHomeFocus((current) => ({ date: draft.occurredOn, revision: (current?.revision ?? 0) + 1 }));
     }
   };
+  // No confirm: the "Deleted …" toast names the entry and its amount, and carries Undo.
   const removeTransaction = async (transaction: LedgerTransaction) => {
-    const label = transaction.note || (transaction.kind === "income" ? "Income" : "Expense");
-    if (window.confirm(`Delete “${label}”? You can undo this for a few seconds.`)) await ledger.deleteTransaction(transaction.id);
+    try {
+      await ledger.deleteTransaction(transaction.id);
+    } catch (error) {
+      // With no confirm step, a failed delete must still say so instead of failing silently.
+      pushToast({ title: `Couldn’t delete “${transaction.note || getCategory(transaction.category, ledger.customCategories).label}”`, body: error instanceof Error ? error.message : "Check your connection and try again.", tone: "danger" });
+    }
   };
   const logOut = async () => {
     if (signingOut) return;
@@ -224,6 +249,10 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     navigate,
     completeOnboardingStep,
     lock: () => { if (ledger.profile.hasPin) setLocked(true); },
+    openSms: (initialText?: string) => { setSmsInitialText(initialText); setSmsOpen(true); },
+    openReceiptScan: () => setReceiptScanOpen(true),
+    openTransfer: (options: TransferRequest = {}) => setTransferRequest(options),
+    openSplitBill: (options: SplitBillRequest = {}) => setSplitBillRequest(options),
   };
 
   if (authLoading) return <AppLoader className="boot-screen" message="Opening your ledger" />;
@@ -248,23 +277,25 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         )}
         <RoutePanel pathname={pathname}>{content}</RoutePanel>
       </AppShell>
-      <ReminderBell
-        items={ledger.dueItems}
-        currency={ledger.profile.currency}
-        recurringEntries={ledger.recurringEntries.filter((entry) => entry.active).map((entry) => ({ id: entry.id, kind: entry.kind, title: entry.note || getCategory(entry.category, ledger.customCategories).label, amountMinor: entry.amountMinor, dueOn: entry.nextDueOn, scheduleLabel: recurrenceLabel(entry) }))}
-        monthlyReport={reportNotice}
-        onOpenDue={openDue}
-        onComplete={ledger.completeDueItem}
-        onSnooze={ledger.snoozeDueItem}
-        onConfirmRecurring={ledger.confirmRecurring}
-      />
-      <button className="ledger-search" onClick={() => setSearchOpen(true)} aria-label="Search the ledger" title="Search (Ctrl+K)"><MagnifyingGlass size={18} /></button>
-      <button className="privacy-toggle" onClick={() => setAmountsHidden((hidden) => !hidden)} aria-label={amountsHidden ? "Reveal amounts" : "Hide amounts"} aria-pressed={amountsHidden}>
-        <span className="t-icon-swap" data-state={amountsHidden ? "a" : "b"} aria-hidden="true">
-          <span className="t-icon" data-icon="a"><Eye size={19} /></span>
-          <span className="t-icon" data-icon="b"><EyeSlash size={19} /></span>
-        </span>
-      </button>
+      <FloatingActions closeSignal={`${pathname}:${searchOpen}`}>
+        <button className="ledger-search" onClick={() => setSearchOpen(true)} aria-label="Search the ledger" title="Search (Ctrl+K)"><MagnifyingGlass size={18} /></button>
+        <ReminderBell
+          items={ledger.dueItems}
+          currency={ledger.profile.currency}
+          recurringEntries={ledger.recurringEntries.filter((entry) => entry.active).map((entry) => ({ id: entry.id, kind: entry.kind, title: entry.note || getCategory(entry.category, ledger.customCategories).label, amountMinor: entry.amountMinor, dueOn: entry.nextDueOn, scheduleLabel: recurrenceLabel(entry) }))}
+          monthlyReport={reportNotice}
+          onOpenDue={openDue}
+          onComplete={ledger.completeDueItem}
+          onSnooze={ledger.snoozeDueItem}
+          onConfirmRecurring={ledger.confirmRecurring}
+        />
+        <button className="privacy-toggle" onClick={() => setAmountsHidden((hidden) => !hidden)} aria-label={amountsHidden ? "Reveal amounts" : "Hide amounts"} aria-pressed={amountsHidden}>
+          <span className="t-icon-swap" data-state={amountsHidden ? "a" : "b"} aria-hidden="true">
+            <span className="t-icon" data-icon="a"><Eye size={19} /></span>
+            <span className="t-icon" data-icon="b"><EyeSlash size={19} /></span>
+          </span>
+        </button>
+      </FloatingActions>
       <LedgerSearch
         open={searchOpen}
         currency={ledger.profile.currency}
@@ -275,6 +306,11 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         accounts={ledger.paymentAccounts}
         customCategories={ledger.customCategories}
         onClose={() => setSearchOpen(false)}
+        onOpenTransaction={(transaction) => {
+          if (ledger.profile.id && transaction.userId !== ledger.profile.id) return false;
+          openEdit(transaction);
+          return true;
+        }}
       />
       <TransactionForm
         open={formOpen}
@@ -286,12 +322,65 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         transactions={ledger.transactions}
         customCategories={ledger.customCategories}
         customSubcategories={ledger.customSubcategories}
-        paymentAccounts={ledger.paymentAccounts}
+        paymentAccounts={onlinePaymentAccounts(ledger.paymentAccounts)}
         savedPlaces={ledger.savedPlaces}
         learning={ledger.profile.learning}
         shareWithHousehold={ledger.profile.household?.status === "active"}
+        calendarSystem={ledger.profile.calendarSystem}
+        ownerId={ledger.profile.id}
         onClose={() => setFormOpen(false)}
         onSave={saveTransaction}
+        onPasteSms={() => workspace.openSms()}
+        onScanReceipt={() => workspace.openReceiptScan()}
+        onTransfer={(prefill) => workspace.openTransfer(prefill)}
+        onSplitBill={(prefill) => workspace.openSplitBill(prefill)}
+      />
+      <SmsCapture
+        open={smsOpen}
+        onOpenChange={(open) => { setSmsOpen(open); if (!open) setSmsInitialText(undefined); }}
+        initialText={smsInitialText}
+        showTrigger={false}
+        currency={ledger.profile.currency}
+        transactions={ledger.transactions}
+        customCategories={ledger.customCategories}
+        customSubcategories={ledger.customSubcategories}
+        paymentAccounts={ledger.paymentAccounts}
+        learning={ledger.profile.learning}
+        calendarSystem={ledger.profile.calendarSystem}
+        ownerId={ledger.profile.id}
+        onSave={async (draft) => { const savedId = await ledger.saveTransaction(draft); completeOnboardingStep("transaction"); return savedId; }}
+        onSaveTransfer={(draft) => ledger.saveTransfer(draft)}
+      />
+      <ReceiptScanner
+        open={receiptScanOpen}
+        onOpenChange={setReceiptScanOpen}
+        showTrigger={false}
+        currency={ledger.profile.currency}
+        fallbackOccurredOn={todayInput()}
+        customCategories={ledger.customCategories}
+        customSubcategories={ledger.customSubcategories}
+        paymentAccounts={onlinePaymentAccounts(ledger.paymentAccounts)}
+        onSave={async (drafts, receipt, totalMinor) => { const count = await ledger.saveReceiptSplit(drafts, receipt, totalMinor); completeOnboardingStep("transaction"); return count; }}
+      />
+      {/* TransferSheet (driven by transferRequest) and SplitBillSheet (driven by splitBillRequest) mount here. */}
+      <TransferSheet
+        request={transferRequest}
+        currency={ledger.profile.currency}
+        calendarSystem={ledger.profile.calendarSystem}
+        accounts={ledger.paymentAccounts.filter((account) => !ledger.profile.id || account.userId === ledger.profile.id)}
+        transfers={ledger.transfers}
+        onClose={() => setTransferRequest(null)}
+        onSave={ledger.saveTransfer}
+      />
+      <SplitBillSheet
+        request={splitBillRequest}
+        currency={ledger.profile.currency}
+        calendarSystem={ledger.profile.calendarSystem}
+        customCategories={ledger.customCategories}
+        paymentAccounts={ledger.paymentAccounts.filter((account) => !ledger.profile.id || account.userId === ledger.profile.id)}
+        dueItems={ledger.dueItems}
+        onClose={() => setSplitBillRequest(null)}
+        onSave={ledger.saveSplitBill}
       />
       {locked && ledger.profile.hasPin && (
         <PrivacyLock onUnlock={async (pin) => {

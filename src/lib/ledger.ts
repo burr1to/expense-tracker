@@ -1,5 +1,5 @@
 import { format, parseISO } from "date-fns";
-import { getCategory } from "./categories";
+import { countsAsIncomeOrSpending, getCategory } from "./categories";
 import type { CustomCategory, LedgerTransaction, TransactionCategory } from "../types";
 
 export interface CategoryTotal {
@@ -24,6 +24,7 @@ export function summarizeLedger(transactions: readonly LedgerTransaction[], cust
   const totals = new Map<TransactionCategory, number>();
 
   for (const transaction of transactions) {
+    if (!countsAsIncomeOrSpending(transaction)) continue;
     if (transaction.kind === "income") {
       income += transaction.amountMinor;
     } else {
@@ -57,7 +58,7 @@ export function summarizeLedger(transactions: readonly LedgerTransaction[], cust
 export function dailyExpenseSeries(transactions: readonly LedgerTransaction[]) {
   const totals = new Map<string, number>();
   for (const transaction of transactions) {
-    if (transaction.kind === "expense") {
+    if (transaction.kind === "expense" && countsAsIncomeOrSpending(transaction)) {
       totals.set(transaction.occurredOn, (totals.get(transaction.occurredOn) ?? 0) + transaction.amountMinor);
     }
   }
@@ -69,6 +70,7 @@ export function dailyExpenseSeries(transactions: readonly LedgerTransaction[]) {
 export function monthlySeries(transactions: readonly LedgerTransaction[]) {
   const months = new Map<string, { income: number; expenses: number }>();
   for (const transaction of transactions) {
+    if (!countsAsIncomeOrSpending(transaction)) continue;
     const key = transaction.occurredOn.slice(0, 7);
     const current = months.get(key) ?? { income: 0, expenses: 0 };
     current[transaction.kind === "income" ? "income" : "expenses"] += transaction.amountMinor;

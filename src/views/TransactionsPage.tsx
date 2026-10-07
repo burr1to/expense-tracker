@@ -1,9 +1,10 @@
-import { CaretDown, CheckCircle, DownloadSimple, FileText, FunnelSimple, MagnifyingGlass, Plus, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
+import { Camera, CaretDown, ChatText, CheckCircle, DownloadSimple, FileText, FunnelSimple, MagnifyingGlass, Plus, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
 import { NumberInput, Popover, Select, TextInput } from "@mantine/core";
 import { DatePicker } from "@mantine/dates";
 import { format, isSameMonth, parseISO, startOfMonth } from "date-fns";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { EmptyState } from "../components/EmptyState";
 import { SlidingTabs } from "../components/SlidingTabs";
 import { AnimatedOverlay } from "../components/AnimatedOverlay";
@@ -12,8 +13,6 @@ import { LedgerDatePickerInput as DatePickerInput } from "../components/LedgerDa
 import { MonthPicker } from "../components/MonthPicker";
 import { TransactionRow } from "../components/TransactionRow";
 import { TransferRow } from "../components/TransferRow";
-import { ReceiptScanner } from "../components/ReceiptScanner";
-import { SmsCapture } from "../components/SmsCapture";
 import { CategoryIconPicker } from "../components/CategoryIconPicker";
 import { isFullBackupCsv } from "../lib/backup";
 import { allCategoriesFor, CATEGORIES, getCategory } from "../lib/categories";
@@ -34,13 +33,15 @@ interface TransactionsPageProps {
   onImport: (drafts: TransactionDraft[], newCategories?: CsvCategoryDraft[], newSubcategories?: CsvSubcategoryDraft[]) => Promise<ImportJob | null>;
   importJobs: ImportJob[];
   onDismissImportJob: (id: string) => void;
-  onSaveReceiptSplit: (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => Promise<number>;
-  learning: LearningState;
+  /** Unused: SMS capture and receipt scanning are the single global sheets in LedgerAppLayout. */
+  onSaveReceiptSplit?: (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => Promise<number>;
+  learning?: LearningState;
   calendarSystem: CalendarSystem;
-  onSaveTransaction: (draft: TransactionDraft) => Promise<string | undefined>;
+  onSaveTransaction?: (draft: TransactionDraft) => Promise<string | undefined>;
 }
 
-export function TransactionsPage({ month, currency, transactions, transfers, customCategories, customSubcategories, paymentAccounts, importJobs, onMonthChange, onAdd, onDuplicate, onEdit, onDelete, onDeleteTransfer, onImport, onDismissImportJob, onSaveReceiptSplit, learning, onSaveTransaction, calendarSystem }: TransactionsPageProps) {
+export function TransactionsPage({ month, currency, transactions, transfers, customCategories, customSubcategories, paymentAccounts, importJobs, onMonthChange, onAdd, onDuplicate, onEdit, onDelete, onDeleteTransfer, onImport, onDismissImportJob, calendarSystem }: TransactionsPageProps) {
+  const workspace = useContext(LedgerWorkspaceContext);
   const searchParams = useSearchParams();
   const [query, setQuery] = useState(""); const [kind, setKind] = useState<LedgerKindFilter>("all");
   const [category, setCategory] = useState("all"); const [from, setFrom] = useState(""); const [to, setTo] = useState(""); const [min, setMin] = useState(""); const [max, setMax] = useState(""); const [paymentMode, setPaymentMode] = useState<PaymentMode | "all">("all");
@@ -54,7 +55,8 @@ export function TransactionsPage({ month, currency, transactions, transfers, cus
   const [selectedDay, setSelectedDay] = useState<Date>(() => isSameMonth(month, new Date()) ? new Date() : startOfMonth(month));
   const [visibleCount, setVisibleCount] = useState(50);
   const selectedDayKey = format(selectedDay, "yyyy-MM-dd");
-  const activeOccurredOn = scope === "day" ? selectedDayKey : todayInput();
+  // Read at tap time, so a tab left open overnight still adds to the real today.
+  const activeOccurredOn = () => scope === "day" ? selectedDayKey : todayInput();
   const filterCategories = useMemo(() => kind === "all" || kind === "transfer" ? [...CATEGORIES, ...customCategories] : [...allCategoriesFor(kind, customCategories)], [kind, customCategories]);
   useEffect(() => { if (category !== "all" && !filterCategories.some((item) => item.id === category)) setCategory("all"); }, [category, filterCategories]);
   useEffect(() => {
@@ -133,7 +135,7 @@ export function TransactionsPage({ month, currency, transactions, transfers, cus
   };
 
   return <div className="page list-page">
-    <header className="page-header"><div><span className="eyebrow">Your ledger</span><h1>Transactions</h1><p>Income, expenses, and transfers between your accounts, in one timeline.</p></div><div className="transaction-actions"><div className="header-actions"><input ref={fileRef} className="visually-hidden" type="file" accept=".csv,.txt,.pdf,text/csv,text/plain,application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ""; if (file) void readFile(file); }} /><ReceiptScanner currency={currency} fallbackOccurredOn={activeOccurredOn} customCategories={customCategories} customSubcategories={customSubcategories} paymentAccounts={paymentAccounts} onSave={onSaveReceiptSplit} /><SmsCapture currency={currency} transactions={transactions} customCategories={customCategories} customSubcategories={customSubcategories} paymentAccounts={paymentAccounts} learning={learning} onSave={onSaveTransaction} /><button id="csv-import-trigger" className="secondary-button csv-import-trigger" disabled={analyzingImport} onClick={() => fileRef.current?.click()}>{analyzingImport ? <ButtonSpinner /> : <UploadSimple size={18} />}{analyzingImport ? "Reading statement…" : "Import statement"}</button><button className="primary-button" onClick={() => onAdd(activeOccurredOn)}><Plus size={18} />Add transaction</button></div><div className="csv-template-help"><span>CSV, PDF, image, or text · always review before import</span><a href={templateHref} download="transaction-import-template.csv"><DownloadSimple size={14} />Download CSV template</a></div></div></header>
+    <header className="page-header"><div><span className="eyebrow">Your ledger</span><h1>Transactions</h1><p>Income, expenses, and transfers between your accounts, in one timeline.</p></div><div className="transaction-actions"><div className="header-actions"><input ref={fileRef} className="visually-hidden" type="file" accept=".csv,.txt,.pdf,text/csv,text/plain,application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ""; if (file) void readFile(file); }} /><button className="secondary-button receipt-scan-trigger" onClick={() => workspace?.openReceiptScan()}><Camera size={18} />Scan receipt <span>AI</span></button><button className="secondary-button sms-capture-trigger" onClick={() => workspace?.openSms()}><ChatText size={18} />Paste bank SMS</button><button id="csv-import-trigger" className="secondary-button csv-import-trigger" disabled={analyzingImport} onClick={() => fileRef.current?.click()}>{analyzingImport ? <ButtonSpinner /> : <UploadSimple size={18} />}{analyzingImport ? "Reading statement…" : "Import statement"}</button><button className="primary-button" onClick={() => onAdd(activeOccurredOn())}><Plus size={18} />Add transaction</button></div><div className="csv-template-help"><span>CSV, PDF, image, or text · always review before import</span><a href={templateHref} download="transaction-import-template.csv"><DownloadSimple size={14} />Download CSV template</a></div></div></header>
     {importJobs.length > 0 && <section className="import-progress-stack" aria-label="CSV import progress" aria-live="polite">{importJobs.map((job) => {
       const percent = job.totalRows ? Math.round(job.processedRows / job.totalRows * 100) : 0;
       const completed = job.status === "completed";
@@ -160,7 +162,7 @@ export function TransactionsPage({ month, currency, transactions, transfers, cus
       <NumberInput label="Max amount" aria-label={`Maximum amount in ${currency}`} leftSection={<span className="currency-prefix">{currency}</span>} leftSectionWidth={52} value={max} onChange={(value) => setMax(String(value))} min={0} thousandSeparator="," decimalScale={2} />
       <Select label="Payment mode" value={paymentMode} onChange={(value) => value && setPaymentMode(value as PaymentMode | "all")} data={[{ value: "all", label: "All payment modes" }, { value: "cash", label: "Cash" }, { value: "cheque", label: "Cheque" }, { value: "online", label: "Online payment" }]} allowDeselect={false} disabled={kind === "transfer"} />
     </section>
-    <section className="ledger-list"><div className="ledger-list-heading"><span>{sorted.length} {sorted.length === 1 ? "entry" : "entries"}{scope === "day" ? ` on ${formatLedgerDay(selectedDay, calendarSystem, "date")}` : ""}</span><span>Newest first</span></div>{visibleTransactions.map((entry) => entry.type === "transaction" ? <TransactionRow key={`transaction-${entry.transaction.id}`} transaction={entry.transaction} currency={currency} customCategories={customCategories} onDuplicate={onDuplicate} onEdit={onEdit} onDelete={(item) => void remove(item)} deletePending={deletingId === entry.transaction.id} /> : <TransferRow key={`transfer-${entry.transfer.id}`} transfer={entry.transfer} fromLabel={transferAccountLabel(paymentAccounts, entry.transfer.fromAccountId)} toLabel={transferAccountLabel(paymentAccounts, entry.transfer.toAccountId)} currency={currency} onDelete={() => void removeTransfer(entry.transfer.id)} deletePending={deletingId === `transfer:${entry.transfer.id}`} />)}{!sorted.length && <EmptyState title={scope === "history" ? "No matching entries" : `No ${kind === "all" ? "" : `${kind} `}entries on ${format(selectedDay, "MMMM d")}`} message={scope === "history" ? "Try changing your search or filters, or add a transaction." : "Try another day or filter, or add a new transaction."} action={kind === "transfer" ? undefined : <button className="primary-button small" onClick={() => onAdd(activeOccurredOn)}><Plus size={17} />Add transaction</button>} />}{visibleTransactions.length < sorted.length && <nav className="transaction-history-pagination" aria-label="More transactions"><span aria-live="polite">Showing {visibleTransactions.length} of {sorted.length}</span><button className="secondary-button small" onClick={() => setVisibleCount((count) => count + 50)}>Load 50 more</button></nav>}</section>
+    <section className="ledger-list"><div className="ledger-list-heading"><span>{sorted.length} {sorted.length === 1 ? "entry" : "entries"}{scope === "day" ? ` on ${formatLedgerDay(selectedDay, calendarSystem, "date")}` : ""}</span><span>Newest first</span></div>{visibleTransactions.map((entry) => entry.type === "transaction" ? <TransactionRow key={`transaction-${entry.transaction.id}`} transaction={entry.transaction} currency={currency} customCategories={customCategories} onDuplicate={onDuplicate} onEdit={onEdit} onDelete={(item) => void remove(item)} deletePending={deletingId === entry.transaction.id} /> : <TransferRow key={`transfer-${entry.transfer.id}`} transfer={entry.transfer} fromLabel={transferAccountLabel(paymentAccounts, entry.transfer.fromAccountId)} toLabel={transferAccountLabel(paymentAccounts, entry.transfer.toAccountId)} currency={currency} onDelete={() => void removeTransfer(entry.transfer.id)} deletePending={deletingId === `transfer:${entry.transfer.id}`} />)}{!sorted.length && <EmptyState title={scope === "history" ? "No matching entries" : `No ${kind === "all" ? "" : `${kind} `}entries on ${format(selectedDay, "MMMM d")}`} message={scope === "history" ? "Try changing your search or filters, or add a transaction." : "Try another day or filter, or add a new transaction."} action={kind === "transfer" ? undefined : <button className="primary-button small" onClick={() => onAdd(activeOccurredOn())}><Plus size={17} />Add transaction</button>} />}{visibleTransactions.length < sorted.length && <nav className="transaction-history-pagination" aria-label="More transactions"><span aria-live="polite">Showing {visibleTransactions.length} of {sorted.length}</span><button className="secondary-button small" onClick={() => setVisibleCount((count) => count + 50)}>Load 50 more</button></nav>}</section>
     <AnimatedOverlay open={importDialogOpen} dismissOnBackdrop onClose={closeImportDialog} onExited={() => { if (!importDialogOpen) { setPreview(null); setImportErrors([]); setNewImportCategories([]); setNewImportSubcategories([]); } }}>
         {preview && <section className="import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-title" aria-busy={importing}>
         <header><div><span className="eyebrow">{importSource?.kind === "statement" ? "AI statement import" : "CSV import"}</span><h2 id="import-title">Review before importing</h2><small className="import-source-name"><FileText size={14} />{importSource?.name}</small></div><button className="icon-button" disabled={importing} onClick={closeImportDialog} aria-label="Close"><X size={20} /></button></header>

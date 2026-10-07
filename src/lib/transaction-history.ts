@@ -1,4 +1,5 @@
 import { getCategory } from "./categories";
+import { entryMatches, transactionSearchParts } from "./ledger-search";
 import { paymentAccountLabel } from "./payment-accounts";
 import type { AccountTransfer, CustomCategory, LedgerTransaction, PaymentAccount, PaymentMode, TransactionKind } from "../types";
 
@@ -17,8 +18,8 @@ export interface TransactionHistoryFilters {
   query: string;
 }
 
-export function filterTransactionHistory(transactions: readonly LedgerTransaction[], customCategories: readonly CustomCategory[], filters: TransactionHistoryFilters): LedgerTransaction[] {
-  const query = filters.query.trim().toLowerCase();
+export function filterTransactionHistory(transactions: readonly LedgerTransaction[], customCategories: readonly CustomCategory[], filters: TransactionHistoryFilters, accounts: readonly PaymentAccount[] = []): LedgerTransaction[] {
+  const query = filters.query.trim();
   return [...transactions]
     .filter((item) => filters.scope === "history" || item.occurredOn === filters.selectedDayKey)
     .filter((item) => filters.kind === "all" || item.kind === filters.kind)
@@ -30,8 +31,7 @@ export function filterTransactionHistory(transactions: readonly LedgerTransactio
     .filter((item) => filters.paymentMode === "all" || item.paymentMode === filters.paymentMode)
     .filter((item) => {
       if (!query) return true;
-      const category = getCategory(item.category, customCategories).label;
-      return `${item.note} ${category} ${item.subcategory ?? ""} ${item.area ?? ""} ${item.paymentAccount?.provider ?? ""}`.toLowerCase().includes(query);
+      return entryMatches(query, transactionSearchParts(item, getCategory(item.category, customCategories).label, accounts), item.amountMinor);
     })
     .sort((a, b) => `${b.occurredOn}${b.createdAt}`.localeCompare(`${a.occurredOn}${a.createdAt}`));
 }
@@ -64,8 +64,8 @@ export function listLedgerActivity(
   const { accountId, ...historyFilters } = filters;
   const visibleTransactions = filters.kind === "transfer"
     ? []
-    : filterTransactionHistory(transactions, customCategories, { ...historyFilters, kind: filters.kind }).filter((item) => !accountId || item.paymentAccountId === accountId);
-  const query = filters.query.trim().toLowerCase();
+    : filterTransactionHistory(transactions, customCategories, { ...historyFilters, kind: filters.kind }, accounts).filter((item) => !accountId || item.paymentAccountId === accountId);
+  const query = filters.query.trim();
   const transfersVisible = filters.kind === "transfer" || (filters.kind === "all" && filters.category === "all" && (filters.paymentMode === "all" || filters.paymentMode === "online"));
   const visibleTransfers = transfersVisible ? transfers.filter((item) => {
     if (accountId && item.fromAccountId !== accountId && item.toAccountId !== accountId) return false;
@@ -75,9 +75,7 @@ export function listLedgerActivity(
     if (filters.minMinor !== null && item.amountMinor < filters.minMinor) return false;
     if (filters.maxMinor !== null && item.amountMinor > filters.maxMinor) return false;
     if (!query) return true;
-    const from = transferAccountLabel(accounts, item.fromAccountId);
-    const to = transferAccountLabel(accounts, item.toAccountId);
-    return `${from} ${to} ${item.note} transfer`.toLowerCase().includes(query);
+    return entryMatches(query, [transferAccountLabel(accounts, item.fromAccountId), transferAccountLabel(accounts, item.toAccountId), item.note, "transfer"], item.amountMinor);
   }) : [];
   return [
     ...visibleTransactions.map((transaction): LedgerActivityItem => ({ type: "transaction", transaction })),

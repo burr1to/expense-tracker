@@ -1,5 +1,5 @@
 import {
-  AirplaneTilt, BookOpenText, Briefcase, Bus, ForkKnife, Gift, GraduationCap, Heartbeat,
+  AirplaneTilt, BookOpenText, Briefcase, Bus, ForkKnife, Gift, GraduationCap, HandCoins, Heartbeat,
   HouseLine, Lightning, Money, ShoppingBagOpen, Sparkle, Tag, type Icon,
 } from "@phosphor-icons/react";
 import type { CategoryIconName } from "../types";
@@ -18,6 +18,7 @@ const icons: Record<CategoryIconName, Icon> = {
   entertainment: Sparkle,
   education: GraduationCap,
   travel: AirplaneTilt,
+  loan: HandCoins,
 };
 
 export function LedgerIcon({ icon, size = 20 }: { icon: CategoryIconName; size?: number }) {

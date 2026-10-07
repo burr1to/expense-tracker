@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectProvider, extractSmsDate, parseBankSms, SMS_REVIEW_THRESHOLD } from "./sms-templates";
+import { detectProvider, detectProviders, extractSmsDate, mentionsCurrencyAmount, parseBankSms, SMS_REVIEW_THRESHOLD } from "./sms-templates";
 
 // These fixtures are synthetic messages written in the shapes providers
 // commonly use. They are not captured from any real sender — replace them with
@@ -104,5 +104,80 @@ describe("confidence", () => {
 
   it("never reports a merchant that is only digits", () => {
     expect(parseBankSms("NPR 400 debited at 889231", TODAY)?.merchant).toBeNull();
+  });
+});
+
+describe("account tails", () => {
+  it("reads masked numbers with visible leading digits", () => {
+    expect(parseBankSms("Your A/C 0010XXXXXX1234 is debited by NPR 100.00", TODAY)?.accountTail).toBe("1234");
+    expect(parseBankSms("A/C 12XXXXXX4821 debited NPR 100.00", TODAY)?.accountTail).toBe("4821");
+    expect(parseBankSms("NPR 100.00 debited from 12XXXXXX4821 at SHOP", TODAY)?.accountTail).toBe("4821");
+  });
+
+  it("still reads hash and X masks", () => {
+    expect(parseBankSms("A/C ###1234 debited NPR 100.00", TODAY)?.accountTail).toBe("1234");
+    expect(parseBankSms("Your A/C XXXXXX4821 is debited by NPR 100.00", TODAY)?.accountTail).toBe("4821");
+  });
+
+  it("does not read a masked phone number as an account", () => {
+    expect(parseBankSms("NPR 1,000.00 has been sent to 98XXXXXX12 from your eSewa wallet", TODAY)?.accountTail).toBeNull();
+  });
+});
+
+describe("merchant reading", () => {
+  it("skips 'your A/C' and keeps reading to the place", () => {
+    expect(parseBankSms("NPR 2,000.00 withdrawn from your A/C XXXXXXX5678 at ATM KTM", TODAY)).toMatchObject({ merchant: "ATM KTM", merchantIsPlace: false, transferHint: "atm" });
+  });
+
+  it("rejects masked numbers and wallet phrases as merchants", () => {
+    expect(parseBankSms("NPR 1,000.00 has been sent to 98XXXXXX12 from your eSewa wallet", TODAY)).toMatchObject({ merchant: null, provider: "eSewa" });
+  });
+
+  it("strips a trailing 'via <provider>' and a leading 'QR PAYMENT TO'", () => {
+    expect(parseBankSms("paid Rs. 200 to Nepal Telecom via Khalti", TODAY)).toMatchObject({ merchant: "Nepal Telecom", provider: "Khalti" });
+    expect(parseBankSms("NPR 350.00 debited. Info: QR PAYMENT TO CAFE SOMA", TODAY)?.merchant).toBe("CAFE SOMA");
+  });
+
+  it("marks only an 'at' merchant that reads like a place", () => {
+    expect(parseBankSms("NPR 450.00 debited at HIMALAYAN JAVA COFFEE", TODAY)?.merchantIsPlace).toBe(true);
+    expect(parseBankSms("NPR 450.00 paid to DARAZ NEPAL", TODAY)?.merchantIsPlace).toBe(false);
+  });
+});
+
+describe("provider outside the merchant", () => {
+  it("never takes the bank from a café's name", () => {
+    expect(parseBankSms("debited NPR 450 at HIMALAYAN JAVA COFFEE", TODAY)?.provider).toBeNull();
+  });
+
+  it("never takes the account from what the money was for", () => {
+    expect(parseBankSms("Your A/C XXXX1234 debited by NPR 1,000.00 for eSewa load", TODAY)).toMatchObject({ provider: null, otherProvider: "eSewa", transferHint: "wallet_load" });
+  });
+
+  it("lists every named provider in order", () => {
+    expect(detectProviders("Rs 1,000 added to your Khalti wallet from NIC Asia")).toEqual(["Khalti", "NIC Asia"]);
+    expect(detectProviders("Himalayan Java")).toEqual([]);
+  });
+
+  it("flags salary words, and own-account transfers", () => {
+    expect(parseBankSms("A/C XXXX1234 credited NPR 5,000.00. Info: SALARY SEPT", TODAY)?.mentionsSalary).toBe(true);
+    expect(parseBankSms("NPR 5,000.00 transferred to your own account on 12/08/2026", TODAY)?.transferHint).toBe("own_account");
+  });
+
+  it("does not read a mobile top-up paid by wallet as a wallet load", () => {
+    expect(parseBankSms("Topup of NTC Rs 100 paid via eSewa", TODAY)?.transferHint).toBeNull();
+  });
+
+  it("does not treat an ATM in another bank's name as the account's bank", () => {
+    const parsed = parseBankSms("Rs 5,000.00 withdrawn from A/C XXXX1234 at NABIL ATM NEWROAD on 05/10/2026", TODAY);
+    expect(parsed).toMatchObject({ transferHint: "atm", provider: null, otherProvider: "Nabil Bank", accountTail: "1234" });
+  });
+});
+
+describe("mentionsCurrencyAmount", () => {
+  it("passes alerts and holds back clipboard text that is not one", () => {
+    expect(mentionsCurrencyAmount("Your A/C XXXX4821 is debited by NPR 1,250.00")).toBe(true);
+    expect(mentionsCurrencyAmount("रू 500 received")).toBe(true);
+    expect(mentionsCurrencyAmount("Your OTP is 482193. Do not share it.")).toBe(false);
+    expect(mentionsCurrencyAmount("hunter2")).toBe(false);
   });
 });

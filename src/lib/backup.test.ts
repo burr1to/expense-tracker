@@ -65,6 +65,16 @@ describe("full backup CSV", () => {
     expect(() => parseBackupCsv(csv)).toThrow("references a missing paymentAccountId");
   });
 
+  it("keeps Cash in hand, IME Pay and Other accounts with their last digits", () => {
+    const account = (backupId: string, type: string, provider: string, accountTail: string | null) => ({ entity: "payment_account" as const, backupId, payload: { type, provider, label: "", accountTail, balanceMinor: 5000, balanceAsOf: "2026-07-25", balanceRecordedAt: exportedAt, createdAt: exportedAt, updatedAt: exportedAt } });
+    const csv = serializeBackupCsv([...baseRecords, account("cash", "cash", "Cash", null), account("ime", "ime_pay", "ime_pay", null), account("coop", "other", "Sahara Co-op", "4821")]);
+
+    const accounts = parseBackupCsv(csv).records.filter((record) => record.entity === "payment_account");
+    expect(accounts.map((record) => (record.payload as { type: string }).type)).toEqual(["cash", "ime_pay", "other"]);
+    expect(accounts[2].payload).toMatchObject({ accountTail: "4821" });
+    expect(() => parseBackupCsv(serializeBackupCsv([...baseRecords, account("bad", "other", "Sahara Co-op", "48211")]))).toThrow();
+  });
+
   it("does not confuse ordinary transaction exports with full backups", () => {
     expect(isFullBackupCsv("date,type,category,amount\n2026-07-25,expense,food,750")).toBe(false);
   });

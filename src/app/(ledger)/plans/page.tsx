@@ -22,7 +22,6 @@ export default function PlansRoute() {
     onDeleteBudget={ledger.deleteBudget}
     onSaveRecurring={ledger.saveRecurring}
     onDeleteRecurring={ledger.deleteRecurring}
-    onConfirmRecurring={ledger.confirmRecurring}
     onSaveGoal={ledger.saveGoal}
     onContribute={ledger.contributeToGoal}
     onDeleteGoal={ledger.deleteGoal}

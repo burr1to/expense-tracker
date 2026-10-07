@@ -21,6 +21,7 @@ const icons: Record<string, Icon> = {
   Movies: FilmSlate, Music: MusicNote, Games: GameController, Events: Ticket, Subscriptions: Receipt,
   Tuition: GraduationCap, Books: BookOpenText, Courses: Certificate, Supplies: PencilLine, "Exam fees": Receipt,
   Transport: AirplaneTilt, Stay: Bed, Food: ForkKnife, Activities: MapPin, "Visa / fees": FileText,
+  Lent: HandCoins, Borrowed: HandCoins, Repayment: HandCoins, "Split bill": Receipt,
 };
 
 export function SubcategoryIcon({ subcategory, icon, size = 19 }: { subcategory: string; icon?: CategoryIconName; size?: number }) {

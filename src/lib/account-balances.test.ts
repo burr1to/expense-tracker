@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachCurrentBalances, calculateCurrentAccountBalance, expectedAccountBalanceThrough, reconciliationSpendingGap, totalCurrentBalance } from "./account-balances";
+import { attachCurrentBalances, calculateCurrentAccountBalance, expectedAccountBalanceThrough, reconciliationSpendingGap, totalCurrentBalance, transactionPostsTo, transferRemovalEffects } from "./account-balances";
 import type { AccountTransfer, LedgerTransaction, PaymentAccount } from "../types";
 
 const account = (overrides: Partial<PaymentAccount> = {}): PaymentAccount => ({
@@ -138,5 +138,58 @@ describe("account balances", () => {
 
   it("can total the currently tracked accounts", () => {
     expect(totalCurrentBalance([account(), account({ id: "bank", currentBalanceMinor: 42500 })])).toBe(52500);
+  });
+});
+
+describe("cash in hand", () => {
+  const cash = account({ id: "cash", type: "cash", provider: "Cash", label: "", balanceMinor: 5_000 });
+  const cashEntry = (overrides: Partial<LedgerTransaction>) => transaction({ paymentMode: "cash", paymentAccountId: null, ...overrides });
+
+  it("collects the owner's cash entries after its snapshot, plus transfers in and out", () => {
+    const entries = [
+      cashEntry({ id: "spend", amountMinor: 800 }),
+      cashEntry({ id: "gift", kind: "income", amountMinor: 1_000 }),
+      cashEntry({ id: "before", amountMinor: 999, occurredOn: "2026-07-19" }),
+      cashEntry({ id: "peer", amountMinor: 700, userId: "partner" }),
+      transaction({ id: "cheque", paymentMode: "cheque", paymentAccountId: null, amountMinor: 300 }),
+      transaction({ id: "wallet", amountMinor: 400 }),
+    ];
+    const movements = [transfer({ fromAccountId: "wallet", toAccountId: "cash", amountMinor: 2_000 }), transfer({ id: "deposit", fromAccountId: "cash", toAccountId: "bank", amountMinor: 500 })];
+    expect(calculateCurrentAccountBalance(cash, entries, movements)).toBe(5_000 - 800 + 1_000 + 2_000 - 500);
+  });
+
+  it("gives the same cash balance through the shared server and client index", () => {
+    const entries = [cashEntry({ id: "spend", amountMinor: 800 }), transaction({ id: "wallet", amountMinor: 400 })];
+    const [withCash, withWallet] = attachCurrentBalances([cash, account()], entries, []);
+    expect(withCash.currentBalanceMinor).toBe(calculateCurrentAccountBalance(cash, entries, []));
+    expect(withWallet.currentBalanceMinor).toBe(10_000 - 400);
+  });
+
+  it("leaves cash entries alone when there is no cash account", () => {
+    expect(attachCurrentBalances([account()], [cashEntry({ amountMinor: 800 })], [])[0].currentBalanceMinor).toBe(10_000);
+  });
+
+  it("decides which entries post to an account", () => {
+    expect(transactionPostsTo(cashEntry({}), cash)).toBe(true);
+    expect(transactionPostsTo(cashEntry({}), account())).toBe(false);
+    expect(transactionPostsTo(transaction({}), account())).toBe(true);
+  });
+});
+
+describe("transferRemovalEffects", () => {
+  it("states how each other account changes when an account and its transfers go", () => {
+    const bank = account({ id: "bank", balanceAsOf: "2026-07-01", balanceRecordedAt: "2026-07-01T00:00:00.000Z" });
+    const khalti = account({ id: "khalti" });
+    const effects = transferRemovalEffects("khalti", [bank, khalti], [
+      transfer({ id: "load", fromAccountId: "bank", toAccountId: "khalti", amountMinor: 18_000 }),
+      transfer({ id: "back", fromAccountId: "khalti", toAccountId: "bank", amountMinor: 3_000 }),
+      transfer({ id: "unrelated", fromAccountId: "bank", toAccountId: "other", amountMinor: 100 }),
+    ]);
+    expect(effects).toEqual([{ accountId: "bank", transferCount: 2, changeMinor: 15_000 }]);
+  });
+
+  it("ignores transfers already inside the other account's confirmed balance", () => {
+    const bank = account({ id: "bank", balanceAsOf: "2026-08-01", balanceRecordedAt: "2026-08-01T00:00:00.000Z" });
+    expect(transferRemovalEffects("khalti", [bank], [transfer({ fromAccountId: "bank", toAccountId: "khalti", amountMinor: 500 })])).toEqual([{ accountId: "bank", transferCount: 1, changeMinor: 0 }]);
   });
 });

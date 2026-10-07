@@ -1,3 +1,4 @@
+import { paymentAccountLabel } from "./payment-accounts";
 import type { AccountTransfer, DueItem, LedgerTransaction, PaymentAccount, SavedPlace } from "../types";
 
 export type LedgerSearchKind = "transaction" | "transfer" | "due" | "place";
@@ -16,17 +17,39 @@ function compact(value: string) {
   return value.trim().toLowerCase();
 }
 
-function amountMatches(query: string, amountMinor: number) {
-  const digits = query.replace(/[^\d.]/g, "");
-  if (!digits) return false;
+/**
+ * True when a numeric query ("1250", "1,250.50", "Rs 250", "NPR 1500") appears in the amount.
+ * A query with words in it ("bus 2") is a text search, so it never matches by amount.
+ */
+export function amountMatches(query: string, amountMinor: number) {
+  const numeric = compact(query).replace(/^(npr|rs\.?|रु\.?)\s*/, "");
+  if (!/^[\d,.\s]+$/.test(numeric)) return false;
+  // "1250.00" means 1250; comparing against the major amount only keeps "100" from matching NPR 10 (1000 paisa).
+  const digits = numeric.replace(/[^\d.]/g, "").replace(/\.0*$/, "");
+  if (!/\d/.test(digits)) return false;
   const major = (amountMinor / 100).toFixed(2).replace(/\.00$/, "");
-  return major.includes(digits) || String(amountMinor).includes(digits.replace(".", ""));
+  return major.includes(digits);
 }
 
-function textMatches(query: string, parts: readonly (string | null | undefined)[]) {
+/** Matches the whole query in one field, or every word of it across fields ("momo thamel" = note + area). */
+export function textMatches(query: string, parts: readonly (string | null | undefined)[]) {
   const needle = compact(query);
   if (!needle) return false;
-  return parts.some((part) => part && part.toLowerCase().includes(needle));
+  const fields = parts.flatMap((part) => part ? [part.toLowerCase()] : []);
+  if (fields.some((field) => field.includes(needle))) return true;
+  const words = needle.split(/\s+/);
+  return words.length > 1 && words.every((word) => fields.some((field) => field.includes(word)));
+}
+
+/** The one matcher both ledger searches (Ctrl+K and the Transactions page) use. */
+export function entryMatches(query: string, parts: readonly (string | null | undefined)[], amountMinor: number) {
+  return textMatches(query, parts) || amountMatches(query, amountMinor);
+}
+
+/** Every searchable field of a transaction, including its exact-location label and payment account. */
+export function transactionSearchParts(item: LedgerTransaction, categoryLabel: string, accounts: readonly PaymentAccount[] = []) {
+  const account = item.paymentAccount ?? (item.paymentAccountId ? accounts.find((entry) => entry.id === item.paymentAccountId) : undefined);
+  return [item.note, item.category, categoryLabel, item.subcategory, item.area, item.locationLabel, item.paymentMode, account?.label, account?.provider, account ? paymentAccountLabel(account) : null];
 }
 
 function accountLabel(accounts: readonly PaymentAccount[], id: string) {
@@ -51,8 +74,7 @@ export function searchLedger(query: string, input: {
 
   for (const item of input.transactions) {
     const title = item.note || label(item.category);
-    const matched = textMatches(needle, [title, item.note, item.category, label(item.category), item.subcategory, item.area, item.paymentMode]) || amountMatches(needle, item.amountMinor);
-    if (!matched) continue;
+    if (!entryMatches(needle, transactionSearchParts(item, label(item.category), input.accounts), item.amountMinor)) continue;
     hits.push({
       id: item.id,
       kind: "transaction",

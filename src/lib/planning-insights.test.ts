@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { calculateBudgetPacing, calculateMonthlyBreathingRoom, calculateSafeToSpend, calculateSafeToSpendV2, committedBeforeHorizon, detectSpendingHorizon } from "./planning-insights";
+import { calculateBudgetPacing, calculateMonthlyBreathingRoom, calculateSafeToSpend, calculateSafeToSpendV2, committedBeforeHorizon, detectSpendingHorizon, recurringAwaitingConfirmation } from "./planning-insights";
 import type { Budget, DueItem, LedgerTransaction, RecurringEntry } from "../types";
+import { calculatePeriodBudgetPacing, calculateUnbudgetedSpending } from "./planning-insights";
 
 const budget: Budget = { id: "budget-1", userId: "user-1", monthKey: "2026-07", category: "food", amountMinor: 1200000 };
 const transaction = (overrides: Partial<LedgerTransaction>): LedgerTransaction => ({
@@ -132,6 +133,82 @@ describe("budget pacing", () => {
   });
 });
 
+describe("all-spending, festival and unbudgeted pacing", () => {
+  const total: Budget = { id: "total", userId: "user-1", monthKey: "2026-07", category: "__total", amountMinor: 4000000 };
+  const julyEntries = () => [
+    transaction({ id: "food", category: "food", amountMinor: 700000 }),
+    transaction({ id: "rent", category: "housing", amountMinor: 1500000 }),
+    transaction({ id: "loan", category: "loan", amountMinor: 900000 }),
+    transaction({ id: "ours", category: "shopping", amountMinor: 100000, shared: true }),
+    transaction({ id: "salary", kind: "income", category: "salary", amountMinor: 5000000 }),
+    transaction({ id: "august", category: "food", amountMinor: 50000, occurredOn: "2026-08-01" }),
+  ];
+
+  it("counts every personal expense against an All spending limit, except loan movements", () => {
+    const result = calculateBudgetPacing([total], julyEntries(), [recurring({ category: "utilities" })], [due({ category: "health", amountMinor: 100000 })], new Date(2026, 6, 1), new Date(2026, 6, 10))[0];
+
+    expect(result).toMatchObject({ spentMinor: 2200000, upcomingRecurringMinor: 200000, upcomingDuesMinor: 100000, projectedMinor: 2500000, remainingMinor: 1500000, remainingDays: 22, tone: "watch" });
+    expect(result.dailyAllowanceMinor).toBe(Math.floor(1500000 / 22));
+  });
+
+  it("counts only entries marked Ours toward an Ours All spending limit", () => {
+    expect(calculateBudgetPacing([{ ...total, shared: true }], julyEntries(), [], [], new Date(2026, 6, 1), new Date(2026, 6, 10))[0].spentMinor).toBe(100000);
+  });
+
+  it("names the overall limit when it is used up", () => {
+    const result = calculateBudgetPacing([{ ...total, amountMinor: 2200000 }], julyEntries(), [], [], new Date(2026, 6, 1), new Date(2026, 6, 10))[0];
+
+    expect(result.alertDetail).toBe("Your overall spending limit is fully used.");
+  });
+
+  describe("festival season budget", () => {
+    const festival: Budget = { id: "fest", userId: "user-1", monthKey: "FEST:dashain-tihar-2083", category: "__total", amountMinor: 6100000 };
+    const bounds = { start: "2026-09-17", endExclusive: "2026-11-17" };
+    const entries = [
+      transaction({ id: "before", occurredOn: "2026-09-16", amountMinor: 999 }),
+      transaction({ id: "early", occurredOn: "2026-09-20", amountMinor: 1000000 }),
+      transaction({ id: "today", occurredOn: "2026-10-07", amountMinor: 500000 }),
+      transaction({ id: "after", occurredOn: "2026-11-17", amountMinor: 999 }),
+    ];
+
+    it("counts spending inside the season window and paces it by the days left", () => {
+      const result = calculatePeriodBudgetPacing(festival, bounds, entries, [], [], "2026-10-07");
+
+      expect(result).toMatchObject({ spentMinor: 1500000, elapsedPercentage: 34, remainingDays: 41, remainingMinor: 4600000, tone: "healthy" });
+      expect(result.dailyAllowanceMinor).toBe(Math.floor(4600000 / 41));
+    });
+
+    it("describes pace against the season, not the month", () => {
+      const result = calculatePeriodBudgetPacing(festival, bounds, [...entries, transaction({ id: "big", occurredOn: "2026-10-01", amountMinor: 2000000 })], [], [], "2026-10-07");
+
+      expect(result.tone).toBe("watch");
+      expect(result.alertDetail).toBe("57% used with 34% of the season elapsed.");
+    });
+
+    it("includes recurring bills and dues that fall inside the season", () => {
+      const result = calculatePeriodBudgetPacing(festival, bounds, entries, [recurring({ anchorDate: "2026-10-20", nextDueOn: "2026-10-20" })], [due({ dueOn: "2026-11-01" }), due({ id: "late", dueOn: "2026-11-20" })], "2026-10-07");
+
+      expect(result).toMatchObject({ upcomingRecurringMinor: 200000, upcomingDuesMinor: 200000 });
+    });
+
+    it("covers the whole season before it starts and nothing after it ends", () => {
+      expect(calculatePeriodBudgetPacing(festival, bounds, entries, [], [], "2026-09-01")).toMatchObject({ elapsedPercentage: 0, remainingDays: 61 });
+      expect(calculatePeriodBudgetPacing(festival, bounds, entries, [], [], "2026-12-01")).toMatchObject({ elapsedPercentage: 100, remainingDays: 0, dailyAllowanceMinor: 0 });
+      expect(calculatePeriodBudgetPacing(festival, bounds, entries, [], [], "2026-11-16").remainingDays).toBe(1);
+    });
+  });
+
+  it("lists spending no category budget counts, largest first", () => {
+    const result = calculateUnbudgetedSpending([budget, total], [...julyEntries(), transaction({ id: "ours-food", category: "food", amountMinor: 200000, shared: true })], new Date(2026, 6, 1));
+
+    expect(result).toEqual({ totalMinor: 1800000, categories: [{ category: "housing", totalMinor: 1500000 }, { category: "food", totalMinor: 200000 }, { category: "shopping", totalMinor: 100000 }] });
+  });
+
+  it("ignores budgets from other months when deciding what is budgeted", () => {
+    expect(calculateUnbudgetedSpending([{ ...budget, monthKey: "2026-06" }], [transaction({})], new Date(2026, 6, 1)).totalMinor).toBe(700000);
+  });
+});
+
 describe("monthly breathing room", () => {
   it("calculates a safe-to-spend estimate from current balance and known commitments", () => {
     expect(calculateSafeToSpend(1000000, {
@@ -225,6 +302,14 @@ describe("spending horizon", () => {
     expect(horizon).toEqual({ throughDate: "2026-08-05", daysRemaining: 17, source: "incomePattern" });
   });
 
+  it("never takes loan repayments for a payday", () => {
+    const repayments = ["2026-04-12", "2026-05-12", "2026-06-12"].map((occurredOn, index) =>
+      transaction({ id: `repay-${index}`, kind: "income", category: "loan", occurredOn }));
+    const horizon = detectSpendingHorizon([], repayments, new Date(2026, 6, 1), "2026-07-20");
+
+    expect(horizon.source).toBe("periodEnd");
+  });
+
   it("ignores a one-off income date", () => {
     const horizon = detectSpendingHorizon([], [transaction({ kind: "income", occurredOn: "2026-06-05" })], new Date(2026, 6, 1), "2026-07-20");
 
@@ -284,6 +369,25 @@ describe("committed before horizon", () => {
 
     expect(committed).toBe(0);
   });
+
+  it("still counts a recurring bill that fell due before today but is not confirmed", () => {
+    const rent = recurring({ anchorDate: "2026-07-01", nextDueOn: "2026-07-01", amountMinor: 2_500_000 });
+
+    // Rent from the 1st has not been recorded, so the balance still holds it; it is not free to spend.
+    expect(committedBeforeHorizon([rent], [], horizon, "2026-07-20")).toBe(2_500_000);
+    // A weekly bill two weeks behind counts every missed week plus the ones still ahead.
+    expect(committedBeforeHorizon([recurring({ recurrenceUnit: "week", anchorDate: "2026-07-06", nextDueOn: "2026-07-06", amountMinor: 10000 })], [], horizon, "2026-07-20")).toBe(10000 * 4);
+  });
+
+  it("totals the recurring bills waiting to be confirmed, today's included", () => {
+    expect(recurringAwaitingConfirmation([
+      recurring({ id: "rent", anchorDate: "2026-07-01", nextDueOn: "2026-07-01", amountMinor: 2_500_000 }),
+      recurring({ id: "wifi", nextDueOn: "2026-07-20", amountMinor: 150000 }),
+      recurring({ id: "later", nextDueOn: "2026-07-25", amountMinor: 900000 }),
+      recurring({ id: "salary", kind: "income", nextDueOn: "2026-07-01", amountMinor: 8_000_000 }),
+      recurring({ id: "paused", nextDueOn: "2026-07-01", amountMinor: 700000, active: false }),
+    ], "2026-07-20")).toBe(2_650_000);
+  });
 });
 
 describe("safe to spend v2", () => {
@@ -309,5 +413,10 @@ describe("safe to spend v2", () => {
 
   it("rounds the daily allowance down so the horizon is never overspent", () => {
     expect(calculateSafeToSpendV2(99_999, 0, horizon).perDayMinor).toBe(9_999);
+  });
+
+  it("reports how much of the commitment is waiting to be confirmed", () => {
+    expect(calculateSafeToSpendV2(1_000_000, 300_000, horizon, 0, 250_000)).toMatchObject({ committedMinor: 300_000, overdueRecurringMinor: 250_000, totalMinor: 700_000 });
+    expect(calculateSafeToSpendV2(1_000_000, 300_000, horizon).overdueRecurringMinor).toBe(0);
   });
 });

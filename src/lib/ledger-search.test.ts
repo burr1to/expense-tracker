@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { searchLedger } from "./ledger-search";
+import { amountMatches, searchLedger } from "./ledger-search";
 import type { AccountTransfer, DueItem, LedgerTransaction, PaymentAccount, SavedPlace } from "../types";
 
 const transaction: LedgerTransaction = {
@@ -37,6 +37,37 @@ describe("searchLedger", () => {
     expect(searchLedger("anu", input)[0]).toMatchObject({ kind: "due", href: "/dues?due=due1" });
     expect(searchLedger("lazimpat", input)[0]).toMatchObject({ kind: "place", href: "/maps?place=place1" });
     expect(searchLedger("esewa", input)[0]).toMatchObject({ kind: "transfer", title: "Salary → eSewa" });
+  });
+
+  it("only treats numeric queries as amounts", () => {
+    expect(amountMatches("1500", 150000)).toBe(true);
+    expect(amountMatches("NPR 1,500", 150000)).toBe(true);
+    expect(amountMatches("rs. 1500", 150000)).toBe(true);
+    expect(amountMatches("bus 1", 150000)).toBe(false);
+    expect(amountMatches(".", 150000)).toBe(false);
+    expect(searchLedger("groceries 1", input)).toEqual([]);
+  });
+
+  it("compares against the rupee amount, not the paisa count", () => {
+    expect(amountMatches("1500.00", 150000)).toBe(true);
+    expect(amountMatches("1,500.0", 150000)).toBe(true);
+    expect(amountMatches("12.5", 1250)).toBe(true);
+    expect(amountMatches("12.50", 1250)).toBe(true);
+    expect(amountMatches("100.10", 10010)).toBe(true);
+    expect(amountMatches("1250", 1250)).toBe(false);
+    expect(amountMatches("100", 1000)).toBe(false);
+  });
+
+  it("finds a transaction by its exact-location label or payment account", () => {
+    const pinned = { ...transaction, id: "t2", note: "Coffee", area: null, locationLabel: "Himalayan Java", paymentMode: "online" as const, paymentAccountId: "a2" };
+    const withPin = { ...input, transactions: [pinned] };
+    expect(searchLedger("himalayan", withPin).map((hit) => hit.id)).toEqual(["t2"]);
+    expect(searchLedger("esewa", withPin).some((hit) => hit.id === "t2")).toBe(true);
+  });
+
+  it("matches every word of a query across a transaction's fields", () => {
+    expect(searchLedger("groceries cash", input).map((hit) => hit.id)).toEqual(["t1"]);
+    expect(searchLedger("groceries esewa", input)).toEqual([]);
   });
 
   it("returns nothing for a blank query", () => {

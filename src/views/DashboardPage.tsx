@@ -9,13 +9,16 @@ import { ButtonSpinner } from "../components/ButtonSpinner";
 import { MonthPicker } from "../components/MonthPicker";
 import { TransactionRow } from "../components/TransactionRow";
 import { TransferRow } from "../components/TransferRow";
+import { RecurringConfirmSheet } from "../components/RecurringConfirmSheet";
+import { FestivalHeadsUp } from "../components/FestivalHeadsUp";
+import { ALL_SPENDING_LABEL, budgetAllowanceText, budgetLabel, isAllSpendingBudget } from "../lib/budgets";
 import { getCategory } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
 import { formatLedgerDay, formatLedgerMonth, isInMonth, monthKey, todayInput } from "../lib/dates";
 import { dailyExpenseSeries, summarizeLedger } from "../lib/ledger";
 import { generateInsights } from "../lib/insights";
 import { calculatePlaceSpendingTrends, placeTrendPeriodOptions, type PlaceSpendingTrend, type PlaceTrendPeriodMonths } from "../lib/place-spending-trends";
-import { calculateBudgetPacing, calculateMonthlyBreathingRoom, calculateSafeToSpendV2, committedBeforeHorizon, detectSpendingHorizon } from "../lib/planning-insights";
+import { calculateBudgetPacing, calculateMonthlyBreathingRoom, calculateSafeToSpendV2, committedBeforeHorizon, detectSpendingHorizon, recurringAwaitingConfirmation } from "../lib/planning-insights";
 import { spendingPeriodOptions, spendingPeriodRange, type SpendingPeriod } from "../lib/spending-period";
 import { totalCurrentBalance } from "../lib/account-balances";
 import { forecastCash } from "../lib/cash-forecast";
@@ -43,7 +46,6 @@ interface DashboardPageProps {
   onSelectedDayChange: (occurredOn: string) => void;
   onNavigate: (view: AppView) => void;
   onOpenPlace: (placeKey: string) => void;
-  onConfirmRecurring: (id: string) => Promise<void>;
   onVerifyPin: (pin: string) => Promise<void>;
 }
 
@@ -66,8 +68,9 @@ function spendingHorizonLabel(horizon: { throughDate: string; daysRemaining: num
   return `Covers ${days}, until the end of the month on ${until}.`;
 }
 
-export function DashboardPage({ month, focus, currency, transactions, transfers, budgets, recurringEntries, dueItems, goals, customCategories, paymentAccounts, savedPlaces, hasPin, safeToSpendBufferMinor, calendarSystem, onMonthChange, onAdd, onSelectedDayChange, onNavigate, onOpenPlace, onConfirmRecurring, onVerifyPin }: DashboardPageProps) {
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+export function DashboardPage({ month, focus, currency, transactions, transfers, budgets, recurringEntries, dueItems, goals, customCategories, paymentAccounts, savedPlaces, hasPin, safeToSpendBufferMinor, calendarSystem, onMonthChange, onAdd, onSelectedDayChange, onNavigate, onOpenPlace, onVerifyPin }: DashboardPageProps) {
+  const [reviewingRecurringId, setReviewingRecurringId] = useState<string | null>(null);
+  const [showAllDue, setShowAllDue] = useState(false);
   const [selectedDay, setSelectedDay] = useState<Date>(() => isSameMonth(month, new Date()) ? new Date() : startOfMonth(month));
   const [spendingPeriod, setSpendingPeriod] = useState<SpendingPeriod>("weekly");
   const [placeTrendPeriod, setPlaceTrendPeriod] = useState<PlaceTrendPeriodMonths>(1);
@@ -110,17 +113,20 @@ export function DashboardPage({ month, focus, currency, transactions, transfers,
     scope: "day", selectedDayKey, kind: "all", category: "all", from: "", to: "", minMinor: null, maxMinor: null, paymentMode: "all", query: "",
   }), [customCategories, paymentAccounts, selectedDayKey, transactions, transfers]);
   const daySummary = useMemo(() => summarizeLedger(dayTransactions, customCategories), [customCategories, dayTransactions]);
-  const insights = useMemo(() => generateInsights(transactions, month, currency, customCategories), [currency, customCategories, month, transactions]);
+  const insights = useMemo(() => generateInsights(transactions, month, currency, customCategories, { recurringEntries, dueItems, calendarSystem, today }), [calendarSystem, currency, customCategories, dueItems, month, recurringEntries, today, transactions]);
   const currentBudgets = useMemo(() => budgets.filter((item) => item.monthKey === monthKey(month)), [budgets, month]);
   const budgetPacing = useMemo(() => calculateBudgetPacing(currentBudgets, transactions, recurringEntries, dueItems, month), [currentBudgets, dueItems, month, recurringEntries, transactions]);
   const breathingRoom = useMemo(() => calculateMonthlyBreathingRoom(transactions, recurringEntries, dueItems, month), [dueItems, month, recurringEntries, transactions]);
   const spendingHorizon = useMemo(() => detectSpendingHorizon(recurringEntries, transactions, month, today), [month, recurringEntries, today, transactions]);
   const committedMinor = useMemo(() => committedBeforeHorizon(recurringEntries, dueItems, spendingHorizon, today), [dueItems, recurringEntries, spendingHorizon, today]);
-  const safeToSpend = calculateSafeToSpendV2(trackedBalance, committedMinor, spendingHorizon, safeToSpendBufferMinor);
+  const safeToSpend = calculateSafeToSpendV2(trackedBalance, committedMinor, spendingHorizon, safeToSpendBufferMinor, recurringAwaitingConfirmation(recurringEntries, today));
   const currentMonth = isSameMonth(month, new Date());
-  const budgetTotal = currentBudgets.reduce((sum, item) => sum + item.amountMinor, 0);
-  const budgetSpent = budgetPacing.reduce((sum, item) => sum + item.spentMinor, 0);
-  const budgetUpcoming = budgetPacing.reduce((sum, item) => sum + item.upcomingMinor, 0);
+  // An "All spending" limit already covers every category, so it leads the home row instead of being added to the category totals.
+  const totalBudgetPacing = budgetPacing.find((item) => isAllSpendingBudget(item.budget));
+  const categoryBudgetPacing = budgetPacing.filter((item) => !isAllSpendingBudget(item.budget));
+  const budgetTotal = categoryBudgetPacing.reduce((sum, item) => sum + item.budget.amountMinor, 0);
+  const budgetSpent = categoryBudgetPacing.reduce((sum, item) => sum + item.spentMinor, 0);
+  const budgetUpcoming = categoryBudgetPacing.reduce((sum, item) => sum + item.upcomingMinor, 0);
   const budgetProjected = budgetSpent + budgetUpcoming;
   const budgetPercentage = budgetTotal > 0 ? Math.round((budgetProjected / budgetTotal) * 100) : 0;
   const budgetRisk = [...budgetPacing].filter((item) => item.tone !== "healthy").sort((a, b) => b.projectedPercentage - a.projectedPercentage)[0];
@@ -132,8 +138,8 @@ export function DashboardPage({ month, focus, currency, transactions, transfers,
   })[0];
   const goalPercentage = highlightedGoal?.targetMinor ? Math.round((highlightedGoal.savedMinor / highlightedGoal.targetMinor) * 100) : 0;
   const hasPlans = currentBudgets.length > 0 || goals.length > 0 || upcomingEntries.length > 0;
-  const dueEntries = useMemo(() => recurringEntries.filter((entry) => entry.active && entry.nextDueOn <= today), [recurringEntries, today]);
-  const confirmRecurring = async (id: string) => { if (confirmingId) return; setConfirmingId(id); try { await onConfirmRecurring(id); } finally { setConfirmingId(null); } };
+  const dueEntries = useMemo(() => recurringEntries.filter((entry) => entry.active && entry.nextDueOn <= today).sort((a, b) => a.nextDueOn.localeCompare(b.nextDueOn)), [recurringEntries, today]);
+  const visibleDueEntries = showAllDue ? dueEntries : dueEntries.slice(0, 3);
   const changeMonth = (nextMonth: Date) => {
     onMonthChange(nextMonth);
     if (!isSameMonth(selectedDay, nextMonth)) setSelectedDay(isSameMonth(nextMonth, new Date()) ? new Date() : startOfMonth(nextMonth));
@@ -187,7 +193,9 @@ export function DashboardPage({ month, focus, currency, transactions, transfers,
         <button className="desktop-quick-add primary-button" onClick={() => onAdd(selectedDayKey)}><Plus size={18} />Add transaction</button>
       </header>
 
-      {dueEntries.length > 0 && <section className="due-strip"><div><CalendarBlank size={23} weight="duotone" /><div><strong>{dueEntries.length} recurring {dueEntries.length === 1 ? "entry is" : "entries are"} ready</strong><span>Confirm before adding anything to your ledger.</span></div></div><div>{dueEntries.slice(0, 2).map((entry) => { const confirming = confirmingId === entry.id; return <button key={entry.id} disabled={Boolean(confirmingId)} onClick={() => void confirmRecurring(entry.id)}>{confirming ? <ButtonSpinner /> : <Check size={15} />}{confirming ? "Confirming…" : entry.note || getCategory(entry.category, customCategories).label}</button>; })}</div></section>}
+      {dueEntries.length > 0 && <section className="due-strip" id="due-recurring-strip"><div><CalendarBlank size={23} weight="duotone" /><div><strong>{dueEntries.length} recurring {dueEntries.length === 1 ? "entry is" : "entries are"} ready</strong><span>Tap one to record it, adjust the amount, or skip it.</span></div></div><div className="due-strip-entries">{visibleDueEntries.map((entry) => { const label = entry.note || getCategory(entry.category, customCategories).label; return <button key={entry.id} onClick={() => setReviewingRecurringId(entry.id)} aria-label={`Review ${label}`}><Check size={15} /><span className="due-strip-label">{label}</span><span className="amount">{formatMoney(entry.amountMinor, currency)}</span></button>; })}{dueEntries.length > visibleDueEntries.length && <button className="due-strip-more" onClick={() => setShowAllDue(true)}>+{dueEntries.length - visibleDueEntries.length} more</button>}</div></section>}
+
+      <FestivalHeadsUp transactions={transactions} budgets={budgets} currency={currency} />
 
       <section className="summary-strip" aria-label="Monthly summary">
         <div><span>Income</span><strong className="income">{formatMoney(summary.income, currency)}</strong></div>
@@ -212,7 +220,7 @@ export function DashboardPage({ month, focus, currency, transactions, transfers,
         <div className="section-heading"><div><span className="section-label">{formatLedgerDay(selectedDay, calendarSystem, "date")} transactions</span><h2>{dayEntries.length ? `${dayEntries.length} ${dayEntries.length === 1 ? "entry" : "entries"}` : "No activity"}</h2></div><button className="text-button" onClick={() => onNavigate("transactions")}>Full history <ArrowRight size={16} /></button></div>
         <div className="transaction-list">
           {dayEntries.map((entry) => entry.type === "transaction"
-            ? <TransactionRow key={`transaction-${entry.transaction.id}`} transaction={entry.transaction} currency={currency} customCategories={customCategories} compact />
+            ? <TransactionRow key={`transaction-${entry.transaction.id}`} transaction={entry.transaction} currency={currency} customCategories={customCategories} compact tapToEdit />
             : <TransferRow key={`transfer-${entry.transfer.id}`} transfer={entry.transfer} fromLabel={transferAccountLabel(paymentAccounts, entry.transfer.fromAccountId)} toLabel={transferAccountLabel(paymentAccounts, entry.transfer.toAccountId)} currency={currency} compact />)}
           {!dayEntries.length && <EmptyState title="No activity this day" message="Choose another day, add an entry, or record a transfer from Accounts." action={<button className="primary-button small" onClick={() => onAdd(selectedDayKey)}><CalendarBlank size={17} />Add transaction</button>} />}
         </div>
@@ -356,6 +364,7 @@ export function DashboardPage({ month, focus, currency, transactions, transfers,
           <span className="section-label">Safe to spend per day</span>
           {hasPin && paymentAccounts.length > 0 && balancesUnlocked ? <h2>{formatMoney(safeToSpend.perDayMinor, currency)}<small>/day</small></h2> : <h2>Amount locked</h2>}
           <p>{spendingHorizonLabel(spendingHorizon)} Estimated from your tracked balance minus everything already committed before then. It is a planning guide, not a live bank balance.</p>
+          {hasPin && paymentAccounts.length > 0 && balancesUnlocked && safeToSpend.overdueRecurringMinor > 0 && <p className="safe-to-spend-waiting">Includes <span className="amount">{formatMoney(safeToSpend.overdueRecurringMinor, currency)}</span> in recurring bills waiting to be confirmed. <button type="button" className="text-button" onClick={() => document.getElementById("due-recurring-strip")?.scrollIntoView({ behavior: "smooth", block: "center" })}>Review</button></p>}
         </div>
         {hasPin && paymentAccounts.length > 0 && balancesUnlocked ? <div className="safe-to-spend-breakdown">
           <span><small>Left to spend</small><strong>{formatMoney(safeToSpend.totalMinor, currency)}</strong></span>
@@ -384,12 +393,13 @@ export function DashboardPage({ month, focus, currency, transactions, transfers,
         <article className="plan-snapshot">
           <div className="section-heading"><div><span className="section-label">Your plans</span><h2>{hasPlans ? "What you’re working toward" : "Make a plan for your money"}</h2></div><button className="text-button" onClick={() => onNavigate("plan")}>{hasPlans ? "View all" : "Get started"} <ArrowRight size={16} /></button></div>
           {hasPlans ? <div className="home-plan-list">
-            {currentBudgets.length > 0 && <div className={`home-plan-row${budgetRisk ? " attention" : ""}`}><span className="home-plan-icon budget"><Flag size={17} weight="duotone" /></span><div><span><strong>{budgetRisk ? `${getCategory(budgetRisk.budget.category, customCategories).label}: ${budgetRisk.alertTitle}` : `${formatLedgerMonth(month, calendarSystem)} budgets`}</strong><small>{budgetPercentage}% projected</small></span><div className="bar-track"><span style={{ width: `${Math.min(100, budgetPercentage)}%` }} /></div><p>{formatMoney(budgetSpent, currency)} spent{budgetUpcoming > 0 ? ` + ${formatMoney(budgetUpcoming, currency)} upcoming` : ""} of {formatMoney(budgetTotal, currency)} across {currentBudgets.length} {currentBudgets.length === 1 ? "category" : "categories"}</p></div></div>}
+            {totalBudgetPacing ? <div className={`home-plan-row${budgetRisk ? " attention" : ""}`}><span className="home-plan-icon budget"><Flag size={17} weight="duotone" /></span><div><span><strong>{budgetRisk ? `${budgetLabel(budgetRisk.budget.category, customCategories)}: ${budgetRisk.alertTitle}` : `${ALL_SPENDING_LABEL} · ${formatLedgerMonth(month, calendarSystem)}`}</strong><small>{totalBudgetPacing.projectedPercentage}% projected</small></span><div className="bar-track"><span style={{ width: `${Math.min(100, totalBudgetPacing.projectedPercentage)}%` }} /></div><p>{budgetAllowanceText(totalBudgetPacing, currency)}{categoryBudgetPacing.length ? ` · ${categoryBudgetPacing.length} category ${categoryBudgetPacing.length === 1 ? "budget" : "budgets"}` : ""}</p></div></div>
+              : currentBudgets.length > 0 && <div className={`home-plan-row${budgetRisk ? " attention" : ""}`}><span className="home-plan-icon budget"><Flag size={17} weight="duotone" /></span><div><span><strong>{budgetRisk ? `${budgetLabel(budgetRisk.budget.category, customCategories)}: ${budgetRisk.alertTitle}` : `${formatLedgerMonth(month, calendarSystem)} budgets`}</strong><small>{budgetPercentage}% projected</small></span><div className="bar-track"><span style={{ width: `${Math.min(100, budgetPercentage)}%` }} /></div><p>{formatMoney(budgetSpent, currency)} spent{budgetUpcoming > 0 ? ` + ${formatMoney(budgetUpcoming, currency)} upcoming` : ""} of {formatMoney(budgetTotal, currency)} across {categoryBudgetPacing.length} {categoryBudgetPacing.length === 1 ? "category" : "categories"}</p></div></div>}
             {highlightedGoal && <div className="home-plan-row"><span className="home-plan-icon goal"><Check size={17} weight="bold" /></span><div><span><strong>{highlightedGoal.name}</strong><small>{goalPercentage}% saved</small></span><div className="bar-track"><span style={{ width: `${Math.min(100, goalPercentage)}%` }} /></div><p>{formatMoney(highlightedGoal.savedMinor, currency)} of {formatMoney(highlightedGoal.targetMinor, currency)}{goals.length > 1 ? ` · +${goals.length - 1} more ${goals.length === 2 ? "goal" : "goals"}` : ""}</p></div></div>}
             {upcomingEntries[0] && <div className="home-plan-row recurring"><span className="home-plan-icon recurring"><Repeat size={17} weight="duotone" /></span><div><span><strong>{upcomingEntries[0].note || getCategory(upcomingEntries[0].category, customCategories).label}</strong><small>{format(parseISO(upcomingEntries[0].nextDueOn), "MMM d")}</small></span><p>{formatMoney(upcomingEntries[0].amountMinor, currency)} scheduled{upcomingEntries.length > 1 ? ` · +${upcomingEntries.length - 1} more` : ""}</p></div></div>}
           </div> : <p className="plan-empty-copy">Add a budget, savings goal, or recurring entry and its progress will stay visible here.</p>}
         </article>
-        <article className="insight-snapshot"><div className="section-heading"><div><span className="section-label">Smart insights</span><h2>Your month, explained</h2></div><Lightbulb size={22} weight="duotone" /></div><div>{insights.slice(0, 3).map((insight) => <div key={insight.id} className={insight.tone}><strong>{insight.title}</strong><span>{insight.detail}</span></div>)}</div></article>
+        <article className="insight-snapshot"><div className="section-heading"><div><span className="section-label">Smart insights</span><h2>Your month, explained</h2></div><Lightbulb size={22} weight="duotone" /></div><div>{insights.slice(0, 3).map((insight) => <div key={insight.id} className={insight.tone}><strong>{insight.title}{insight.amountMinor !== undefined && <> <span className="amount">{formatMoney(insight.amountMinor, currency)}</span></>}</strong><span>{insight.detail}</span></div>)}</div></article>
       </section>
       <Modal
         opened={balanceUnlockOpen}
@@ -413,6 +423,7 @@ export function DashboardPage({ month, focus, currency, transactions, transfers,
           <button className="primary-button full-width" disabled={balanceUnlocking || balancePin.length < 4}>{balanceUnlocking ? <><ButtonSpinner />Checking…</> : "Unlock balances"}</button>
         </form>
       </Modal>
+      <RecurringConfirmSheet entryId={reviewingRecurringId} onClose={() => setReviewingRecurringId(null)} />
     </div>
   );
 }

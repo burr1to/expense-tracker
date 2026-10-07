@@ -5,6 +5,7 @@ import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
 import { EmptyState } from "../components/EmptyState";
 import { MonthPicker } from "../components/MonthPicker";
 import { formatMoney } from "../lib/currency";
+import { countsAsIncomeOrSpending } from "../lib/categories";
 import { isInMonth, monthKey, todayInput } from "../lib/dates";
 import { monthlySeries, summarizeLedger } from "../lib/ledger";
 import { financialMilestones } from "../lib/milestones";
@@ -12,8 +13,8 @@ import type { CalendarSystem, CurrencyCode, CustomCategory, DueItem, LedgerTrans
 import { totalCurrentBalance } from "../lib/account-balances";
 import { isCompletedReportMonth } from "../lib/monthly-report";
 import { addFiscalYears, fiscalYearBounds, fiscalYearLabel, fiscalYearOf } from "../lib/fiscal-year";
-import { compareFestivalSpending, FESTIVALS, festivalBounds, festivalMonthLabel, festivalPeriodKey } from "../lib/festivals";
-import { adToBs, BS_MIN_YEAR } from "../lib/nepali-date";
+import { compareFestivalSpending, expensesBetween, FESTIVALS, festivalMonthLabel, type FestivalComparison } from "../lib/festivals";
+import { adToBs } from "../lib/nepali-date";
 const reportCategoryColors = ["#0072b2", "#e69f00", "#009e73", "#d55e00", "#cc79a7", "#56b4e9", "#f0e442", "#6f6f6f", "#332288", "#117733", "#cc6677", "#88ccee"] as const;
 
 interface ReportsPageProps {
@@ -33,7 +34,7 @@ export function ReportsPage({ month, currency, transactions, customCategories, p
   const [activeCategoryIndex, setActiveCategoryIndex] = useState<number | null>(null);
   const current = useMemo(() => transactions.filter((item) => isInMonth(item.occurredOn, month)), [month, transactions]);
   const summary = useMemo(() => summarizeLedger(current, customCategories), [current, customCategories]);
-  const expenseCount = useMemo(() => current.reduce((count, item) => count + (item.kind === "expense" ? 1 : 0), 0), [current]);
+  const expenseCount = useMemo(() => current.reduce((count, item) => count + (item.kind === "expense" && countsAsIncomeOrSpending(item) ? 1 : 0), 0), [current]);
   const categoryData = summary.categories.map((item, index) => ({ ...item, color: reportCategoryColors[index % reportCategoryColors.length] }));
   const history = useMemo(() => monthlySeries(transactions), [transactions]);
   const milestones = useMemo(() => financialMilestones(transactions, dueItems), [dueItems, transactions]);
@@ -86,34 +87,26 @@ function NepaliYearSection({ transactions, currency }: { transactions: LedgerTra
   const bsYear = (() => { try { return adToBs(today).year; } catch { return null; } })();
   const picture = useMemo(() => {
     const bounds = fiscalYearBounds(fiscalKey);
-    const ranges = bsYear === null ? [] : FESTIVALS.flatMap((festival) => [bsYear, bsYear - 1].flatMap((year) => {
-      if (year < BS_MIN_YEAR) return [];
-      const range = festivalBounds(festival, year);
-      return [{ key: festivalPeriodKey(festival, year), start: range.start, endExclusive: range.endExclusive }];
-    }));
-    const spent = new Map<string, number>();
     let income = 0;
     let expenses = 0;
     let entries = 0;
     for (const item of transactions) {
+      const counted = countsAsIncomeOrSpending(item);
       if (item.occurredOn >= bounds.start && item.occurredOn < bounds.endExclusive) {
         entries += 1;
-        if (item.kind === "income") income += item.amountMinor;
-        else expenses += item.amountMinor;
-      }
-      if (item.kind !== "expense") continue;
-      for (const range of ranges) {
-        if (item.occurredOn >= range.start && item.occurredOn < range.endExclusive) spent.set(range.key, (spent.get(range.key) ?? 0) + item.amountMinor);
+        if (counted && item.kind === "income") income += item.amountMinor;
+        else if (counted) expenses += item.amountMinor;
       }
     }
+    const spentBetween = expensesBetween(transactions);
     return {
       bounds,
       income,
       expenses,
       entries,
-      festivals: bsYear === null ? [] : FESTIVALS.map((festival) => compareFestivalSpending(festival, bsYear, (key) => spent.get(key) ?? 0)),
+      festivals: bsYear === null ? [] : FESTIVALS.flatMap((festival) => { try { return [compareFestivalSpending(festival, bsYear, spentBetween, today)]; } catch { return []; } }),
     };
-  }, [bsYear, fiscalKey, transactions]);
+  }, [bsYear, fiscalKey, today, transactions]);
   const { bounds, income, expenses, entries, festivals } = picture;
   const net = income - expenses;
 
@@ -129,13 +122,26 @@ function NepaliYearSection({ transactions, currency }: { transactions: LedgerTra
       <div><span>Entries</span><strong>{entries}</strong></div>
     </div>
     {festivals.length > 0 && <div className="festival-grid">
-      {festivals.map((comparison) => <article className="festival-card" key={comparison.festival.id}>
-        <header><strong>{comparison.festival.name} {comparison.bsYear}</strong><small>{festivalMonthLabel(comparison.festival)}</small></header>
-        <b>{formatMoney(comparison.spentMinor, currency)}</b>
-        {comparison.changePercentage === null
-          ? <small className="festival-change muted">No {comparison.previousBsYear} spending to compare against yet.</small>
-          : <small className={`festival-change ${comparison.changePercentage > 0 ? "up" : "down"}`}>{comparison.changePercentage > 0 ? "+" : ""}{comparison.changePercentage}% vs {comparison.previousBsYear} ({formatMoney(comparison.previousSpentMinor ?? 0, currency)})</small>}
-      </article>)}
+      {festivals.map((comparison) => <FestivalCard key={comparison.periodKey} comparison={comparison} currency={currency} today={today} />)}
     </div>}
   </section>;
+}
+
+/** One season this BS year: still to come (last year's total, never "−100%"), under way (against last year at the same day), or over. */
+function FestivalCard({ comparison, currency, today }: { comparison: FestivalComparison; currency: CurrencyCode; today: string }) {
+  const { festival, status, previousBsYear, previousSpentMinor, previousComparableMinor, changePercentage } = comparison;
+  const dayCount = Math.round((Date.parse(`${comparison.bounds.start}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+  const startsIn = dayCount === 1 ? "Starts tomorrow" : `Starts in ${dayCount} days`;
+  const change = changePercentage === null ? null : <small className={`festival-change ${changePercentage > 0 ? "up" : "down"}`}>{changePercentage > 0 ? "+" : ""}{changePercentage}% vs {status === "running" ? `the same point in ${previousBsYear}` : previousBsYear} (<span className="festival-amount">{formatMoney(previousComparableMinor ?? 0, currency)}</span>)</small>;
+  return <article className={`festival-card is-${status}`}>
+    <header><strong>{festival.name} {comparison.bsYear}</strong><small>{festivalMonthLabel(festival)}</small></header>
+    {status === "upcoming" ? <>
+      <b className="festival-status">{startsIn}</b>
+      <small className="festival-change muted">Coming up · {previousSpentMinor ? <>last year <span className="festival-amount">{formatMoney(previousSpentMinor, currency)}</span></> : `nothing logged for ${previousBsYear}`}</small>
+    </> : <>
+      <b className="festival-amount">{formatMoney(comparison.spentMinor, currency)}</b>
+      {status === "running" && <small className="festival-progress">Day {comparison.daysElapsed} of {comparison.seasonDays} · so far</small>}
+      {change ?? <small className="festival-change muted">{previousSpentMinor === null ? "Nothing earlier to compare against." : status === "running" && previousSpentMinor > 0 ? <>Nothing by this point in {previousBsYear} · <span className="festival-amount">{formatMoney(previousSpentMinor, currency)}</span> over its whole season</> : `No ${previousBsYear} spending to compare against yet.`}</small>}
+    </>}
+  </article>;
 }

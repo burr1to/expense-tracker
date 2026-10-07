@@ -1,4 +1,5 @@
 import { format, parseISO } from "date-fns";
+import { countsAsIncomeOrSpending } from "./categories";
 import type { DueItem, LedgerTransaction } from "../types";
 
 export interface FinancialMilestone { id: string; date: string; title: string; detail: string; tone: "blue" | "green" | "gold" }
@@ -13,6 +14,7 @@ export function financialMilestones(transactions: readonly LedgerTransaction[], 
 
   const months = new Map<string, { income: number; expenses: number }>();
   for (const item of transactions) {
+    if (!countsAsIncomeOrSpending(item)) continue;
     const key = item.occurredOn.slice(0, 7); const current = months.get(key) ?? { income: 0, expenses: 0 };
     current[item.kind === "income" ? "income" : "expenses"] += item.amountMinor; months.set(key, current);
   }

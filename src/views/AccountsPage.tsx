@@ -1,18 +1,19 @@
-import { ArrowCounterClockwise, ArrowsLeftRight, Bank, CalendarBlank, Check, CheckCircle, Copy, LockKey, Plus, Receipt, Scales, ShieldCheck, Trash, TrendDown, TrendUp, UploadSimple } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, ArrowsLeftRight, Bank, CalendarBlank, Check, CheckCircle, Copy, LockKey, PencilSimple, Plus, Receipt, Scales, ShieldCheck, Trash, TrendDown, TrendUp, UploadSimple } from "@phosphor-icons/react";
 import { Modal, NumberInput, Select, Switch, TextInput } from "@mantine/core";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { EmptyState } from "../components/EmptyState";
 import { TransactionRow } from "../components/TransactionRow";
 import { TransferRow } from "../components/TransferRow";
 import { useLedger } from "../context/LedgerContext";
-import { accountActivityThrough, activityHasMovement, expectedAccountBalanceThrough, reconciliationSpendingGap, type AccountActivity } from "../lib/account-balances";
+import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
+import { accountActivityThrough, activityHasMovement, expectedAccountBalanceThrough, reconciliationSpendingGap, transactionPostsTo, transferRemovalEffects, type AccountActivity } from "../lib/account-balances";
 import { formatMoney, majorToMinor } from "../lib/currency";
-import { todayInput } from "../lib/dates";
+import { formatLedgerDate, todayInput } from "../lib/dates";
 import { listLedgerActivity, transferAccountLabel } from "../lib/transaction-history";
-import { NEPAL_MOBILE_BANKS, PAYMENT_ACCOUNT_TYPES, paymentAccountLabel } from "../lib/payment-accounts";
-import type { CurrencyCode, LedgerTransaction, PaymentAccountType } from "../types";
+import { isCashAccount, NEPAL_MOBILE_BANKS, normalizeAccountTail, PAYMENT_ACCOUNT_TYPES, paymentAccountLabel, paymentAccountProviderError, providerForAccountType } from "../lib/payment-accounts";
+import type { CurrencyCode, LedgerTransaction, PaymentAccount, PaymentAccountType } from "../types";
 import { FormError } from "../components/FormError";
 
 interface AccountsPageProps {
@@ -35,13 +36,17 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
     approveAccountReconciliation,
     resetAccountReconciliation,
     deletePaymentAccount,
-    saveTransfer,
+    updatePaymentAccountTail,
     deleteTransfer,
   } = useLedger();
+  const workspace = useContext(LedgerWorkspaceContext);
   const [selectedAccountId, setSelectedAccountId] = useState(paymentAccounts[0]?.id ?? "");
   const [accountType, setAccountType] = useState<PaymentAccountType>("mobile_banking");
   const [accountProvider, setAccountProvider] = useState("");
   const [accountLabel, setAccountLabel] = useState("");
+  const [accountTail, setAccountTail] = useState("");
+  const [editingTailId, setEditingTailId] = useState<string | null>(null);
+  const [editingTail, setEditingTail] = useState("");
   const [accountBalance, setAccountBalance] = useState("");
   const [accountBalanceAsOf, setAccountBalanceAsOf] = useState(todayInput());
   const [accountShared, setAccountShared] = useState(false);
@@ -51,14 +56,11 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
   const [editingBalanceId, setEditingBalanceId] = useState<string | null>(null);
   const [editingBalance, setEditingBalance] = useState("");
   const [editingBalanceAsOf, setEditingBalanceAsOf] = useState(todayInput());
-  const [transferFrom, setTransferFrom] = useState("");
-  const [transferTo, setTransferTo] = useState("");
-  const [transferAmount, setTransferAmount] = useState("");
-  const [transferDate, setTransferDate] = useState(todayInput());
-  const [transferNote, setTransferNote] = useState("");
   const [transferError, setTransferError] = useState<string | null>(null);
   const [transferAction, setTransferAction] = useState<string | null>(null);
   const ownAccounts = paymentAccounts.filter((account) => account.userId === profile.id);
+  const hasCashAccount = ownAccounts.some(isCashAccount);
+  const accountTypeOptions = PAYMENT_ACCOUNT_TYPES.map((item) => item.value === "cash" && hasCashAccount ? { ...item, label: "Cash in hand (already added)", disabled: true } : item);
   const today = todayInput();
   const [reconciliationMonth, setReconciliationMonth] = useState(today.slice(0, 7));
   const [reconciliationCheckedOn, setReconciliationCheckedOn] = useState(today);
@@ -88,15 +90,17 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
       setAccountError("Could not copy the CSV import ID. Select and copy it manually.");
     }
   };
+  // Cash in hand has no entries of its own: it collects its owner's cash entries.
+  const selectedIsCash = Boolean(selectedAccount && isCashAccount(selectedAccount));
   const accountTransactions = useMemo(
-    () => transactions.filter((transaction) => transaction.paymentAccountId === selectedAccountId),
-    [selectedAccountId, transactions],
+    () => selectedAccount ? transactions.filter((transaction) => transactionPostsTo(transaction, selectedAccount)) : [],
+    [selectedAccount, transactions],
   );
   const accountEntries = useMemo(
-    () => selectedAccountId ? listLedgerActivity(transactions, transfers, paymentAccounts, customCategories, {
-      scope: "history", selectedDayKey: today, kind: "all", category: "all", from: "", to: "", minMinor: null, maxMinor: null, paymentMode: "all", query: "", accountId: selectedAccountId,
+    () => selectedAccountId ? listLedgerActivity(selectedIsCash ? accountTransactions : transactions, selectedIsCash ? transfers.filter((transfer) => transfer.fromAccountId === selectedAccountId || transfer.toAccountId === selectedAccountId) : transfers, paymentAccounts, customCategories, {
+      scope: "history", selectedDayKey: today, kind: "all", category: "all", from: "", to: "", minMinor: null, maxMinor: null, paymentMode: "all", query: "", accountId: selectedIsCash ? undefined : selectedAccountId,
     }) : [],
-    [customCategories, paymentAccounts, selectedAccountId, today, transactions, transfers],
+    [accountTransactions, customCategories, paymentAccounts, selectedAccountId, selectedIsCash, today, transactions, transfers],
   );
   const accountIncome = accountTransactions.reduce((sum, transaction) => sum + (transaction.kind === "income" ? transaction.amountMinor : 0), 0);
   const accountExpenses = accountTransactions.reduce((sum, transaction) => sum + (transaction.kind === "expense" ? transaction.amountMinor : 0), 0);
@@ -127,14 +131,21 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
   const addPaymentAccount = async (event: React.FormEvent) => {
     event.preventDefault();
     if (accountAction) return;
-    const provider = accountType === "mobile_banking" ? accountProvider : accountType;
-    if (!provider) { setAccountError("Choose a bank."); return; }
+    const isCash = accountType === "cash";
+    if (isCash && hasCashAccount) { setAccountError("You already track Cash in hand."); return; }
+    const provider = providerForAccountType(accountType, accountProvider);
+    const providerError = paymentAccountProviderError(accountType, provider);
+    if (providerError) { setAccountError(providerError); return; }
+    const tail = isCash ? null : normalizeAccountTail(accountTail);
+    if (!isCash && accountTail.trim() && !tail) { setAccountError("Enter the last 3 or 4 digits of the account number, or leave it empty."); return; }
     setAccountAction("add");
     try {
       setAccountError(null);
-      await savePaymentAccount({ type: accountType, provider, label: accountLabel, balance: accountBalance || "0", balanceAsOf: accountBalanceAsOf, shared: accountShared });
+      await savePaymentAccount({ type: accountType, provider, label: isCash ? "" : accountLabel, accountTail: tail, balance: accountBalance || "0", balanceAsOf: accountBalanceAsOf, shared: isCash ? false : accountShared });
+      if (isCash) setAccountType("mobile_banking");
       setAccountProvider("");
       setAccountLabel("");
+      setAccountTail("");
       setAccountBalance("");
       setAccountBalanceAsOf(todayInput());
       setAccountShared(false);
@@ -154,8 +165,49 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
   const beginBalanceEdit = (account: typeof paymentAccounts[number]) => {
     setEditingBalanceId(account.id);
     setEditingBalance(String(account.currentBalanceMinor / 100));
-    setEditingBalanceAsOf(account.balanceAsOf);
+    // A cash count is what is in your wallet right now.
+    setEditingBalanceAsOf(isCashAccount(account) ? todayInput() : account.balanceAsOf);
     setAccountError(null);
+  };
+  const beginTailEdit = (account: PaymentAccount) => {
+    setEditingTailId(account.id);
+    setEditingTail(account.accountTail ?? "");
+    setAccountError(null);
+  };
+  const saveTail = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingTailId || accountAction) return;
+    const tail = normalizeAccountTail(editingTail);
+    if (editingTail.trim() && !tail) { setAccountError("Enter the last 3 or 4 digits of the account number, or leave it empty."); return; }
+    setAccountAction(editingTailId);
+    try {
+      setAccountError(null);
+      await updatePaymentAccountTail(editingTailId, tail);
+      setEditingTailId(null);
+    } catch (caught) {
+      setAccountError(caught instanceof Error ? caught.message : "Could not save the account's last digits.");
+    } finally {
+      setAccountAction(null);
+    }
+  };
+  /** Says what removing an account does to the rest of the ledger, so nothing changes silently. */
+  const removalSummary = (account: PaymentAccount) => {
+    const effects = transferRemovalEffects(account.id, paymentAccounts, transfers);
+    const transferCount = effects.reduce((sum, effect) => sum + effect.transferCount, 0);
+    const onlineCount = transactions.filter((transaction) => transaction.paymentAccountId === account.id).length;
+    const amountsHidden = typeof document !== "undefined" && document.body.dataset.hideAmounts === "true";
+    const lines = [`Remove ${paymentAccountLabel(account)}?`];
+    if (transferCount) {
+      lines.push(`Its ${transferCount} transfer${transferCount === 1 ? "" : "s"} with your other accounts will be removed too, which changes ${effects.length === 1 ? "that account's" : "those accounts'"} balance:`);
+      for (const effect of effects) {
+        const other = paymentAccounts.find((item) => item.id === effect.accountId);
+        const change = effect.changeMinor === 0 ? "no change (those transfers are older than its last checked balance)" : amountsHidden ? (effect.changeMinor > 0 ? "goes up" : "goes down") : `${effect.changeMinor > 0 ? "+" : "−"}${formatMoney(Math.abs(effect.changeMinor), profile.currency)}`;
+        lines.push(`• ${other ? paymentAccountLabel(other) : "Another account"}: ${change}`);
+      }
+    }
+    if (onlineCount) lines.push(`${onlineCount} ${onlineCount === 1 ? "entry" : "entries"} paid through it will become cash entries, so you can still edit them.`);
+    else if (isCashAccount(account)) lines.push("Your cash entries stay as they are.");
+    return { message: lines.join("\n"), removeTransfers: transferCount > 0 };
   };
   const saveBalance = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -171,12 +223,15 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
       setAccountAction(null);
     }
   };
-  const removePaymentAccount = async (id: string) => {
-    if (accountAction || !window.confirm("Remove this tracked account? Existing transactions will keep their payment mode.")) return;
+  const removePaymentAccount = async (account: PaymentAccount) => {
+    if (accountAction) return;
+    const { message, removeTransfers } = removalSummary(account);
+    if (!window.confirm(message)) return;
+    const id = account.id;
     setAccountAction(id);
     try {
       setAccountError(null);
-      await deletePaymentAccount(id);
+      await deletePaymentAccount(id, { removeTransfers });
     } catch (caught) {
       setAccountError(caught instanceof Error ? caught.message : "Could not remove the account.");
     } finally {
@@ -224,22 +279,6 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
       setReconciling(false);
     }
   };
-  const addTransfer = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (transferAction) return;
-    if (!transferFrom || !transferTo) { setTransferError("Choose the accounts involved."); return; }
-    setTransferAction("add");
-    try {
-      setTransferError(null);
-      await saveTransfer({ fromAccountId: transferFrom, toAccountId: transferTo, amount: transferAmount, occurredOn: transferDate, note: transferNote });
-      setTransferAmount("");
-      setTransferNote("");
-    } catch (caught) {
-      setTransferError(caught instanceof Error ? caught.message : "Could not record the transfer.");
-    } finally {
-      setTransferAction(null);
-    }
-  };
   const removeTransfer = async (id: string) => {
     if (transferAction || !window.confirm("Delete this transfer? Account balances will be recalculated.")) return;
     setTransferAction(id);
@@ -264,34 +303,42 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
     <section className="accounts-overview" aria-label="Tracked accounts">
       <div className="section-heading"><div><span className="section-label">Balances</span><h2>Tracked accounts</h2></div><Bank size={23} weight="duotone" /></div>
       <div className="account-summary-grid">
-        {paymentAccounts.map((account) => <button key={account.id} type="button" className={selectedAccountId === account.id ? "account-summary-card active" : "account-summary-card"} onClick={() => setSelectedAccountId(account.id)} aria-pressed={selectedAccountId === account.id}>
-          <span>{paymentAccountLabel(account)}</span><strong>{formatMoney(account.currentBalanceMinor, profile.currency)}</strong><small>Checked {account.balanceAsOf}</small>
-        </button>)}
-        {!paymentAccounts.length && <EmptyState title="No tracked accounts yet" message="Add a bank or digital wallet to start tracking balances and account activity." />}
+        {paymentAccounts.map((account) => <div key={account.id} className={selectedAccountId === account.id ? "account-summary-card active" : "account-summary-card"}>
+          <button type="button" className="account-summary-select" onClick={() => setSelectedAccountId(account.id)} aria-pressed={selectedAccountId === account.id}>
+            <span>{paymentAccountLabel(account)}</span><strong>{formatMoney(account.currentBalanceMinor, profile.currency)}</strong><small>{isCashAccount(account) ? "Counted" : "Checked"} {formatLedgerDate(account.balanceAsOf, profile.calendarSystem)}{account.accountTail ? ` · ends ${account.accountTail}` : ""}</small>
+          </button>
+          {account.userId === profile.id && ownAccounts.length > 1 && workspace && <button type="button" className="text-button account-move-money" onClick={() => workspace.openTransfer({ fromAccountId: account.id })}><ArrowsLeftRight size={14} />Move money</button>}
+        </div>)}
+        {!paymentAccounts.length && <EmptyState title="No tracked accounts yet" message="Add a bank, a digital wallet or the cash in your wallet to start tracking balances and account activity." />}
       </div>
     </section>
 
     <div className="accounts-management-grid">
       <section className="settings-panel" id="add-account"><div className="settings-title"><span className="settings-icon"><Bank size={23} /></span><div><h2>Add and manage accounts</h2><p>Enter the real balance currently shown by your bank or wallet. Create this account before importing its past online transactions.</p></div></div>
         {profile.hasPin ? <form className="settings-form" onSubmit={addPaymentAccount} aria-busy={accountAction === "add"}>
-          <Select label="Account type" value={accountType} onChange={(value) => { if (!value) return; setAccountType(value as PaymentAccountType); setAccountProvider(""); }} data={[...PAYMENT_ACCOUNT_TYPES]} allowDeselect={false} disabled={Boolean(accountAction)} />
+          <Select label="Account type" value={accountType} onChange={(value) => { if (!value) return; setAccountType(value as PaymentAccountType); setAccountProvider(""); setAccountError(null); }} data={accountTypeOptions} allowDeselect={false} disabled={Boolean(accountAction)} />
           {accountType === "mobile_banking" && <Select label="Bank" placeholder="Search Nepal banks" value={accountProvider || null} onChange={(value) => setAccountProvider(value ?? "")} data={NEPAL_MOBILE_BANKS.map((bank) => ({ value: bank, label: bank }))} searchable required disabled={Boolean(accountAction)} />}
-          <TextInput label="Nickname" description="Optional — useful if you have more than one account." placeholder={accountType === "mobile_banking" ? "e.g. Salary account" : "e.g. Personal wallet"} value={accountLabel} onChange={(event) => setAccountLabel(event.target.value)} maxLength={60} disabled={Boolean(accountAction)} />
-          <NumberInput label="Balance today" description="Use the balance currently shown by your bank or wallet." value={accountBalance} onChange={(value) => setAccountBalance(String(value))} decimalScale={2} thousandSeparator="," disabled={Boolean(accountAction)} />
-          <TextInput label="Balance as of" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={accountBalanceAsOf} onChange={(event) => setAccountBalanceAsOf(event.currentTarget.value)} required disabled={Boolean(accountAction)} />
-          {profile.household?.status === "active" && <Switch label="Share with household" description="Your partner can see this balance and post Ours entries to it." checked={accountShared} onChange={(event) => setAccountShared(event.currentTarget.checked)} disabled={Boolean(accountAction)} />}
+          {accountType === "other" && <TextInput label="Provider" description="The co-op, finance company or card, as it appears in its messages." placeholder="e.g. Sahara Saving and Credit Co-op" value={accountProvider} onChange={(event) => setAccountProvider(event.currentTarget.value)} maxLength={100} required disabled={Boolean(accountAction)} />}
+          {accountType === "cash" && <p className="field-hint account-cash-hint">Cash in hand keeps a running count of the money in your wallet. Your cash entries and ATM withdrawals moved into it change its balance.</p>}
+          {accountType !== "cash" && <TextInput label="Nickname" description="Optional — useful if you have more than one account." placeholder={accountType === "mobile_banking" ? "e.g. Salary account" : "e.g. Personal wallet"} value={accountLabel} onChange={(event) => setAccountLabel(event.target.value)} maxLength={60} disabled={Boolean(accountAction)} />}
+          {accountType !== "cash" && <TextInput label="Last 4 digits (as shown in your SMS)" description="Optional. Lets a pasted bank SMS find this account, even with two accounts at one bank." placeholder="e.g. 4821" inputMode="numeric" autoComplete="off" value={accountTail} onChange={(event) => setAccountTail(event.currentTarget.value.replace(/\D/g, "").slice(0, 4))} maxLength={4} disabled={Boolean(accountAction)} />}
+          <NumberInput label={accountType === "cash" ? "Cash you have now" : "Balance today"} description={accountType === "cash" ? "Count the notes in your wallet." : "Use the balance currently shown by your bank or wallet."} value={accountBalance} onChange={(value) => setAccountBalance(String(value))} decimalScale={2} thousandSeparator="," disabled={Boolean(accountAction)} />
+          <TextInput label={accountType === "cash" ? "Counted on" : "Balance as of"} type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={accountBalanceAsOf} onChange={(event) => setAccountBalanceAsOf(event.currentTarget.value)} required disabled={Boolean(accountAction)} />
+          {profile.household?.status === "active" && accountType !== "cash" && <Switch label="Share with household" description="Your partner can see this balance and post Ours entries to it." checked={accountShared} onChange={(event) => setAccountShared(event.currentTarget.checked)} disabled={Boolean(accountAction)} />}
           <FormError message={accountError} />
-          <button className="primary-button" disabled={Boolean(accountAction) || (accountType === "mobile_banking" && !accountProvider)}>{accountAction === "add" ? <><ButtonSpinner />Adding…</> : <><Plus size={17} />Add account</>}</button>
+          <button className="primary-button" disabled={Boolean(accountAction) || (accountType === "mobile_banking" && !accountProvider) || (accountType === "other" && accountProvider.trim().length < 2) || (accountType === "cash" && hasCashAccount)}>{accountAction === "add" ? <><ButtonSpinner />Adding…</> : <><Plus size={17} />{accountType === "cash" ? "Add Cash in hand" : "Add account"}</>}</button>
         </form> : <div className="account-pin-required"><span><LockKey size={21} weight="duotone" /></span><div><strong>PIN required to add an account</strong><p>Set up a 4–6 digit ledger PIN in Profile first. It protects the balances shown on your dashboard.</p></div><Link className="primary-button" href="/profile#security-heading">Go to PIN setup</Link></div>}
         <div className="payment-account-list">{paymentAccounts.map((account) => {
           const hasAuditHistory = reconciliations.some((item) => item.paymentAccountId === account.id);
-          return <div key={account.id} className="payment-account-item" aria-busy={accountAction === account.id}><div className="payment-account-summary"><span><strong>{paymentAccountLabel(account)}{account.shared ? <span className="ours-chip">Shared</span> : null}</strong><small>{formatMoney(account.currentBalanceMinor, profile.currency)} · checked {account.balanceAsOf}</small><span className="account-import-id"><span>Use this ID in CSV imports</span><code>{account.importId}</code><button type="button" onClick={() => void copyImportId(account.importId)} aria-label={`Copy CSV import ID for ${paymentAccountLabel(account)}`}>{copiedImportId === account.importId ? <Check size={13} /> : <Copy size={13} />}{copiedImportId === account.importId ? "Copied" : "Copy"}</button></span></span><div className="payment-account-actions">{account.userId !== profile.id ? <small>Shared with you</small> : <>{profile.household?.status === "active" && <Switch label="Share" checked={account.shared === true} disabled={Boolean(accountAction)} onChange={(event) => void shareAccount(account.id, event.currentTarget.checked)} />}{hasAuditHistory ? <><small className="account-audit-managed"><ShieldCheck size={14} />Reconciled</small><button type="button" className="text-button danger-text" disabled={Boolean(accountAction)} onClick={() => { setResetAccount(account); setResetError(null); }}><ArrowCounterClockwise size={15} />Reset audit history</button></> : <button type="button" className="text-button" disabled={Boolean(accountAction)} onClick={() => beginBalanceEdit(account)}>Correct opening balance</button>}<button type="button" className="icon-button danger" disabled={Boolean(accountAction) || hasAuditHistory} title={hasAuditHistory ? "Reset this account's audit history before removing it." : undefined} onClick={() => void removePaymentAccount(account.id)} aria-label={`Remove ${paymentAccountLabel(account)}`}>{accountAction === account.id ? <ButtonSpinner /> : <Trash size={16} />}</button></>}</div></div>{editingBalanceId === account.id && !hasAuditHistory && <form className="account-balance-form" onSubmit={saveBalance}><NumberInput label="Opening balance" value={editingBalance} onChange={(value) => setEditingBalance(String(value))} decimalScale={2} thousandSeparator="," required disabled={Boolean(accountAction)} /><TextInput label="Balance as of" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={editingBalanceAsOf} onChange={(event) => setEditingBalanceAsOf(event.currentTarget.value)} required disabled={Boolean(accountAction)} /><div className="inline-actions"><button type="button" className="secondary-button" onClick={() => setEditingBalanceId(null)} disabled={Boolean(accountAction)}>Cancel</button><button className="primary-button" disabled={Boolean(accountAction)}>{accountAction === account.id ? <><ButtonSpinner />Saving…</> : "Save opening balance"}</button></div></form>}</div>;
+          const isCash = isCashAccount(account);
+          return <div key={account.id} className="payment-account-item" aria-busy={accountAction === account.id}><div className="payment-account-summary"><span><b className="payment-account-name">{paymentAccountLabel(account)}{account.shared ? <span className="ours-chip">Shared</span> : null}</b><small><span className="payment-account-money">{formatMoney(account.currentBalanceMinor, profile.currency)}</span> · {isCash ? "counted" : "checked"} {formatLedgerDate(account.balanceAsOf, profile.calendarSystem)}{account.accountTail ? ` · ends ${account.accountTail}` : ""}</small>{!isCash && <span className="account-import-id"><span>Use this ID in CSV imports</span><code>{account.importId}</code><button type="button" onClick={() => void copyImportId(account.importId)} aria-label={`Copy CSV import ID for ${paymentAccountLabel(account)}`}>{copiedImportId === account.importId ? <Check size={13} /> : <Copy size={13} />}{copiedImportId === account.importId ? "Copied" : "Copy"}</button></span>}</span><div className="payment-account-actions">{account.userId !== profile.id ? <small>Shared with you</small> : <>{profile.household?.status === "active" && !isCash && <Switch label="Share" checked={account.shared === true} disabled={Boolean(accountAction)} onChange={(event) => void shareAccount(account.id, event.currentTarget.checked)} />}{!isCash && <button type="button" className="text-button" disabled={Boolean(accountAction)} onClick={() => beginTailEdit(account)} aria-label={`Edit the last digits for ${paymentAccountLabel(account)}`}><PencilSimple size={14} />{account.accountTail ? "Last digits" : "Add last digits"}</button>}{hasAuditHistory ? <><small className="account-audit-managed"><ShieldCheck size={14} />Reconciled</small><button type="button" className="text-button danger-text" disabled={Boolean(accountAction)} onClick={() => { setResetAccount(account); setResetError(null); }}><ArrowCounterClockwise size={15} />Reset audit history</button></> : <button type="button" className="text-button" disabled={Boolean(accountAction)} onClick={() => beginBalanceEdit(account)}>{isCash ? "Update cash count" : "Correct opening balance"}</button>}<button type="button" className="icon-button danger" disabled={Boolean(accountAction) || hasAuditHistory} title={hasAuditHistory ? "Reset this account's audit history before removing it." : undefined} onClick={() => void removePaymentAccount(account)} aria-label={`Remove ${paymentAccountLabel(account)}`}>{accountAction === account.id ? <ButtonSpinner /> : <Trash size={16} />}</button></>}</div></div>{editingTailId === account.id && !isCash && <form className="account-balance-form account-tail-form" onSubmit={saveTail}><TextInput label="Last 4 digits (as shown in your SMS)" description="Leave empty to match this account by its bank or wallet name only." placeholder="e.g. 4821" inputMode="numeric" autoComplete="off" value={editingTail} onChange={(event) => setEditingTail(event.currentTarget.value.replace(/\D/g, "").slice(0, 4))} maxLength={4} disabled={Boolean(accountAction)} /><div className="inline-actions"><button type="button" className="secondary-button" onClick={() => setEditingTailId(null)} disabled={Boolean(accountAction)}>Cancel</button><button className="primary-button" disabled={Boolean(accountAction)}>{accountAction === account.id ? <><ButtonSpinner />Saving…</> : "Save last digits"}</button></div></form>}{editingBalanceId === account.id && !hasAuditHistory && <form className="account-balance-form" onSubmit={saveBalance}><NumberInput label={isCash ? "Cash you have now" : "Opening balance"} value={editingBalance} onChange={(value) => setEditingBalance(String(value))} decimalScale={2} thousandSeparator="," required disabled={Boolean(accountAction)} /><TextInput label={isCash ? "Counted on" : "Balance as of"} type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={editingBalanceAsOf} onChange={(event) => setEditingBalanceAsOf(event.currentTarget.value)} required disabled={Boolean(accountAction)} /><div className="inline-actions"><button type="button" className="secondary-button" onClick={() => setEditingBalanceId(null)} disabled={Boolean(accountAction)}>Cancel</button><button className="primary-button" disabled={Boolean(accountAction)}>{accountAction === account.id ? <><ButtonSpinner />Saving…</> : isCash ? "Save cash count" : "Save opening balance"}</button></div></form>}</div>;
         })}{!paymentAccounts.length && <p>No tracked accounts yet.</p>}</div>
       </section>
 
       <section className="settings-panel"><div className="settings-title"><span className="settings-icon"><ArrowsLeftRight size={23} /></span><div><h2>Account movement</h2><p>Transfer money without counting it as income or spending.</p></div></div>
-        {ownAccounts.length < 2 ? <p className="plan-empty-copy">Add at least two of your own tracked accounts to record a transfer.</p> : <form className="transfer-form" onSubmit={addTransfer} aria-busy={transferAction === "add"}><Select label="From" placeholder="Choose source account" value={transferFrom || null} onChange={(value) => setTransferFrom(value ?? "")} data={ownAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))} required disabled={Boolean(transferAction)} /><Select label="To" placeholder="Choose destination account" value={transferTo || null} onChange={(value) => setTransferTo(value ?? "")} data={ownAccounts.filter((account) => account.id !== transferFrom).map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))} required disabled={Boolean(transferAction)} /><NumberInput label="Amount" value={transferAmount} onChange={(value) => setTransferAmount(String(value))} decimalScale={2} thousandSeparator="," required disabled={Boolean(transferAction)} /><TextInput label="Date" type="date" leftSection={<CalendarBlank size={16} aria-hidden />} value={transferDate} onChange={(event) => setTransferDate(event.currentTarget.value)} required disabled={Boolean(transferAction)} /><TextInput label="Note" value={transferNote} onChange={(event) => setTransferNote(event.currentTarget.value)} placeholder="Optional" maxLength={240} disabled={Boolean(transferAction)} /><FormError message={transferError} /><button className="primary-button" disabled={Boolean(transferAction)}>{transferAction === "add" ? <><ButtonSpinner />Recording…</> : <><ArrowsLeftRight size={17} />Record transfer</>}</button></form>}
-        <div className="transfer-list">{transfers.slice(0, 8).map((transfer) => { const from = paymentAccounts.find((account) => account.id === transfer.fromAccountId); const to = paymentAccounts.find((account) => account.id === transfer.toAccountId); return <div key={transfer.id} className="transfer-row"><span><strong>{from ? paymentAccountLabel(from) : "Removed account"} → {to ? paymentAccountLabel(to) : "Removed account"}</strong><small>{transfer.occurredOn}{transfer.note ? ` · ${transfer.note}` : ""}</small></span><div><strong>{formatMoney(transfer.amountMinor, profile.currency)}</strong><button type="button" className="icon-button danger" disabled={Boolean(transferAction)} hidden={transfer.userId !== profile.id} onClick={() => void removeTransfer(transfer.id)} aria-label="Delete transfer">{transferAction === transfer.id ? <ButtonSpinner /> : <Trash size={16} />}</button></div></div>; })}{!transfers.length && <p>No transfers recorded yet.</p>}</div>
+        {ownAccounts.length < 2 ? <p className="plan-empty-copy">Add at least two of your own tracked accounts to record a transfer. Cash in hand counts as one, so an ATM withdrawal can move money from your bank into it.</p> : workspace && <button type="button" className="primary-button account-move-money-main" onClick={() => workspace.openTransfer()}><ArrowsLeftRight size={17} />Move money</button>}
+        <FormError message={transferError} />
+        <div className="transfer-list">{transfers.slice(0, 8).map((transfer) => { const from = paymentAccounts.find((account) => account.id === transfer.fromAccountId); const to = paymentAccounts.find((account) => account.id === transfer.toAccountId); const mine = transfer.userId === profile.id; return <div key={transfer.id} className="transfer-row"><span><strong>{from ? paymentAccountLabel(from) : "Removed account"} → {to ? paymentAccountLabel(to) : "Removed account"}</strong><small>{formatLedgerDate(transfer.occurredOn, profile.calendarSystem)}{transfer.note ? ` · ${transfer.note}` : ""}</small></span><div><strong>{formatMoney(transfer.amountMinor, profile.currency)}</strong>{mine && workspace && <button type="button" className="icon-button" disabled={Boolean(transferAction)} onClick={() => workspace.openTransfer({ transferId: transfer.id })} aria-label="Edit transfer"><PencilSimple size={16} /></button>}<button type="button" className="icon-button danger" disabled={Boolean(transferAction)} hidden={!mine} onClick={() => void removeTransfer(transfer.id)} aria-label="Delete transfer">{transferAction === transfer.id ? <ButtonSpinner /> : <Trash size={16} />}</button></div></div>; })}{!transfers.length && <p>No transfers recorded yet.</p>}</div>
       </section>
     </div>
 
@@ -315,7 +362,7 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
             }} />
           </div>
 
-          {selectedAccount && selectedAccount.userId !== profile.id ? <p className="plan-empty-copy">This account is shared with you. The person who added it checks it against their statement.</p> : existingReconciliation ? <div className="reconciliation-approved">
+          {selectedIsCash ? <p className="plan-empty-copy">Cash in hand is not reconciled monthly, because cash entries are not locked to an account. Count your cash and use “Update cash count” above instead.</p> : selectedAccount && selectedAccount.userId !== profile.id ? <p className="plan-empty-copy">This account is shared with you. The person who added it checks it against their statement.</p> : existingReconciliation ?<div className="reconciliation-approved">
             <div className="reconciliation-approved-title"><span><CheckCircle size={22} weight="fill" /></span><div><strong>Approved and locked</strong><small>Checked {existingReconciliation.checkedOn} · approved {new Date(existingReconciliation.approvedAt).toLocaleString()}</small></div></div>
             <div className="reconciliation-period-copy"><span>Activity after {existingReconciliation.startingBalanceAsOf} through {existingReconciliation.checkedOn}</span><small>The expense line is activity on this account across that span. Transfers stay on their own lines because they move money between your accounts. {reconciliationMonthLabel(existingReconciliation.monthKey)} spending elsewhere in the app also counts cash, cheque, and your other accounts.</small></div>
             <div className="reconciliation-calculation">
@@ -386,9 +433,9 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
     </section>
 
     <section className="account-transactions-panel">
-      <div className="account-transactions-heading"><div><span className="section-label">Account-wise transactions</span><h2>{selectedAccount ? paymentAccountLabel(selectedAccount) : "Choose an account"}</h2><p>Transactions paid through the selected account, plus transfers into or out of it. Income and expense totals stay all-time transaction totals.</p></div>{paymentAccounts.length > 0 && <Select aria-label="Choose account" value={selectedAccountId} onChange={(value) => setSelectedAccountId(value ?? "")} data={paymentAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))} allowDeselect={false} />}</div>
+      <div className="account-transactions-heading"><div><span className="section-label">Account-wise transactions</span><h2>{selectedAccount ? paymentAccountLabel(selectedAccount) : "Choose an account"}</h2><p>{selectedIsCash ? "Your cash entries, plus money moved into or out of your cash. Income and expense totals stay all-time totals." : "Transactions paid through the selected account, plus transfers into or out of it. Income and expense totals stay all-time transaction totals."}</p></div>{paymentAccounts.length > 0 && <Select aria-label="Choose account" value={selectedAccountId} onChange={(value) => setSelectedAccountId(value ?? "")} data={paymentAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))} allowDeselect={false} />}</div>
       {selectedAccount && <div className="account-transaction-kpis"><div><TrendUp size={18} /><span>All-time income<strong>{formatMoney(accountIncome, profile.currency)}</strong></span></div><div><TrendDown size={18} /><span>All-time expenses<strong>{formatMoney(accountExpenses, profile.currency)}</strong></span></div><div><Receipt size={18} /><span>Transactions<strong>{accountTransactions.length}</strong></span></div></div>}
-      <div className="account-transaction-list">{accountEntries.map((entry) => entry.type === "transaction" ? <TransactionRow key={`transaction-${entry.transaction.id}`} transaction={entry.transaction} currency={profile.currency} customCategories={customCategories} onEdit={onEdit} onDelete={onDelete} /> : <TransferRow key={`transfer-${entry.transfer.id}`} transfer={entry.transfer} fromLabel={transferAccountLabel(paymentAccounts, entry.transfer.fromAccountId)} toLabel={transferAccountLabel(paymentAccounts, entry.transfer.toAccountId)} currency={profile.currency} direction={entry.transfer.toAccountId === selectedAccountId ? "in" : "out"} onDelete={() => void removeTransfer(entry.transfer.id)} deletePending={transferAction === entry.transfer.id} />)}{selectedAccount && !accountEntries.length && <EmptyState title="No activity for this account" message="Online transactions and transfers for this account will appear here." action={<button className="primary-button" onClick={onAdd}>Add transaction</button>} />}{!selectedAccount && <EmptyState title="Choose an account first" message="Add a tracked account to see its transactions here." />}</div>
+      <div className="account-transaction-list">{accountEntries.map((entry) => entry.type === "transaction" ? <TransactionRow key={`transaction-${entry.transaction.id}`} transaction={entry.transaction} currency={profile.currency} customCategories={customCategories} onEdit={onEdit} onDelete={onDelete} /> : <TransferRow key={`transfer-${entry.transfer.id}`} transfer={entry.transfer} fromLabel={transferAccountLabel(paymentAccounts, entry.transfer.fromAccountId)} toLabel={transferAccountLabel(paymentAccounts, entry.transfer.toAccountId)} currency={profile.currency} direction={entry.transfer.toAccountId === selectedAccountId ? "in" : "out"} onDelete={() => void removeTransfer(entry.transfer.id)} deletePending={transferAction === entry.transfer.id} />)}{selectedAccount && !accountEntries.length && <EmptyState title="No activity for this account" message={selectedIsCash ? "Cash entries and money moved into or out of your cash will appear here." : "Online transactions and transfers for this account will appear here."} action={<button className="primary-button" onClick={onAdd}>Add transaction</button>} />}{!selectedAccount && <EmptyState title="Choose an account first" message="Add a tracked account to see its transactions here." />}</div>
     </section>
     <Modal opened={Boolean(resetAccount)} onClose={closeReset} centered closeOnClickOutside={!resetting} closeOnEscape={!resetting} withCloseButton={!resetting} overlayProps={{ backgroundOpacity: .55, blur: 5 }} title="Reset reconciliation history?">
       <p className="delete-account-warning">This removes every approved reconciliation for <strong>{resetAccount ? paymentAccountLabel(resetAccount) : "this account"}</strong> and restores its earliest opening balance snapshot. Transactions and transfers are preserved. This cannot be undone.</p>

@@ -13,6 +13,6 @@ export default function CalculatorRoute() {
     customCategories={ledger.customCategories}
     goals={ledger.goals}
     onSaveGoal={ledger.saveGoal}
-    onSaveBudget={ledger.saveBudget}
+    onSaveBudgets={ledger.saveBudgets}
   />;
 }

@@ -6,6 +6,7 @@ import { formatMoney } from "../lib/currency";
 import type { CurrencyCode, DueItem, TransactionKind } from "../types";
 import { ButtonSpinner } from "./ButtonSpinner";
 import { FormError } from "./FormError";
+import { RecurringConfirmSheet } from "./RecurringConfirmSheet";
 
 type ReminderAction = "complete" | "snooze" | "confirmRecurring";
 
@@ -26,7 +27,8 @@ interface ReminderBellProps {
   onOpenDue: (id?: string, action?: "repay") => void;
   onComplete: (id: string, addToLedger: boolean) => Promise<void>;
   onSnooze: (id: string) => Promise<void>;
-  onConfirmRecurring: (id: string) => Promise<void>;
+  /** `dueOn` is the occurrence shown, so a stale tap never records the next one. */
+  onConfirmRecurring: (id: string, overrides?: { dueOn?: string }) => Promise<void>;
 }
 
 const groupLabels: Record<DueUrgency, string> = {
@@ -57,6 +59,7 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
   const [phase, setPhase] = useState<"closed" | "pre" | "open" | "closing">("closed");
   const [pending, setPending] = useState<{ id: string; action: ReminderAction } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reviewingRecurringId, setReviewingRecurringId] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -129,7 +132,7 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
     setPending({ id: item.id, action: "confirmRecurring" });
     setError(null);
     try {
-      await onConfirmRecurring(item.id);
+      await onConfirmRecurring(item.id, { dueOn: item.dueOn });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not confirm this recurring entry.");
     } finally {
@@ -223,7 +226,7 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
             {recurringGroup.map((item) => {
               const confirming = pending?.id === item.id && pending.action === "confirmRecurring";
               return <article className="reminder-item" key={`recurring-${item.id}`} aria-busy={confirming}>
-                <div className="reminder-item-main">
+                <button className="reminder-item-main" disabled={confirming} onClick={() => { closePanel(); setReviewingRecurringId(item.id); }} aria-label={`Review ${item.title}: adjust, skip or pause`}>
                   <span className={`reminder-kind recurring ${item.kind}`}>
                     <Repeat size={18} weight="duotone" />
                   </span>
@@ -232,7 +235,7 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
                     <small>{dueDateLabel(item.dueOn)} · {item.scheduleLabel}</small>
                   </span>
                   <b className="reminder-item-amount">{formatMoney(item.amountMinor, currency)}</b>
-                </div>
+                </button>
                 <div className="reminder-actions">
                   <button className="reminder-action primary" disabled={confirming} onClick={() => void confirmRecurring(item)}>
                     {confirming ? <ButtonSpinner /> : <Check size={14} />}{confirming ? "Confirming…" : "Confirm"}
@@ -254,5 +257,6 @@ export function ReminderBell({ items, currency, recurringEntries, monthlyReport,
 
       <button className="reminder-view-all" onClick={() => openDue()}>View all dues</button>
     </section>}
+    <RecurringConfirmSheet entryId={reviewingRecurringId} onClose={() => setReviewingRecurringId(null)} />
   </div>;
 }

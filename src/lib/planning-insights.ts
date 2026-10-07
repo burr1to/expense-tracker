@@ -1,8 +1,10 @@
-import { addDays, compareAsc, endOfMonth, format, getDate, getDaysInMonth, isSameMonth, startOfMonth } from "date-fns";
+import { addDays, compareAsc, endOfMonth, format, getDate, getDaysInMonth, isSameMonth, parseISO, startOfMonth } from "date-fns";
+import { budgetCoversCategory, isAllSpendingBudget } from "./budgets";
+import { isLoanCategory } from "./categories";
 import { dueRemaining } from "./dues";
 import { transactionCountsTowardBudget } from "./household";
 import { isInMonth, monthKeyFor, todayInput } from "./dates";
-import { isSameMonthKey } from "./period";
+import { isMonthKey, isSameMonthKey, type PeriodBounds } from "./period";
 import { recurringOccurrencesBetween } from "./recurrence";
 import type { Budget, DueItem, LedgerTransaction, RecurringEntry } from "../types";
 
@@ -19,6 +21,8 @@ export interface BudgetPacing {
   projectedPercentage: number;
   elapsedPercentage: number;
   remainingMinor: number;
+  /** Days the remaining amount has to cover, today included; 0 once the period is over. */
+  remainingDays: number;
   dailyAllowanceMinor: number;
   tone: BudgetPacingTone;
   alertTitle: string;
@@ -54,6 +58,8 @@ export interface SafeToSpend {
   totalMinor: number;
   perDayMinor: number;
   committedMinor: number;
+  /** The part of `committedMinor` from recurring bills due on or before today that are not confirmed yet. */
+  overdueRecurringMinor: number;
   bufferMinor: number;
   balanceMinor: number;
   horizon: SpendingHorizon;
@@ -74,7 +80,7 @@ function horizonTo(throughDate: string, today: string, source: SpendingHorizonSo
 function dominantIncomeDay(transactions: readonly LedgerTransaction[]): number | null {
   const counts = new Map<number, number>();
   for (const item of transactions) {
-    if (item.kind !== "income") continue;
+    if (item.kind !== "income" || isLoanCategory(item.category)) continue;
     const day = Number(item.occurredOn.slice(8, 10));
     if (!day) continue;
     counts.set(day, (counts.get(day) ?? 0) + 1);
@@ -118,7 +124,11 @@ export function detectSpendingHorizon(
   return horizonTo(monthEnd > today ? monthEnd : today, today, "periodEnd");
 }
 
-/** Expenses already committed between today and the horizon, inclusive. */
+/**
+ * Expenses already committed between today and the horizon, inclusive.
+ * Recurring bills that fell due earlier but are not confirmed yet still count:
+ * their money has not left the balance.
+ */
 export function committedBeforeHorizon(
   recurringEntries: readonly RecurringEntry[],
   dueItems: readonly DueItem[],
@@ -127,11 +137,18 @@ export function committedBeforeHorizon(
 ): number {
   const recurring = sum(recurringEntries
     .filter((entry) => entry.kind === "expense")
-    .flatMap((entry) => recurringOccurrencesBetween(entry, today, horizon.throughDate).map(() => entry.amountMinor)));
+    .flatMap((entry) => recurringOccurrencesBetween(entry, entry.nextDueOn < today ? entry.nextDueOn : today, horizon.throughDate).map(() => entry.amountMinor)));
   const dues = sum(dueItems
     .filter((item) => item.status === "open" && (item.kind === "payment" || item.kind === "borrowed") && item.dueOn <= horizon.throughDate)
     .map(dueRemaining));
   return recurring + dues;
+}
+
+/** Recurring bills due on or before today that are waiting to be confirmed. */
+export function recurringAwaitingConfirmation(recurringEntries: readonly RecurringEntry[], today = todayInput()): number {
+  return sum(recurringEntries
+    .filter((entry) => entry.kind === "expense" && entry.nextDueOn <= today)
+    .flatMap((entry) => recurringOccurrencesBetween(entry, entry.nextDueOn, today).map(() => entry.amountMinor)));
 }
 
 /**
@@ -146,12 +163,14 @@ export function calculateSafeToSpendV2(
   committedMinor: number,
   horizon: SpendingHorizon,
   bufferMinor = 0,
+  overdueRecurringMinor = 0,
 ): SafeToSpend {
   const totalMinor = balanceMinor - committedMinor - bufferMinor;
   return {
     totalMinor,
     perDayMinor: totalMinor > 0 ? Math.floor(totalMinor / horizon.daysRemaining) : 0,
     committedMinor,
+    overdueRecurringMinor,
     bufferMinor,
     balanceMinor,
     horizon,
@@ -198,6 +217,79 @@ const upcomingRecurringForBreathingRoom = (entries: readonly RecurringEntry[], m
   return entries.flatMap((entry) => recurringOccurrencesBetween(entry, entry.nextDueOn < todayKey ? entry.nextDueOn : todayKey, through).map((occurredOn) => ({ entry, occurredOn })));
 };
 
+interface PacingTiming { elapsedPercentage: number; remainingDays: number }
+
+/**
+ * Paces one budget against expenses, recurring occurrences and dues that are
+ * already limited to the budget's period. Category budgets count their own
+ * category; an "All spending" budget counts every non-loan expense.
+ */
+function paceBudget(
+  budget: Budget,
+  expenses: readonly LedgerTransaction[],
+  recurring: readonly RecurringOccurrence[],
+  dues: readonly DueItem[],
+  timing: PacingTiming,
+  periodNoun: "month" | "season",
+): BudgetPacing {
+  const spentMinor = sum(expenses.filter((item) => budgetCoversCategory(budget, item.category) && transactionCountsTowardBudget(item, budget)).map((item) => item.amountMinor));
+  const upcomingRecurringMinor = sum(recurring.filter(({ entry }) => budgetCoversCategory(budget, entry.category)).map(({ entry }) => entry.amountMinor));
+  const upcomingDuesMinor = sum(dues.filter((item) => budgetCoversCategory(budget, item.category)).map(dueRemaining));
+  const upcomingMinor = upcomingRecurringMinor + upcomingDuesMinor;
+  const projectedMinor = spentMinor + upcomingMinor;
+  const spentPercentage = percentage(spentMinor, budget.amountMinor);
+  const projectedPercentage = percentage(projectedMinor, budget.amountMinor);
+  const remainingMinor = Math.max(0, budget.amountMinor - projectedMinor);
+  const dailyAllowanceMinor = timing.remainingDays > 0 ? Math.floor(remainingMinor / timing.remainingDays) : 0;
+
+  let tone: BudgetPacingTone = "healthy";
+  let alertTitle = "On track";
+  let alertDetail = upcomingMinor > 0 ? `${projectedPercentage}% projected after upcoming expenses.` : `${spentPercentage}% used so far.`;
+  if (spentMinor > budget.amountMinor) {
+    tone = "over";
+    alertTitle = "Budget exceeded";
+    alertDetail = `${spentPercentage}% already used.`;
+  } else if (spentMinor === budget.amountMinor && budget.amountMinor > 0) {
+    tone = "warning";
+    alertTitle = "Budget limit reached";
+    alertDetail = isAllSpendingBudget(budget) ? "Your overall spending limit is fully used." : "This category's budget is fully used.";
+  } else if (projectedMinor > budget.amountMinor) {
+    tone = "warning";
+    alertTitle = "Projected to exceed";
+    alertDetail = `${projectedPercentage}% projected after upcoming expenses.`;
+  } else if (projectedMinor === budget.amountMinor && budget.amountMinor > 0 && upcomingMinor > 0) {
+    tone = "warning";
+    alertTitle = "Projected to reach limit";
+    alertDetail = "Logged and upcoming expenses use the full budget.";
+  } else if (spentPercentage >= 80) {
+    tone = "warning";
+    alertTitle = "80% threshold reached";
+    alertDetail = `${spentPercentage}% used with ${timing.elapsedPercentage}% of the ${periodNoun} elapsed.`;
+  } else if (spentPercentage >= 50 && spentPercentage > timing.elapsedPercentage + 10) {
+    tone = "watch";
+    alertTitle = "Spending ahead of pace";
+    alertDetail = `${spentPercentage}% used with ${timing.elapsedPercentage}% of the ${periodNoun} elapsed.`;
+  }
+
+  return {
+    budget,
+    spentMinor,
+    upcomingRecurringMinor,
+    upcomingDuesMinor,
+    upcomingMinor,
+    projectedMinor,
+    spentPercentage,
+    projectedPercentage,
+    elapsedPercentage: timing.elapsedPercentage,
+    remainingMinor,
+    remainingDays: timing.remainingDays,
+    dailyAllowanceMinor,
+    tone,
+    alertTitle,
+    alertDetail,
+  };
+}
+
 export function calculateBudgetPacing(
   budgets: readonly Budget[],
   transactions: readonly LedgerTransaction[],
@@ -212,64 +304,57 @@ export function calculateBudgetPacing(
   const dues = upcomingDuesForMonth(dueItems, month).filter((item) => item.kind === "payment" || item.kind === "borrowed");
 
   return budgets
-    .filter((budget) => isSameMonthKey(budget.monthKey, monthKeyFor(month)))
-    .map((budget) => {
-      const spentMinor = sum(expenses.filter((item) => item.category === budget.category && transactionCountsTowardBudget(item, budget)).map((item) => item.amountMinor));
-      const upcomingRecurringMinor = sum(recurring.filter(({ entry }) => entry.category === budget.category).map(({ entry }) => entry.amountMinor));
-      const upcomingDuesMinor = sum(dues.filter((item) => item.category === budget.category).map(dueRemaining));
-      const upcomingMinor = upcomingRecurringMinor + upcomingDuesMinor;
-      const projectedMinor = spentMinor + upcomingMinor;
-      const spentPercentage = percentage(spentMinor, budget.amountMinor);
-      const projectedPercentage = percentage(projectedMinor, budget.amountMinor);
-      const remainingMinor = Math.max(0, budget.amountMinor - projectedMinor);
-      const dailyAllowanceMinor = timing.remainingDays > 0 ? Math.floor(remainingMinor / timing.remainingDays) : 0;
+    .filter((budget) => isMonthKey(budget.monthKey) && isSameMonthKey(budget.monthKey, monthKeyFor(month)))
+    .map((budget) => paceBudget(budget, expenses, recurring, dues, timing, "month"));
+}
 
-      let tone: BudgetPacingTone = "healthy";
-      let alertTitle = "On track";
-      let alertDetail = upcomingMinor > 0 ? `${projectedPercentage}% projected after upcoming expenses.` : `${spentPercentage}% used so far.`;
-      if (spentMinor > budget.amountMinor) {
-        tone = "over";
-        alertTitle = "Budget exceeded";
-        alertDetail = `${spentPercentage}% already used.`;
-      } else if (spentMinor === budget.amountMinor && budget.amountMinor > 0) {
-        tone = "warning";
-        alertTitle = "Budget limit reached";
-        alertDetail = "This category's budget is fully used.";
-      } else if (projectedMinor > budget.amountMinor) {
-        tone = "warning";
-        alertTitle = "Projected to exceed";
-        alertDetail = `${projectedPercentage}% projected after upcoming expenses.`;
-      } else if (projectedMinor === budget.amountMinor && budget.amountMinor > 0 && upcomingMinor > 0) {
-        tone = "warning";
-        alertTitle = "Projected to reach limit";
-        alertDetail = "Logged and upcoming expenses use the full budget.";
-      } else if (spentPercentage >= 80) {
-        tone = "warning";
-        alertTitle = "80% threshold reached";
-        alertDetail = `${spentPercentage}% used with ${timing.elapsedPercentage}% of the month elapsed.`;
-      } else if (spentPercentage >= 50 && spentPercentage > timing.elapsedPercentage + 10) {
-        tone = "watch";
-        alertTitle = "Spending ahead of pace";
-        alertDetail = `${spentPercentage}% used with ${timing.elapsedPercentage}% of the month elapsed.`;
-      }
+/**
+ * Pacing for a budget whose period is not a Gregorian month, such as a
+ * festival season (`FEST:dashain-tihar-2083`). `bounds` is the period's
+ * window; `today` is a Kathmandu `YYYY-MM-DD`.
+ */
+export function calculatePeriodBudgetPacing(
+  budget: Budget,
+  bounds: PeriodBounds,
+  transactions: readonly LedgerTransaction[],
+  recurringEntries: readonly RecurringEntry[],
+  dueItems: readonly DueItem[],
+  today = todayInput(),
+): BudgetPacing {
+  const totalDays = Math.max(1, dayDifference(bounds.start, bounds.endExclusive));
+  const elapsedDays = today < bounds.start ? 0 : today >= bounds.endExclusive ? totalDays : dayDifference(bounds.start, today) + 1;
+  const timing: PacingTiming = {
+    elapsedPercentage: Math.round((elapsedDays / totalDays) * 100),
+    remainingDays: today >= bounds.endExclusive ? 0 : today < bounds.start ? totalDays : Math.max(1, totalDays - elapsedDays + 1),
+  };
+  const lastDay = format(addDays(parseISO(bounds.endExclusive), -1), "yyyy-MM-dd");
+  const inWindow = (date: string) => date >= bounds.start && date < bounds.endExclusive;
+  const expenses = transactions.filter((item) => item.kind === "expense" && inWindow(item.occurredOn));
+  const recurring = recurringEntries.filter((entry) => entry.kind === "expense").flatMap((entry) => recurringOccurrencesBetween(entry, bounds.start, lastDay).map((occurredOn) => ({ entry, occurredOn })));
+  const dues = dueItems.filter((item) => item.status === "open" && (item.kind === "payment" || item.kind === "borrowed") && inWindow(item.dueOn));
+  return paceBudget(budget, expenses, recurring, dues, timing, "season");
+}
 
-      return {
-        budget,
-        spentMinor,
-        upcomingRecurringMinor,
-        upcomingDuesMinor,
-        upcomingMinor,
-        projectedMinor,
-        spentPercentage,
-        projectedPercentage,
-        elapsedPercentage: timing.elapsedPercentage,
-        remainingMinor,
-        dailyAllowanceMinor,
-        tone,
-        alertTitle,
-        alertDetail,
-      };
-    });
+export interface UnbudgetedSpending {
+  totalMinor: number;
+  /** Largest first. */
+  categories: { category: string; totalMinor: number }[];
+}
+
+/**
+ * This month's expenses that no category budget counts. An "All spending"
+ * limit does not make a category budgeted, and loan movements are not spending.
+ */
+export function calculateUnbudgetedSpending(budgets: readonly Budget[], transactions: readonly LedgerTransaction[], month: Date): UnbudgetedSpending {
+  const categoryBudgets = budgets.filter((budget) => !isAllSpendingBudget(budget) && isMonthKey(budget.monthKey) && isSameMonthKey(budget.monthKey, monthKeyFor(month)));
+  const totals = new Map<string, number>();
+  for (const item of transactions) {
+    if (item.kind !== "expense" || isLoanCategory(item.category) || !isInMonth(item.occurredOn, month)) continue;
+    if (categoryBudgets.some((budget) => budgetCoversCategory(budget, item.category) && transactionCountsTowardBudget(item, budget))) continue;
+    totals.set(item.category, (totals.get(item.category) ?? 0) + item.amountMinor);
+  }
+  const categories = [...totals.entries()].map(([category, totalMinor]) => ({ category, totalMinor })).sort((a, b) => b.totalMinor - a.totalMinor);
+  return { totalMinor: sum(categories.map((item) => item.totalMinor)), categories };
 }
 
 export function calculateMonthlyBreathingRoom(

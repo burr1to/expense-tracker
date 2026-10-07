@@ -21,12 +21,22 @@ interface ReceiptScannerProps {
   customSubcategories: CustomSubcategory[];
   paymentAccounts: PaymentAccount[];
   onSave: (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => Promise<number>;
+  /** Controlled mode: the workspace opens this sheet from anywhere. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Render the "Scan receipt" trigger button. Defaults to true. */
+  showTrigger?: boolean;
 }
 
 type Stage = "ready" | "uploading" | "analyzing" | "reviewing" | "saving";
 
-export function ReceiptScanner({ currency, fallbackOccurredOn, customCategories, customSubcategories, paymentAccounts, onSave }: ReceiptScannerProps) {
-  const [open, setOpen] = useState(false);
+export function ReceiptScanner({ currency, fallbackOccurredOn, customCategories, customSubcategories, paymentAccounts, onSave, open: openProp, onOpenChange, showTrigger = true }: ReceiptScannerProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = openProp ?? uncontrolledOpen;
+  const setOpen = (next: boolean) => {
+    if (openProp === undefined) setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
   const [stage, setStage] = useState<Stage>("ready");
   const [receipt, setReceipt] = useState<ReceiptUpload | null>(null);
   const [analysis, setAnalysis] = useState<ReceiptAnalysis | null>(null);
@@ -172,7 +182,7 @@ export function ReceiptScanner({ currency, fallbackOccurredOn, customCategories,
   };
 
   return <>
-    <button className="secondary-button receipt-scan-trigger" onClick={() => setOpen(true)}><Camera size={18} />Scan receipt <span>AI</span></button>
+    {showTrigger && <button className="secondary-button receipt-scan-trigger" onClick={() => setOpen(true)}><Camera size={18} />Scan receipt <span>AI</span></button>}
     <AnimatedOverlay open={open} dismissOnBackdrop onClose={() => void close()}>
       <section className="receipt-scan-dialog" role="dialog" aria-modal="true" aria-labelledby="receipt-scan-title" aria-busy={stage === "uploading" || stage === "analyzing" || stage === "saving"}>
         <header>

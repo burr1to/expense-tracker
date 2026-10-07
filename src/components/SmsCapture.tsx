@@ -1,19 +1,19 @@
 "use client";
 
 import { NumberInput, Select, Textarea, TextInput } from "@mantine/core";
-import { ChatText, Sparkle, WarningCircle, X } from "@phosphor-icons/react";
+import { ArrowsLeftRight, CheckCircle, ClipboardText, Info, Sparkle, WarningCircle, X, ChatText } from "@phosphor-icons/react";
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { allCategoriesFor, subcategoryOptionsFor } from "../lib/categories";
 import { majorToMinor } from "../lib/currency";
-import { todayInput } from "../lib/dates";
-import { matchLearningSuggestion } from "../lib/learning";
-import { paymentAccountLabel } from "../lib/payment-accounts";
-import { smsResultToDraft, type SmsAnalysis } from "../lib/sms-analysis";
-import { parseBankSms, SMS_MAX_LENGTH } from "../lib/sms-templates";
+import { formatLedgerDate, todayInput } from "../lib/dates";
+import { isCashAccount, onlinePaymentAccounts, paymentAccountLabel } from "../lib/payment-accounts";
+import { personalizeSmsAnalysis, smsDefaultCategory, smsResultToDraft, withSmsAccountMatch, type SmsAnalysis } from "../lib/sms-analysis";
+import { mentionsCurrencyAmount, parseBankSms, SMS_MAX_LENGTH } from "../lib/sms-templates";
 import { transactionWarnings } from "../lib/transaction-intelligence";
 import type {
-  CurrencyCode, CustomCategory, CustomSubcategory, LearningState, LedgerTransaction,
-  PaymentAccount, PaymentMode, TransactionDraft,
+  AccountTransferDraft, CalendarSystem, CurrencyCode, CustomCategory, CustomSubcategory, LearningState, LedgerTransaction,
+  PaymentAccount, PaymentMode, TransactionDraft, TransactionKind,
 } from "../types";
 import { AnimatedOverlay } from "./AnimatedOverlay";
 import { ButtonSpinner } from "./ButtonSpinner";
@@ -28,21 +28,54 @@ interface SmsCaptureProps {
   paymentAccounts: PaymentAccount[];
   learning: LearningState;
   onSave: (draft: TransactionDraft) => Promise<string | undefined>;
+  /** Controlled mode: the workspace opens this sheet from anywhere (Add sheet, share target). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Message text to prefill when the sheet opens, e.g. from the share target. */
+  initialText?: string;
+  /** Render the "Paste bank SMS" trigger button. Defaults to true. */
+  showTrigger?: boolean;
+  /** Shows the Bikram Sambat date beside the date picker when the user reads dates in BS. */
+  calendarSystem?: CalendarSystem;
+  /** The signed-in user. Only their own accounts and entries are used to read a message. */
+  ownerId?: string;
+  /** Saves a "Transfer between my accounts" reading. Without it, review offers only Expense and Income. */
+  onSaveTransfer?: (draft: AccountTransferDraft) => Promise<void>;
 }
 
-type Stage = "ready" | "parsing" | "reviewing" | "saving";
+type Stage = "ready" | "parsing" | "reviewing" | "saving" | "saved";
+type ReviewType = TransactionKind | "transfer";
+interface TransferRoute { fromAccountId: string; toAccountId: string }
 
-export function SmsCapture({ currency, transactions, customCategories, customSubcategories, paymentAccounts, learning, onSave }: SmsCaptureProps) {
-  const [open, setOpen] = useState(false);
+export function SmsCapture({ currency, transactions, customCategories, customSubcategories, paymentAccounts, learning, onSave, open: openProp, onOpenChange, initialText, showTrigger = true, calendarSystem = "AD", ownerId, onSaveTransfer }: SmsCaptureProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = openProp ?? uncontrolledOpen;
+  const setOpen = (next: boolean) => {
+    if (openProp === undefined) setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
   const [stage, setStage] = useState<Stage>("ready");
   const [message, setMessage] = useState("");
   const [analysis, setAnalysis] = useState<SmsAnalysis | null>(null);
   const [draft, setDraft] = useState<TransactionDraft | null>(null);
+  const [reviewType, setReviewType] = useState<ReviewType>("expense");
+  const [route, setRoute] = useState<TransferRoute>({ fromAccountId: "", toAccountId: "" });
   const [error, setError] = useState<string | null>(null);
-  const [personalizedFrom, setPersonalizedFrom] = useState<string | null>(null);
+  const [personalizedNote, setPersonalizedNote] = useState<string | null>(null);
+  const [pasteHint, setPasteHint] = useState<string | null>(null);
+  const [savedAs, setSavedAs] = useState<"transaction" | "transfer">("transaction");
   const requestRef = useRef<AbortController | null>(null);
   const operationRef = useRef(0);
 
+  useEffect(() => {
+    if (open && initialText) setMessage(initialText);
+  }, [open, initialText]);
+
+  // A message is the user's own: match it against their accounts and habits, never a partner's.
+  const ownAccounts = useMemo(() => ownerId ? paymentAccounts.filter((account) => account.userId === ownerId) : paymentAccounts, [ownerId, paymentAccounts]);
+  const onlineAccounts = useMemo(() => onlinePaymentAccounts(ownAccounts), [ownAccounts]);
+  const ownTransactions = useMemo(() => ownerId ? transactions.filter((transaction) => transaction.userId === ownerId) : transactions, [ownerId, transactions]);
+  const transferOptions = useMemo(() => ownAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) })), [ownAccounts]);
   const categories = useMemo(
     () => allCategoriesFor(draft?.kind ?? "expense", customCategories),
     [draft?.kind, customCategories],
@@ -74,7 +107,8 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
     setAnalysis(null);
     setDraft(null);
     setError(null);
-    setPersonalizedFrom(null);
+    setPersonalizedNote(null);
+    setPasteHint(null);
     setStage("ready");
   };
 
@@ -87,33 +121,30 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
     reset();
   };
 
-  /** Fills the fields the message itself cannot state, from the learning profile. */
-  const withPersonalization = (result: SmsAnalysis): SmsAnalysis => {
-    const place = result.draft.area || result.draft.note;
-    const suggestion = place ? matchLearningSuggestion(learning, place, result.draft.kind) : null;
-    if (!suggestion) return result;
-    setPersonalizedFrom(suggestion.place);
-    return {
-      ...result,
-      draft: {
-        ...result.draft,
-        category: suggestion.category,
-        subcategory: suggestion.subcategory,
-        paymentMode: suggestion.paymentMode,
-        paymentAccountId: suggestion.paymentMode === "online" ? result.draft.paymentAccountId : "",
-      },
-    };
+  /** Fills what the message cannot state from the user's habits, and starts review on the right type. */
+  const startReview = (reading: SmsAnalysis) => {
+    const categoryIds = allCategoriesFor(reading.draft.kind, customCategories).map((category) => category.id);
+    const { analysis: result, note } = personalizeSmsAnalysis(reading, learning, ownTransactions, categoryIds);
+    // Each reading gets its own request id, so a retried save records it once.
+    const draftWithId = { ...result.draft, clientRequestId: crypto.randomUUID() };
+    setPersonalizedNote(note);
+    setAnalysis({ ...result, draft: draftWithId });
+    setDraft(draftWithId);
+    setRoute({ fromAccountId: result.transfer?.fromAccountId ?? "", toAccountId: result.transfer?.toAccountId ?? "" });
+    setReviewType(onSaveTransfer && result.transfer?.startAsTransfer ? "transfer" : result.draft.kind);
+    setStage("reviewing");
   };
 
-  const read = async () => {
-    const text = message.trim();
+  const read = async (input = message) => {
+    const text = input.trim();
     if (!text) return;
     const operation = ++operationRef.current;
     requestRef.current?.abort();
     const controller = new AbortController();
     requestRef.current = controller;
     setError(null);
-    setPersonalizedFrom(null);
+    setPersonalizedNote(null);
+    setPasteHint(null);
     setStage("parsing");
 
     // The offline parser handles the common formats instantly and without
@@ -121,10 +152,7 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
     // cannot read.
     const offline = parseBankSms(text, todayInput());
     if (offline) {
-      const result = withPersonalization(smsResultToDraft(offline, todayInput(), paymentAccounts));
-      setAnalysis(result);
-      setDraft(result.draft);
-      setStage("reviewing");
+      startReview(smsResultToDraft(offline, todayInput(), ownAccounts));
       requestRef.current = null;
       return;
     }
@@ -139,10 +167,8 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
       const body = await response.json() as { analysis?: SmsAnalysis; error?: string };
       if (operation !== operationRef.current) return;
       if (!response.ok || !body.analysis) throw new Error(body.error ?? "Could not read this message.");
-      const result = withPersonalization(body.analysis);
-      setAnalysis(result);
-      setDraft(result.draft);
-      setStage("reviewing");
+      // Gemini reads amount, date and category; the account still comes from the message itself.
+      startReview(withSmsAccountMatch(body.analysis, text, ownAccounts));
     } catch (caught) {
       const cancelled = caught instanceof Error && caught.name === "AbortError";
       if (!cancelled && operation === operationRef.current) {
@@ -158,42 +184,84 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
     setDraft((current) => current ? { ...current, ...changes } : current);
   };
 
+  const asTransfer = reviewType === "transfer";
   const amountIsValid = Boolean(draft && Number(draft.amount.replace(/,/g, "")) > 0);
-  const accountIsMissing = draft?.paymentMode === "online" && !draft.paymentAccountId;
-  const canSave = Boolean(draft && amountIsValid && !accountIsMissing && stage === "reviewing");
+  const accountIsMissing = !asTransfer && draft?.paymentMode === "online" && !draft.paymentAccountId;
+  const routeIsMissing = asTransfer && (!route.fromAccountId || !route.toAccountId || route.fromAccountId === route.toAccountId);
+  const canSave = Boolean(draft && amountIsValid && !accountIsMissing && !routeIsMissing && stage === "reviewing");
+
+  const changeReviewType = (value: ReviewType) => {
+    setReviewType(value);
+    if (value !== "transfer" && draft && value !== draft.kind) update({ kind: value, category: smsDefaultCategory(value), subcategory: "" });
+  };
 
   const save = async () => {
     if (!canSave || !draft) return;
     setStage("saving");
     setError(null);
     try {
-      await onSave(draft);
-      setOpen(false);
-      reset();
+      if (asTransfer && onSaveTransfer) await onSaveTransfer({ ...route, amount: draft.amount, occurredOn: draft.occurredOn, note: draft.note, clientRequestId: draft.clientRequestId });
+      else await onSave(draft);
+      setSavedAs(asTransfer ? "transfer" : "transaction");
+      setAnalysis(null);
+      setDraft(null);
+      setMessage("");
+      setStage("saved");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save this transaction.");
+      setError(caught instanceof Error ? caught.message : asTransfer ? "Could not record this transfer." : "Could not save this transaction.");
       setStage("reviewing");
     }
+  };
+
+  /** Reads the clipboard and the message in one tap; some browsers refuse, so the box stays as the fallback. */
+  const pasteFromClipboard = async () => {
+    setError(null);
+    setPasteHint(null);
+    try {
+      const text = typeof navigator !== "undefined" && navigator.clipboard?.readText ? (await navigator.clipboard.readText()).slice(0, SMS_MAX_LENGTH) : null;
+      if (text === null) throw new Error("Clipboard reading is not available.");
+      if (!text.trim()) { setPasteHint("Your clipboard is empty. Copy the bank SMS first, or long-press the box below to paste."); return; }
+      setMessage(text);
+      // Anything without an amount (an OTP, a password) stays on the device until the user reads it on purpose.
+      if (mentionsCurrencyAmount(text)) await read(text);
+      else setPasteHint("Pasted, but this does not look like a bank alert. Check it, then tap Read message.");
+    } catch {
+      setPasteHint("This browser did not share the clipboard. Long-press the box below to paste.");
+    }
+  };
+
+  const pasteAnother = () => {
+    reset();
+    void pasteFromClipboard();
   };
 
   const subcategories = draft ? subcategoryOptionsFor(draft.category, customSubcategories) : [];
 
   return <>
-    <button className="secondary-button sms-capture-trigger" onClick={() => setOpen(true)}>
+    {showTrigger && <button className="secondary-button sms-capture-trigger" onClick={() => setOpen(true)}>
       <ChatText size={18} />Paste bank SMS
-    </button>
+    </button>}
     <AnimatedOverlay open={open} dismissOnBackdrop onClose={close}>
       <section className="sms-capture-dialog" role="dialog" aria-modal="true" aria-labelledby="sms-capture-title" aria-busy={stage === "parsing" || stage === "saving"}>
         <header>
           <div>
             <span className="eyebrow">Quick capture</span>
-            <h2 id="sms-capture-title">{stage === "reviewing" || stage === "saving" ? "Review before saving" : "Paste a bank message"}</h2>
+            <h2 id="sms-capture-title">{stage === "reviewing" || stage === "saving" ? "Review before saving" : stage === "saved" ? "Saved" : "Paste a bank message"}</h2>
           </div>
           <button className="icon-button" disabled={stage === "saving"} onClick={close} aria-label="Close"><X size={20} /></button>
         </header>
 
-        {stage !== "reviewing" && stage !== "saving" ? <div className="sms-capture-step">
+        {stage === "saved" ? <div className="sms-capture-step sms-saved-step" role="status">
+          <span className="sms-saved-icon" aria-hidden="true"><CheckCircle size={30} weight="fill" /></span>
+          <p><strong>Saved. Paste another?</strong> {savedAs === "transfer" ? "The transfer is recorded and both balances are updated." : "The entry is in your ledger."} Copy the next alert from your messages, then tap below.</p>
+          <div className="dialog-actions">
+            <button className="secondary-button" onClick={close}>Done</button>
+            <button className="primary-button" onClick={pasteAnother}><ClipboardText size={17} />Paste another</button>
+          </div>
+        </div> : stage !== "reviewing" && stage !== "saving" ? <div className="sms-capture-step">
           <p>Paste the confirmation SMS from your bank or wallet. Most messages are read on your device without leaving it; only an unrecognised format is sent to Gemini.</p>
+          <button type="button" className="secondary-button full-width sms-paste-button" disabled={stage === "parsing"} onClick={() => void pasteFromClipboard()}><ClipboardText size={18} />Paste from clipboard</button>
+          {pasteHint && <p className="sms-paste-hint" role="status"><Info size={15} aria-hidden />{pasteHint}</p>}
           <Textarea
             label="Message"
             placeholder="Your A/C XXXXXX4821 is debited by NPR 1,250.00 on 12/08/2026 at ..."
@@ -217,23 +285,35 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
           {analysis.warnings.map((warning) => (
             <div className="sms-review-warning" key={warning}><WarningCircle size={18} /><span>{warning}</span></div>
           ))}
-          {duplicateWarnings.map((warning) => (
+          {!asTransfer && duplicateWarnings.map((warning) => (
             <div className={`sms-review-warning ${warning.tone}`} key={warning.type + warning.title}>
               <WarningCircle size={18} /><span><strong>{warning.title}.</strong> {warning.detail}</span>
             </div>
           ))}
-          {personalizedFrom && <p className="sms-personalized-note">Category and payment method filled from what you usually record at {personalizedFrom}.</p>}
+          {analysis.transfer && onSaveTransfer && <div className="sms-transfer-note">
+            <ArrowsLeftRight size={18} aria-hidden /><span>{analysis.transfer.message}{!asTransfer && (analysis.transfer.ready || ownAccounts.length > 1) && <> <button type="button" className="text-button" onClick={() => changeReviewType("transfer")}>Record as a transfer</button></>}{analysis.transfer.reason === "atm" && !ownAccounts.some(isCashAccount) && <> <Link href="/accounts#add-account" onClick={close}>Add Cash in hand</Link></>}</span>
+          </div>}
+          {!asTransfer && personalizedNote && <p className="sms-personalized-note">{personalizedNote}</p>}
 
           <div className="sms-review-grid">
-            <Select label="Type" value={draft.kind} allowDeselect={false} data={[{ value: "expense", label: "Expense" }, { value: "income", label: "Income" }]}
-              onChange={(value) => value && update({ kind: value as TransactionDraft["kind"], category: value === "income" ? "salary" : "other", subcategory: "" })} />
+            <Select label="Type" value={reviewType} allowDeselect={false} data={[{ value: "expense", label: "Expense" }, { value: "income", label: "Income" }, ...(onSaveTransfer ? [{ value: "transfer", label: "Transfer between my accounts" }] : [])]}
+              onChange={(value) => value && changeReviewType(value as ReviewType)} />
             <NumberInput label={`Amount in ${currency}`} value={draft.amount} min={0} decimalScale={2} thousandSeparator=","
               onChange={(value) => update({ amount: String(value) })} />
           </div>
 
-          <DatePickerInput label="Date" value={draft.occurredOn} onChange={(value) => value && update({ occurredOn: value })} valueFormat="MMM D, YYYY" firstDayOfWeek={0} required />
-          <TextInput label="Description" value={draft.note} maxLength={80} onChange={(event) => update({ note: event.currentTarget.value })} />
+          <DatePickerInput label="Date" description={calendarSystem === "BS" && draft.occurredOn ? formatLedgerDate(draft.occurredOn, "BS") : undefined} value={draft.occurredOn} onChange={(value) => value && update({ occurredOn: value })} valueFormat="MMM D, YYYY" firstDayOfWeek={0} required />
+          <TextInput label={asTransfer ? "Note" : "Description"} value={draft.note} maxLength={80} onChange={(event) => update({ note: event.currentTarget.value })} />
 
+          {asTransfer ? <>
+            <div className="sms-review-grid">
+              <Select label="From" placeholder={ownAccounts.length > 1 ? "Choose the source" : "Add an account first"} value={route.fromAccountId || null} allowDeselect={false} disabled={ownAccounts.length < 2}
+                data={transferOptions} onChange={(value) => setRoute((current) => ({ ...current, fromAccountId: value ?? "" }))} />
+              <Select label="To" placeholder={ownAccounts.length > 1 ? "Choose the destination" : "Add an account first"} value={route.toAccountId || null} allowDeselect={false} disabled={ownAccounts.length < 2}
+                data={transferOptions.map((option) => ({ ...option, disabled: option.value === route.fromAccountId }))} onChange={(value) => setRoute((current) => ({ ...current, toAccountId: value ?? "" }))} />
+            </div>
+            <p className="sms-personalized-note">A transfer moves money between your own accounts. It is not counted as income or spending.</p>
+          </> : <>
           <div className="sms-review-grid">
             <Select label="Category" value={draft.category} allowDeselect={false} data={categories.map((category) => ({ value: category.id, label: category.label }))}
               onChange={(value) => value && update({ category: value, subcategory: "" })} />
@@ -245,21 +325,23 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
             <Select label="Payment method" value={draft.paymentMode} allowDeselect={false}
               data={[{ value: "cash", label: "Cash" }, { value: "cheque", label: "Cheque" }, { value: "online", label: "Online payment" }]}
               onChange={(value) => update({ paymentMode: value as PaymentMode, paymentAccountId: value === "online" ? draft.paymentAccountId : "" })} />
-            {draft.paymentMode === "online" && <Select label="Payment account" placeholder={paymentAccounts.length ? "Choose an account" : "Add an account first"}
-              value={draft.paymentAccountId || null} allowDeselect={false} disabled={!paymentAccounts.length}
-              data={paymentAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))}
+            {draft.paymentMode === "online" && <Select label="Payment account" placeholder={onlineAccounts.length ? "Choose an account" : "Add an account first"}
+              value={draft.paymentAccountId || null} allowDeselect={false} disabled={!onlineAccounts.length}
+              data={onlineAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))}
               onChange={(value) => update({ paymentAccountId: value ?? "" })} />}
           </div>
+          </>}
 
           {!amountIsValid && <p className="receipt-total-error">Enter an amount greater than zero.</p>}
           {accountIsMissing && <p className="receipt-total-error">Choose the payment account used for this transaction.</p>}
+          {routeIsMissing && <p className="receipt-total-error">{ownAccounts.length < 2 ? "Add at least two of your own accounts on the Accounts page to record a transfer." : "Choose two different accounts."}</p>}
           <FormError message={error} />
 
           <p className="sms-review-footnote">Nothing has been saved yet.</p>
           <div className="dialog-actions">
             <button className="secondary-button" disabled={stage === "saving"} onClick={() => { setStage("ready"); setDraft(null); setAnalysis(null); }}>Back</button>
             <button className="primary-button" disabled={!canSave} onClick={() => void save()}>
-              {stage === "saving" ? <><ButtonSpinner />Saving…</> : <><Sparkle size={17} />Save transaction</>}
+              {stage === "saving" ? <><ButtonSpinner />Saving…</> : asTransfer ? <><ArrowsLeftRight size={17} />Save transfer</> : <><Sparkle size={17} />Save transaction</>}
             </button>
           </div>
         </div>}

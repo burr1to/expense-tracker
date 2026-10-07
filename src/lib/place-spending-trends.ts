@@ -1,4 +1,5 @@
 import { addDays, addMonths, format, startOfDay } from "date-fns";
+import { countsAsIncomeOrSpending } from "./categories";
 import type { LedgerTransaction, SavedPlace, SavedPlaceIconName } from "../types";
 
 export type PlaceTrendPeriodMonths = 1 | 3 | 6 | 12;
@@ -85,7 +86,7 @@ export function calculatePlaceSpendingTrends(
   }>();
 
   transactions.forEach((transaction) => {
-    if (transaction.kind !== "expense") return;
+    if (transaction.kind !== "expense" || !countsAsIncomeOrSpending(transaction)) return;
     const key = transactionPlaceKey(transaction);
     if (!key) return;
     const inCurrent = transaction.occurredOn >= ranges.currentStartKey && transaction.occurredOn <= ranges.currentEndKey;

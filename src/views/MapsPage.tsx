@@ -7,7 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { LocationPicker } from "../components/LocationPicker";
 import { SavedPlaceIcon } from "../components/SavedPlaceIcon";
 import { TransactionRow } from "../components/TransactionRow";
-import { allCategoriesFor, getCategory } from "../lib/categories";
+import { allCategoriesFor, countsAsIncomeOrSpending, getCategory } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
 import { KATHMANDU_BOUNDS, KATHMANDU_CENTER, KATHMANDU_MAP_MAX_ZOOM, addKathmanduLabelMarkers, applyKathmanduMapTheme, kathmanduMapStyle } from "../lib/kathmandu-locations";
 import { transactionPlaceKey } from "../lib/place-spending-trends";
@@ -95,8 +95,10 @@ function buildSummaries(transactions: LedgerTransaction[], savedPlaces: SavedPla
       monthlyTotals: [],
     };
     current.transactions.push(transaction);
-    if (transaction.kind === "expense") current.totalExpenseMinor += transaction.amountMinor;
-    else current.totalIncomeMinor += transaction.amountMinor;
+    // Money lent or repaid at a place is listed there but is not spending or income there.
+    const counted = countsAsIncomeOrSpending(transaction);
+    if (counted && transaction.kind === "expense") current.totalExpenseMinor += transaction.amountMinor;
+    else if (counted) current.totalIncomeMinor += transaction.amountMinor;
     current.netMinor = current.totalIncomeMinor - current.totalExpenseMinor;
     groups.set(key, current);
   });
@@ -127,7 +129,7 @@ function buildSummaries(transactions: LedgerTransaction[], savedPlaces: SavedPla
     const categoryTotals = new Map<string, number>();
     const monthlyTotals = new Map<string, number>();
     summary.transactions.forEach((transaction) => categoryTotals.set(transaction.category, (categoryTotals.get(transaction.category) ?? 0) + transaction.amountMinor));
-    summary.transactions.forEach((transaction) => { if (transaction.kind === "expense") monthlyTotals.set(transaction.occurredOn.slice(0, 7), (monthlyTotals.get(transaction.occurredOn.slice(0, 7)) ?? 0) + transaction.amountMinor); });
+    summary.transactions.forEach((transaction) => { if (transaction.kind === "expense" && countsAsIncomeOrSpending(transaction)) monthlyTotals.set(transaction.occurredOn.slice(0, 7), (monthlyTotals.get(transaction.occurredOn.slice(0, 7)) ?? 0) + transaction.amountMinor); });
     summary.topCategory = [...categoryTotals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? summary.topCategory;
     summary.monthlyTotals = [...monthlyTotals.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-6).map(([month, amountMinor]) => ({ month, amountMinor }));
     return summary;

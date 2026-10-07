@@ -6,8 +6,12 @@ import { todayInput } from "../lib/dates";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { majorToMinor } from "../lib/currency";
 import { ASYNC_IMPORT_THRESHOLD, IMPORT_POLL_INTERVAL_MS } from "../lib/import-job";
-import type { AccountReconciliation, AccountTransfer, Budget, CategoryIconName, CustomCategory, CustomSubcategory, DueDraft, DueItem, ImportJob, LearningState, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, ReceiptUpload, RecurringDraft, RecurringEntry, SavedPlace, SavedPlaceDraft, SavingsGoal, TransactionDraft, TransactionKind } from "../types";
+import type { AccountReconciliation, AccountTransfer, AccountTransferDraft, Budget,CategoryIconName, CustomCategory, CustomSubcategory, DueDraft, DueItem, ImportJob, LearningState, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, ReceiptUpload, RecurringDraft, RecurringEntry, SavedPlace, SavedPlaceDraft, SavingsGoal, TransactionDraft, TransactionKind } from "../types";
 import type { CsvCategoryDraft, CsvSubcategoryDraft } from "../lib/csv";
+import type { SplitBillDraft } from "../lib/split-bill";
+
+/** Where a repayment landed or left (null/omitted means cash), and an id generated per open form so a retried save records once. */
+export interface DueSettlementOptions { paymentAccountId?: string | null; clientRequestId?: string }
 import { useAuth } from "./AuthContext";
 import { useToasts, type ToastInput } from "./ToastContext";
 import { activityToast } from "../components/ActivityIcon";
@@ -17,26 +21,38 @@ interface BudgetDraft { category: string; amount: string; monthKey: string; shar
 interface GoalDraft { name: string; target: string; saved: string; targetDate: string }
 interface CategoryDraft { name: string; kind: TransactionKind | "both"; color: string; icon: CategoryIconName }
 interface SubcategoryDraft { categoryId: string; name: string; icon: CategoryIconName }
-interface PaymentAccountDraft { type: PaymentAccountType; provider: string; label: string; balance: string; balanceAsOf: string; shared?: boolean }
-interface AccountTransferDraft { fromAccountId: string; toAccountId: string; amount: string; occurredOn: string; note: string }
+interface PaymentAccountDraft { type: PaymentAccountType; provider: string; label: string; balance: string; balanceAsOf: string; shared?: boolean; accountTail?: string | null }
 interface LedgerData { profile: Profile; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; goals: SavingsGoal[]; customCategories: CustomCategory[]; customSubcategories: CustomSubcategory[]; paymentAccounts: PaymentAccount[]; reconciliations: AccountReconciliation[]; savedPlaces: SavedPlace[]; transfers: AccountTransfer[]; dueItems: DueItem[] }
 export interface BackupRestoreResult { restoredAt: string; exportedAt: string; counts: Record<string, number> }
+/** Adjusts one recurring occurrence as it is recorded; anything left out comes from the schedule. */
+export interface RecurringConfirmation { dueOn?: string; amountMinor?: number; occurredOn?: string; paymentMode?: TransactionDraft["paymentMode"]; paymentAccountId?: string | null }
 interface LedgerContextValue extends LedgerData {
   loading: boolean; error: string | null;
   saveTransaction: (draft: TransactionDraft, id?: string) => Promise<string | undefined>; importTransactions: (drafts: TransactionDraft[], newCategories?: CsvCategoryDraft[], newSubcategories?: CsvSubcategoryDraft[]) => Promise<ImportJob | null>; importJobs: ImportJob[]; dismissImportJob: (id: string) => void; saveReceiptSplit: (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => Promise<number>; deleteTransaction: (id: string) => Promise<void>; restoreTransaction: (id: string) => Promise<void>;
   saveSavedPlace: (draft: SavedPlaceDraft, id?: string) => Promise<void>; deleteSavedPlace: (id: string) => Promise<void>;
   saveBudget: (draft: BudgetDraft, id?: string) => Promise<void>; deleteBudget: (id: string) => Promise<void>;
-  saveRecurring: (draft: RecurringDraft, id?: string) => Promise<void>; deleteRecurring: (id: string) => Promise<void>; confirmRecurring: (id: string) => Promise<void>;
+  /** Saves several budgets for one period at once (carry forward, Smart budgets, festival). One log entry. */
+  saveBudgets: (monthKey: string, drafts: { category: string; amount: string; shared?: boolean }[]) => Promise<void>;
+  saveRecurring: (draft: RecurringDraft, id?: string) => Promise<void>; deleteRecurring: (id: string) => Promise<void>; confirmRecurring: (id: string, overrides?: RecurringConfirmation) => Promise<void>;
+  /** Moves past one occurrence without recording it; `dueOn` is the occurrence being skipped. */
+  skipRecurring: (id: string, dueOn: string) => Promise<void>; setRecurringActive: (id: string, active: boolean) => Promise<void>;
   saveGoal: (draft: GoalDraft, id?: string) => Promise<void>; contributeToGoal: (id: string, amount: string) => Promise<void>; deleteGoal: (id: string) => Promise<void>;
   saveCustomCategory: (draft: CategoryDraft) => Promise<void>; updateCustomCategoryIcon: (id: string, icon: CategoryIconName) => Promise<void>; deleteCustomCategory: (id: string) => Promise<void>;
   saveCustomSubcategory: (draft: SubcategoryDraft) => Promise<void>; deleteCustomSubcategory: (id: string) => Promise<void>;
-  savePaymentAccount: (draft: PaymentAccountDraft) => Promise<void>; updatePaymentAccountBalance: (id: string, balance: string, balanceAsOf: string) => Promise<void>; setPaymentAccountShared: (id: string, shared: boolean) => Promise<void>; resetAccountReconciliation: (id: string) => Promise<void>; deletePaymentAccount: (id: string) => Promise<void>;
+  savePaymentAccount: (draft: PaymentAccountDraft) => Promise<void>; updatePaymentAccountBalance: (id: string, balance: string, balanceAsOf: string) => Promise<void>; setPaymentAccountShared: (id: string, shared: boolean) => Promise<void>; resetAccountReconciliation: (id: string) => Promise<void>;
+  /** Sets or clears the last digits an SMS uses for this account. */
+  updatePaymentAccountTail: (id: string, accountTail: string | null) => Promise<void>;
+  /** `removeTransfers` confirms that the account's transfers go with it, changing the other accounts' balances. */
+  deletePaymentAccount: (id: string, options?: { removeTransfers?: boolean }) => Promise<void>;
   approveAccountReconciliation: (paymentAccountId: string, monthKey: string, checkedOn: string, actualBalance: string, adjustmentNote: string) => Promise<void>;
-  saveTransfer: (draft: AccountTransferDraft) => Promise<void>; deleteTransfer: (id: string) => Promise<void>;
+  /** With `id`, edits that transfer; otherwise records a new one, deduped on `draft.clientRequestId`. */
+  saveTransfer: (draft: AccountTransferDraft, id?: string) => Promise<void>; deleteTransfer: (id: string) => Promise<void>;
   saveDueItem: (draft: DueDraft, id?: string) => Promise<void>; deleteDueItem: (id: string) => Promise<void>;
   snoozeDueItem: (id: string) => Promise<void>;
-  recordDuePayment: (id: string, amount: string, occurredOn: string, note: string, addToLedger: boolean) => Promise<void>;
-  completeDueItem: (id: string, addToLedger: boolean) => Promise<void>;
+  recordDuePayment: (id: string, amount: string, occurredOn: string, note: string, addToLedger: boolean, options?: DueSettlementOptions) => Promise<void>;
+  completeDueItem: (id: string, addToLedger: boolean, options?: DueSettlementOptions & { amount?: string; occurredOn?: string }) => Promise<void>;
+  deleteDuePayment: (paymentId: string) => Promise<void>;
+  saveSplitBill: (draft: SplitBillDraft) => Promise<void>;
   savePin: (pin: string, currentPin?: string) => Promise<void>; removePin: (currentPin: string) => Promise<void>; verifyPin: (pin: string) => Promise<void>;
   restoreBackup: (file: File, password: string) => Promise<BackupRestoreResult>;
   updateProfile: (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes" | "calendarSystem" | "safeToSpendBufferMinor" | "emailReminders" | "browserReminders">>) => Promise<void>;
@@ -88,8 +104,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const announceRef = useRef<(entries: ActivityEntry[] | undefined, fromUndo?: boolean) => void>(() => undefined);
   const announce = useCallback((entries: ActivityEntry[] | undefined, fromUndo = false) => announceRef.current(entries, fromUndo), []);
   useEffect(() => {
-    const runUndo = async (action: "deleteTransaction" | "restoreTransaction", transactionId: string) => {
-      const { activity, ...next } = await requestAction(action, undefined, transactionId) as WithActivity<LedgerData>;
+    const runUndo = async (action: "deleteTransaction" | "restoreTransaction" | "undoRecurring", transactionId: string, payload?: unknown) => {
+      const { activity, ...next } = await requestAction(action, payload, transactionId) as WithActivity<LedgerData>;
       setData(next);
       announceRef.current(activity, true);
     };
@@ -98,6 +114,10 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       const transactionId = entry.entityId;
       if (entry.action === "transaction.created") return { label: "Undo", run: () => runUndo("deleteTransaction", transactionId) };
       if (entry.action === "transaction.deleted") return { label: "Undo", run: () => runUndo("restoreTransaction", transactionId) };
+      const previousDueOn = entry.meta?.previousDueOn;
+      const recurringId = entry.meta?.recurringId;
+      if (entry.action === "recurring.recorded" && typeof previousDueOn === "string" && typeof recurringId === "string") return { label: "Undo", run: () => runUndo("undoRecurring", recurringId, { previousDueOn, transactionId }) };
+      if (entry.action === "recurring.skipped" && typeof previousDueOn === "string") return { label: "Undo", run: () => runUndo("undoRecurring", transactionId, { previousDueOn }) };
       return undefined;
     };
     announceRef.current = (entries, fromUndo = false) => {
@@ -172,6 +192,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const saveSavedPlace = useCallback(async (draft: SavedPlaceDraft, id?: string) => mutate("saveSavedPlace", draft, id), [mutate]);
   const deleteSavedPlace = useCallback(async (id: string) => mutate("deleteSavedPlace", undefined, id), [mutate]);
   const saveBudget = useCallback(async (draft: BudgetDraft, id?: string) => mutate("saveBudget", { monthKey: draft.monthKey, category: draft.category, amountMinor: majorToMinor(draft.amount), shared: draft.shared ?? false }, id), [mutate]);
+  const saveBudgets = useCallback(async (monthKey: string, drafts: { category: string; amount: string; shared?: boolean }[]) => mutate("saveBudgets", { monthKey, budgets: drafts.map((draft) => ({ category: draft.category, amountMinor: majorToMinor(draft.amount), ...(draft.shared === undefined ? {} : { shared: draft.shared }) })) }), [mutate]);
   const deleteBudget = useCallback(async (id: string) => mutate("deleteBudget", undefined, id), [mutate]);
   const saveRecurring = useCallback(async (draft: RecurringDraft, id?: string) => {
     await mutate("saveRecurring", {
@@ -184,10 +205,17 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       recurrenceUnit: draft.recurrenceUnit,
       recurrenceInterval: draft.recurrenceInterval,
       startOn: draft.startOn,
+      active: draft.active,
     }, id);
   }, [mutate]);
   const deleteRecurring = useCallback(async (id: string) => mutate("deleteRecurring", undefined, id), [mutate]);
-  const confirmRecurring = useCallback(async (id: string) => mutate("confirmRecurring", undefined, id), [mutate]);
+  const confirmRecurring = useCallback(async (id: string, overrides?: RecurringConfirmation) => mutate("confirmRecurring", overrides, id), [mutate]);
+  const skipRecurring = useCallback(async (id: string, dueOn: string) => mutate("skipRecurring", { dueOn }, id), [mutate]);
+  const setRecurringActive = useCallback(async (id: string, active: boolean) => {
+    const entry = data.recurringEntries.find((item) => item.id === id);
+    if (!entry) throw new Error("This recurring entry no longer exists.");
+    await mutate("saveRecurring", { kind: entry.kind, category: entry.category, amountMinor: entry.amountMinor, paymentAccountId: entry.paymentAccountId, note: entry.note, tags: entry.tags, recurrenceUnit: entry.recurrenceUnit, recurrenceInterval: entry.recurrenceInterval, startOn: entry.anchorDate, active }, id);
+  }, [data.recurringEntries, mutate]);
   const saveGoal = useCallback(async (draft: GoalDraft, id?: string) => mutate("saveGoal", { name: draft.name, targetMinor: majorToMinor(draft.target), savedMinor: majorToMinor(draft.saved), targetDate: draft.targetDate || null }, id), [mutate]);
   const contributeToGoal = useCallback(async (id: string, amount: string) => mutate("contributeToGoal", { amountMinor: majorToMinor(amount) }, id), [mutate]);
   const deleteGoal = useCallback(async (id: string) => mutate("deleteGoal", undefined, id), [mutate]);
@@ -196,7 +224,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const deleteCustomCategory = useCallback(async (id: string) => mutate("deleteCustomCategory", undefined, id), [mutate]);
   const saveCustomSubcategory = useCallback(async (draft: SubcategoryDraft) => mutate("saveCustomSubcategory", draft), [mutate]);
   const deleteCustomSubcategory = useCallback(async (id: string) => mutate("deleteCustomSubcategory", undefined, id), [mutate]);
-  const savePaymentAccount = useCallback(async (draft: PaymentAccountDraft) => mutate("savePaymentAccount", { type: draft.type, provider: draft.provider, label: draft.label, balanceMinor: majorToMinor(draft.balance), balanceAsOf: draft.balanceAsOf, shared: draft.shared ?? false }), [mutate]);
+  const savePaymentAccount = useCallback(async (draft: PaymentAccountDraft) => mutate("savePaymentAccount", { type: draft.type, provider: draft.provider, label: draft.label, accountTail: draft.accountTail?.trim() || null, balanceMinor: majorToMinor(draft.balance), balanceAsOf: draft.balanceAsOf, shared: draft.shared ?? false }), [mutate]);
+  const updatePaymentAccountTail = useCallback(async (id: string, accountTail: string | null) => mutate("updatePaymentAccountTail", { accountTail: accountTail?.trim() || null }, id), [mutate]);
   const setPaymentAccountShared = useCallback(async (id: string, shared: boolean) => mutate("setPaymentAccountShared", { shared }, id), [mutate]);
   const inviteHousehold = useCallback(async (email: string) => mutate("inviteHousehold", { email }), [mutate]);
   const acceptHousehold = useCallback(async () => mutate("acceptHousehold"), [mutate]);
@@ -205,14 +234,16 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const updatePaymentAccountBalance = useCallback(async (id: string, balance: string, balanceAsOf: string) => mutate("updatePaymentAccountBalance", { balanceMinor: majorToMinor(balance), balanceAsOf }, id), [mutate]);
   const approveAccountReconciliation = useCallback(async (paymentAccountId: string, monthKey: string, checkedOn: string, actualBalance: string, adjustmentNote: string) => mutate("approveAccountReconciliation", { paymentAccountId, monthKey, checkedOn, actualBalanceMinor: majorToMinor(actualBalance), adjustmentNote: adjustmentNote.trim() }), [mutate]);
   const resetAccountReconciliation = useCallback(async (id: string) => mutate("resetAccountReconciliation", { confirmation: "RESET" }, id), [mutate]);
-  const deletePaymentAccount = useCallback(async (id: string) => mutate("deletePaymentAccount", undefined, id), [mutate]);
-  const saveTransfer = useCallback(async (draft: AccountTransferDraft) => mutate("saveTransfer", { fromAccountId: draft.fromAccountId, toAccountId: draft.toAccountId, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn, note: draft.note.trim() }), [mutate]);
+  const deletePaymentAccount = useCallback(async (id: string, options: { removeTransfers?: boolean } = {}) => mutate("deletePaymentAccount", options.removeTransfers ? { removeTransfers: true } : undefined, id), [mutate]);
+  const saveTransfer = useCallback(async (draft: AccountTransferDraft, id?: string) => mutate("saveTransfer", { fromAccountId: draft.fromAccountId, toAccountId: draft.toAccountId, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn, note: draft.note.trim(), clientRequestId: id ? undefined : draft.clientRequestId }, id), [mutate]);
   const deleteTransfer = useCallback(async (id: string) => mutate("deleteTransfer", undefined, id), [mutate]);
   const saveDueItem = useCallback(async (draft: DueDraft, id?: string) => mutate("saveDueItem", { ...draft, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn || null, remindOn: draft.remindOn || null, annualRatePercent: draft.annualRatePercent.trim() ? Number(draft.annualRatePercent) : null }, id), [mutate]);
   const deleteDueItem = useCallback(async (id: string) => mutate("deleteDueItem", undefined, id), [mutate]);
   const snoozeDueItem = useCallback(async (id: string) => mutate("snoozeDueItem", { until: format(addDays(new Date(), 1), "yyyy-MM-dd") }, id), [mutate]);
-  const recordDuePayment = useCallback(async (id: string, amount: string, occurredOn: string, note: string, addToLedger: boolean) => mutate("recordDuePayment", { amountMinor: majorToMinor(amount), occurredOn, note: note.trim(), addToLedger }, id), [mutate]);
-  const completeDueItem = useCallback(async (id: string, addToLedger: boolean) => mutate("completeDueItem", { addToLedger, occurredOn: todayInput() }, id), [mutate]);
+  const recordDuePayment = useCallback(async (id: string, amount: string, occurredOn: string, note: string, addToLedger: boolean, options: DueSettlementOptions = {}) => mutate("recordDuePayment", { amountMinor: majorToMinor(amount), occurredOn, note: note.trim(), addToLedger, paymentAccountId: options.paymentAccountId || null, clientRequestId: options.clientRequestId }, id), [mutate]);
+  const completeDueItem = useCallback(async (id: string, addToLedger: boolean, options: DueSettlementOptions & { amount?: string; occurredOn?: string } = {}) => mutate("completeDueItem", { addToLedger, occurredOn: options.occurredOn || todayInput(), amountMinor: options.amount ? majorToMinor(options.amount) : undefined, paymentAccountId: options.paymentAccountId || null, clientRequestId: options.clientRequestId }, id), [mutate]);
+  const deleteDuePayment = useCallback(async (paymentId: string) => mutate("deleteDuePayment", undefined, paymentId), [mutate]);
+  const saveSplitBill = useCallback(async (draft: SplitBillDraft) => mutate("saveSplitBill", { ...draft, note: draft.note.trim() }), [mutate]);
   const savePin = useCallback(async (pin: string, currentPin?: string) => mutate("savePin", { pin, currentPin }), [mutate]);
   const removePin = useCallback(async (currentPin: string) => mutate("removePin", { currentPin }), [mutate]);
   const verifyPin = useCallback(async (pin: string) => {
@@ -245,7 +276,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const resetLearning = useCallback(async () => { await learningAction({ action: "reset" }); }, [learningAction]);
   const resetDemo = useCallback(() => undefined, []);
 
-  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, setPaymentAccountShared, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, inviteHousehold, acceptHousehold, removeHouseholdMember, leaveHousehold, setLearningEnabled, runLearning, resetLearning, resetDemo, activityRevision }), [activityRevision, data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountBalance, setPaymentAccountShared, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, savePin, removePin, verifyPin, restoreBackup, updateProfile, inviteHousehold, acceptHousehold, removeHouseholdMember, leaveHousehold, setLearningEnabled, runLearning, resetLearning, resetDemo]);
+  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, saveBudgets, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, skipRecurring, setRecurringActive, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountTail, updatePaymentAccountBalance, setPaymentAccountShared, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, deleteDuePayment, saveSplitBill, savePin, removePin, verifyPin, restoreBackup, updateProfile, inviteHousehold, acceptHousehold, removeHouseholdMember, leaveHousehold, setLearningEnabled, runLearning, resetLearning, resetDemo, activityRevision }), [activityRevision, data, loading, error, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, saveBudgets, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, skipRecurring, setRecurringActive, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountTail, updatePaymentAccountBalance, setPaymentAccountShared, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, deleteDuePayment, saveSplitBill, savePin, removePin, verifyPin, restoreBackup, updateProfile, inviteHousehold, acceptHousehold, removeHouseholdMember, leaveHousehold, setLearningEnabled, runLearning, resetLearning, resetDemo]);
   return <LedgerContext.Provider value={value}>{children}</LedgerContext.Provider>;
 }
 

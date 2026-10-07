@@ -1,7 +1,16 @@
 import type { AccountTransfer, LedgerTransaction, PaymentAccount } from "../types";
 
-type BalanceTransaction = Pick<LedgerTransaction, "paymentAccountId" | "kind" | "amountMinor" | "occurredOn" | "createdAt">;
+type BalanceTransaction = Pick<LedgerTransaction, "paymentAccountId" | "kind" | "amountMinor" | "occurredOn" | "createdAt"> & Partial<Pick<LedgerTransaction, "paymentMode" | "userId">>;
 type BalanceTransfer = Pick<AccountTransfer, "fromAccountId" | "toAccountId" | "amountMinor" | "occurredOn" | "createdAt">;
+
+/**
+ * Whether an entry moves this account's balance. Cash entries never carry an
+ * account; a Cash in hand account collects its owner's cash entries instead.
+ */
+export function transactionPostsTo(item: BalanceTransaction, account: Pick<PaymentAccount, "id" | "type" | "userId">) {
+  if (item.paymentAccountId) return item.paymentAccountId === account.id;
+  return account.type === "cash" && item.paymentMode === "cash" && item.userId === account.userId;
+}
 
 export function isAfterAccountAnchor(date: string, createdAt: string, account: PaymentAccount) {
   if (date > account.balanceAsOf) return true;
@@ -27,7 +36,7 @@ export function accountActivityThrough(
   let transfersInMinor = 0;
   let transfersOutMinor = 0;
   for (const item of transactions) {
-    if (item.paymentAccountId !== account.id) continue;
+    if (!transactionPostsTo(item, account)) continue;
     if (!isAfterAccountAnchor(item.occurredOn, item.createdAt, account)) continue;
     if (throughDate && item.occurredOn > throughDate) continue;
     if (item.kind === "income") incomeMinor += item.amountMinor;
@@ -51,7 +60,12 @@ function pushGroup<T>(groups: Map<string, T[]>, key: string, item: T) {
 /** One index of the ledger, then one balance per account. */
 export function attachCurrentBalances(accounts: readonly PaymentAccount[], transactions: readonly BalanceTransaction[], transfers: readonly BalanceTransfer[]): PaymentAccount[] {
   const transactionsByAccount = new Map<string, BalanceTransaction[]>();
-  for (const item of transactions) if (item.paymentAccountId) pushGroup(transactionsByAccount, item.paymentAccountId, item);
+  const cashAccountByOwner = new Map<string, string>();
+  for (const account of accounts) if (account.type === "cash" && !cashAccountByOwner.has(account.userId)) cashAccountByOwner.set(account.userId, account.id);
+  for (const item of transactions) {
+    if (item.paymentAccountId) pushGroup(transactionsByAccount, item.paymentAccountId, item);
+    else if (item.paymentMode === "cash" && item.userId && cashAccountByOwner.has(item.userId)) pushGroup(transactionsByAccount, cashAccountByOwner.get(item.userId)!, item);
+  }
   const transfersByAccount = new Map<string, BalanceTransfer[]>();
   for (const item of transfers) {
     pushGroup(transfersByAccount, item.fromAccountId, item);
@@ -81,6 +95,32 @@ export function withCurrentAccountBalance(account: PaymentAccount, transactions:
 
 export function totalCurrentBalance(accounts: readonly PaymentAccount[]) {
   return accounts.reduce((total, account) => total + account.currentBalanceMinor, 0);
+}
+
+export interface TransferRemovalEffect {
+  accountId: string;
+  transferCount: number;
+  /** How the other account's current balance changes once these transfers are gone. */
+  changeMinor: number;
+}
+
+/**
+ * Removing an account also removes its transfers. Money it sent to another
+ * account then leaves that account, and money it received goes back.
+ */
+export function transferRemovalEffects(accountId: string, accounts: readonly PaymentAccount[], transfers: readonly BalanceTransfer[]): TransferRemovalEffect[] {
+  const effects = new Map<string, TransferRemovalEffect>();
+  for (const item of transfers) {
+    if (item.fromAccountId !== accountId && item.toAccountId !== accountId) continue;
+    const otherId = item.fromAccountId === accountId ? item.toAccountId : item.fromAccountId;
+    if (otherId === accountId) continue;
+    const effect = effects.get(otherId) ?? { accountId: otherId, transferCount: 0, changeMinor: 0 };
+    effect.transferCount += 1;
+    const other = accounts.find((account) => account.id === otherId);
+    if (other && isAfterAccountAnchor(item.occurredOn, item.createdAt, other)) effect.changeMinor += item.fromAccountId === accountId ? -item.amountMinor : item.amountMinor;
+    effects.set(otherId, effect);
+  }
+  return [...effects.values()];
 }
 
 export function activityHasMovement(activity: AccountActivity) {
@@ -131,7 +171,7 @@ export function reconciliationSpendingGap(
   for (const item of transactions) {
     if (item.kind !== "expense" || item.occurredOn < monthStart || item.occurredOn > checkedOn) continue;
     monthExpenseMinor += item.amountMinor;
-    if (item.paymentAccountId === account.id) onThisAccount += item.amountMinor;
+    if (transactionPostsTo(item, account)) onThisAccount += item.amountMinor;
   }
   const otherAccountExpenseMinor = monthExpenseMinor - onThisAccount;
   return {

@@ -53,9 +53,10 @@ export const backupEntitySchemas = {
   }),
   payment_account: z.object({
     importId: z.string().uuid().optional(),
-    type: z.enum(["mobile_banking", "esewa", "khalti", "connect_ips"]),
+    type: z.enum(["mobile_banking", "esewa", "khalti", "connect_ips", "ime_pay", "cash", "other"]),
     provider: z.string().trim().min(1).max(100),
     label: z.string().trim().max(60),
+    accountTail: z.string().regex(/^\d{3,4}$/).nullable().optional(),
     shared: z.boolean().optional(),
     balanceMinor: z.number().int(),
     balanceAsOf: date,

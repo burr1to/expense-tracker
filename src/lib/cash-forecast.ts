@@ -1,5 +1,5 @@
 import { dueRemaining } from "./dues";
-import { nextRecurringOccurrence, recurringOccurrencesBetween } from "./recurrence";
+import { recurringOccurrencesBetween, scheduledOccurrencesBetween } from "./recurrence";
 import type { DueItem, LedgerTransaction, RecurringEntry } from "../types";
 
 export interface CashForecastDay {
@@ -29,21 +29,11 @@ function isInflow(kind: DueItem["kind"]) {
   return kind === "receivable" || kind === "lent";
 }
 
-function scheduledOccurrences(entry: RecurringEntry, start: string, end: string) {
-  if (!entry.active || start > end) return [];
-  const dates: string[] = [];
-  let occurrence = entry.anchorDate;
-  let guard = 0;
-  while (occurrence < start && guard < 10_000) {
-    occurrence = nextRecurringOccurrence(entry, occurrence);
-    guard += 1;
-  }
-  while (occurrence <= end && guard < 10_000) {
-    dates.push(occurrence);
-    occurrence = nextRecurringOccurrence(entry, occurrence);
-    guard += 1;
-  }
-  return dates;
+/** Occurrences already confirmed, i.e. before `nextDueOn`; anything from `nextDueOn` on has not reached the ledger. */
+function confirmedOccurrences(entry: RecurringEntry, start: string, end: string) {
+  if (!entry.active) return [];
+  const lastConfirmed = shiftDate(entry.nextDueOn, -1);
+  return scheduledOccurrencesBetween(entry, start, lastConfirmed < end ? lastConfirmed : end);
 }
 
 /**
@@ -51,6 +41,7 @@ function scheduledOccurrences(entry: RecurringEntry, start: string, end: string)
  * The start is today's tracked balance. Future days add scheduled income and
  * money owed to you, then subtract scheduled bills, open dues, and a daily
  * pace from recent online spending that is not already a scheduled bill.
+ * Bills and dues that are due but not settled yet land on the first day.
  */
 export function forecastCash(input: {
   startingBalanceMinor: number;
@@ -75,7 +66,7 @@ export function forecastCash(input: {
   let recentScheduled = 0;
   for (const entry of input.recurringEntries) {
     if (entry.kind !== "expense" || !entry.paymentAccountId) continue;
-    recentScheduled += scheduledOccurrences(entry, windowStart, today).length * entry.amountMinor;
+    recentScheduled += confirmedOccurrences(entry, windowStart, today).length * entry.amountMinor;
   }
 
   const dailyPaceMinor = Math.max(0, Math.round((recentOnline - recentScheduled) / horizon));
@@ -88,7 +79,9 @@ export function forecastCash(input: {
     let billsMinor = 0;
     for (const entry of input.recurringEntries) {
       if (!entry.active) continue;
-      const hits = recurringOccurrencesBetween(entry, date, date).length;
+      // Due but not confirmed yet: the money has not left the balance, so it lands on the first day.
+      const from = date === firstDay && entry.nextDueOn < date ? entry.nextDueOn : date;
+      const hits = recurringOccurrencesBetween(entry, from, date).length;
       if (!hits) continue;
       const amount = hits * entry.amountMinor;
       if (entry.kind === "income") incomeMinor += amount;

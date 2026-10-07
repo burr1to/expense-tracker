@@ -52,6 +52,37 @@ describe("forecastCash", () => {
     expect(result.dailyPaceMinor).toBe(Math.round(30000 / 30));
   });
 
+  it("lands a recurring bill that is due but not confirmed on the first forecast day", () => {
+    const result = forecastCash({
+      startingBalanceMinor: 3_000_000,
+      today: "2026-10-07",
+      transactions: [],
+      recurringEntries: [
+        recurring({ id: "rent", anchorDate: "2026-09-01", nextDueOn: "2026-10-01", amountMinor: 2_500_000 }),
+        recurring({ id: "wifi", anchorDate: "2026-09-07", nextDueOn: "2026-10-07", amountMinor: 150000 }),
+      ],
+      dueItems: [],
+    });
+
+    expect(result.days[0]).toMatchObject({ date: "2026-10-08", billsMinor: 2_650_000 });
+    // Next month's rent still lands on its own day, and the overdue one is not counted twice.
+    expect(result.days.find((day) => day.date === "2026-11-01")?.billsMinor).toBe(2_500_000);
+    expect(result.day30.balanceMinor).toBe(3_000_000 - 2_650_000 - 2_500_000);
+  });
+
+  it("leaves bills that are due but not confirmed out of the recent online pace", () => {
+    const result = forecastCash({
+      startingBalanceMinor: 500000,
+      today: "2026-10-07",
+      transactions: [transaction({ amountMinor: 60000, occurredOn: "2026-10-02" })],
+      recurringEntries: [recurring({ anchorDate: "2026-09-01", nextDueOn: "2026-10-01", amountMinor: 40000 })],
+      dueItems: [],
+    });
+
+    // September's rent was confirmed and logged before the window; October's has not been logged at all.
+    expect(result.dailyPaceMinor).toBe(Math.round(60000 / 30));
+  });
+
   it("lands an overdue due on the first forecast day and adds money owed to you", () => {
     const result = forecastCash({
       startingBalanceMinor: 200000,
