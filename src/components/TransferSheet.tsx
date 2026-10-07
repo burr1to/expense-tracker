@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 import { majorToMinor } from "../lib/currency";
 import { formatLedgerDate, todayInput } from "../lib/dates";
 import { findSimilarTransfer, isCashAccount, paymentAccountLabel, transferAccountDefaults, type TransferAccounts } from "../lib/payment-accounts";
+import { newClientRequestId } from "../lib/transaction-defaults";
 import type { AccountTransfer, AccountTransferDraft, CalendarSystem, CurrencyCode, PaymentAccount } from "../types";
 import { AnimatedOverlay } from "./AnimatedOverlay";
 import { ButtonSpinner } from "./ButtonSpinner";
@@ -53,7 +54,7 @@ export function TransferSheet({ request, ...props }: TransferSheetProps) {
 
 function TransferForm({ request, currency, calendarSystem = "AD", accounts, transfers, onClose, onSave, onBusyChange }: Omit<TransferSheetProps, "request"> & { request: TransferRequest; onBusyChange: (busy: boolean) => void }) {
   const editing = request.transferId ? transfers.find((transfer) => transfer.id === request.transferId) ?? null : null;
-  const [clientRequestId] = useState(() => crypto.randomUUID());
+  const [clientRequestId] = useState(newClientRequestId);
   const [route, setRoute] = useState<TransferAccounts>(() => editing
     ? { fromAccountId: editing.fromAccountId, toAccountId: editing.toAccountId }
     : transferAccountDefaults(accounts, request, readLastRoute()));

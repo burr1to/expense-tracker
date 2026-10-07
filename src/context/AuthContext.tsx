@@ -57,7 +57,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSessionError(CANT_REACH_MESSAGE);
       throw new Error(CANT_REACH_MESSAGE);
     }
-    setUser(parsed.body.user);
+    const next = parsed.body.user;
+    // Keep the same object for the same person: a new identity would re-run every user-keyed effect, including the
+    // full ledger reload, and a ledger 401 that re-checks the session could then loop.
+    setUser((current) => current && current.id === next.id && current.name === next.name && current.email === next.email && current.emailVerified === next.emailVerified && (current.image ?? null) === (next.image ?? null) ? current : next);
     setSessionError(null);
   }, []);
 

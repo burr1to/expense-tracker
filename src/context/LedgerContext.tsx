@@ -16,16 +16,12 @@ import { useAuth } from "./AuthContext";
 import { useToasts, type ToastInput } from "./ToastContext";
 import { activityToast } from "../components/ActivityIcon";
 import type { ActivityEntry } from "../lib/activity-log";
-import { CANT_REACH_MESSAGE, isConnectionError, readResponse, responseMessage, timeoutSignal, toUserMessage, unconfirmedMessage, type ParsedResponse } from "../lib/user-messages";
+import { CANT_REACH_MESSAGE, isConnectionError, readResponse, responseMessage, retrySafeAction as retrySafe, timeoutSignal, toUserMessage, unconfirmedMessage, type ParsedResponse } from "../lib/user-messages";
 
 /** A save that has not answered in this long is reported as unconfirmed; the first load waits as long as it takes. */
 const ACTION_TIMEOUT_MS = 20_000;
 /** A tab hidden at least this long refreshes quietly when it comes back. */
 const STALE_AFTER_HIDDEN_MS = 5 * 60_000;
-// Repeating these after a lost response cannot record anything twice (the server dedupes them, or they set a value).
-const RETRY_SAFE_ACTIONS = new Set(["saveReceiptSplit", "saveBudgets", "updateProfile", "snoozeDueItem", "setPaymentAccountShared", "updatePaymentAccountTail", "listImportJobs", "processImportJob"]);
-const retrySafe = (action: string, payload: unknown, id?: string) => (Boolean(id) && action !== "contributeToGoal") || RETRY_SAFE_ACTIONS.has(action)
-  || (typeof payload === "object" && payload !== null && typeof (payload as { clientRequestId?: unknown }).clientRequestId === "string");
 
 interface BudgetDraft { category: string; amount: string; monthKey: string; shared?: boolean }
 interface GoalDraft { name: string; target: string; saved: string; targetDate: string }

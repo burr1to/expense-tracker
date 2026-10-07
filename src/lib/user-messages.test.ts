@@ -7,6 +7,7 @@ import {
   isConnectionError,
   readResponse,
   responseMessage,
+  retrySafeAction,
   SERVER_BUSY_MESSAGE,
   SERVER_FAILURE_MESSAGE,
   serverErrorResponse,
@@ -105,5 +106,18 @@ describe("serverErrorResponse", () => {
     expect(serverErrorResponse(Object.assign(new Error("P1001: Can't reach database server"), { code: "P1001" }))).toMatchObject({ status: 500, message: SERVER_FAILURE_MESSAGE });
     expect(serverErrorResponse(new TypeError("Cannot read properties of undefined"))).toMatchObject({ status: 500 });
     expect(serverErrorResponse("boom")).toMatchObject({ status: 500 });
+  });
+});
+
+describe("retrySafeAction", () => {
+  it("promises a safe retry only where the server dedupes or the action sets a value", () => {
+    expect(retrySafeAction("saveTransaction", { amountMinor: 100 })).toBe(false);
+    expect(retrySafeAction("saveTransaction", { amountMinor: 100, clientRequestId: "abc12345" })).toBe(true);
+    expect(retrySafeAction("saveTransaction", { amountMinor: 100 }, "tx-1")).toBe(true);
+    expect(retrySafeAction("updateProfile", { hideAmounts: true })).toBe(true);
+    // These add to the record on every call, so an id alone does not make a retry safe.
+    expect(retrySafeAction("contributeToGoal", { amountMinor: 100 }, "goal-1")).toBe(false);
+    expect(retrySafeAction("recordDuePayment", { amountMinor: 100 }, "due-1")).toBe(false);
+    expect(retrySafeAction("recordDuePayment", { amountMinor: 100, clientRequestId: "abc12345" }, "due-1")).toBe(true);
   });
 });

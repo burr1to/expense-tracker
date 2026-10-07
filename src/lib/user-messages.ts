@@ -50,6 +50,17 @@ export function toUserMessage(error: unknown, response?: Pick<ParsedResponse, "s
   return fallback;
 }
 
+// Repeating these after a lost response cannot record anything twice (the server dedupes them, or they set a value).
+const RETRY_SAFE_ACTIONS = new Set(["saveReceiptSplit", "saveBudgets", "updateProfile", "snoozeDueItem", "setPaymentAccountShared", "updatePaymentAccountTail", "listImportJobs", "processImportJob"]);
+// An id usually means "set this record", but these add to it on every call and are safe only with a request id.
+const ADDS_TO_RECORD = new Set(["contributeToGoal", "recordDuePayment"]);
+
+/** Whether repeating a ledger action whose answer was lost cannot record it twice. */
+export function retrySafeAction(action: string, payload: unknown, id?: string) {
+  if (typeof payload === "object" && payload !== null && typeof (payload as { clientRequestId?: unknown }).clientRequestId === "string") return true;
+  return (Boolean(id) && !ADDS_TO_RECORD.has(action)) || RETRY_SAFE_ACTIONS.has(action);
+}
+
 /** After a lost or timed-out save: a retry is only promised to be safe when the server dedupes it. */
 export function unconfirmedMessage(retrySafe: boolean) {
   return retrySafe ? UNCONFIRMED_SAVE_MESSAGE : UNCONFIRMED_CHANGE_MESSAGE;

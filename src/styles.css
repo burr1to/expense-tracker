@@ -2938,7 +2938,8 @@ body[data-hide-amounts="true"] :is(.budget-carry-row, .smart-budget-row, .festiv
 .monthly-report-dismiss:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); color: var(--ink); }
 @media (max-width: 640px) {
   .month-card { grid-template-columns: minmax(0, 1fr); gap: 14px; margin: 0 -14px 18px; padding: 16px 20px; border-right: 0; border-left: 0; border-radius: 0; }
-  .month-card-main h2 { font-size: 34px; }
+  /* A seven-figure month still fits one line on a 360px phone. */
+  .month-card-main h2 { font-size: clamp(26px, 8.6vw, 34px); }
   .month-card-figures { padding-top: 12px; border-top: 1px solid color-mix(in srgb, var(--blue) 18%, var(--line)); border-left: 0; }
   .month-card-figure { padding: 0 12px 0 0; }
   .month-card-figure + .month-card-figure { padding: 0 0 0 12px; }

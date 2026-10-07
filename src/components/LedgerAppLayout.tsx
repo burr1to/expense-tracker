@@ -81,14 +81,6 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const [balancesUnlockedFor, setBalancesUnlockedFor] = useState<string | null>(null);
   const [balanceUnlockOpen, setBalanceUnlockOpen] = useState(false);
   const reminderToday = useToday();
-  const previousTodayRef = useRef(reminderToday);
-  // A tab left open across a month boundary moves on with it, if it was showing the month that just ended.
-  useEffect(() => {
-    const previous = previousTodayRef.current;
-    previousTodayRef.current = reminderToday;
-    if (previous.slice(0, 7) === reminderToday.slice(0, 7)) return;
-    setMonth((current) => toDateInput(current).slice(0, 7) === previous.slice(0, 7) ? currentMonthMarker() : current);
-  }, [reminderToday]);
   const [amountsHidden, setAmountsHidden] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -197,7 +189,9 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const deepLinkQuery = searchParams.toString();
   const handledDeepLink = useRef<string | null>(null);
   useEffect(() => {
-    if ((!user && !isDemo) || ledger.loading || ledger.error || locked || !deepLinkQuery || handledDeepLink.current === deepLinkQuery) return;
+    // Once the address is clean again, the same shortcut used later in this session must open its sheet again.
+    if (!deepLinkQuery) { handledDeepLink.current = null; return; }
+    if ((!user && !isDemo) || ledger.loading || ledger.error || locked || handledDeepLink.current === deepLinkQuery) return;
     const { link, rest } = readAddDeepLink(new URLSearchParams(deepLinkQuery));
     if (!link && rest === deepLinkQuery) return;
     handledDeepLink.current = deepLinkQuery;

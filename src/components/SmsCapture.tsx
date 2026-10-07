@@ -10,6 +10,7 @@ import { formatLedgerDate, todayInput } from "../lib/dates";
 import { findSimilarTransfer, isCashAccount, onlinePaymentAccounts, paymentAccountLabel } from "../lib/payment-accounts";
 import { personalizeSmsAnalysis, smsDefaultCategory, smsResultToDraft, withSmsAccountMatch, type SmsAnalysis } from "../lib/sms-analysis";
 import { mentionsCurrencyAmount, mentionsOneTimeCode, parseBankSms, SMS_MAX_LENGTH } from "../lib/sms-templates";
+import { newClientRequestId } from "../lib/transaction-defaults";
 import { transactionWarnings } from "../lib/transaction-intelligence";
 import { readResponse, responseMessage, toUserMessage } from "../lib/user-messages";
 import type {
@@ -130,7 +131,7 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
     const categoryIds = spendingCategoriesFor(reading.draft.kind, customCategories).map((category) => category.id);
     const { analysis: result, note } = personalizeSmsAnalysis(reading, learning, ownTransactions, categoryIds);
     // Each reading gets its own request id, so a retried save records it once.
-    const draftWithId = { ...result.draft, clientRequestId: crypto.randomUUID() };
+    const draftWithId = { ...result.draft, clientRequestId: newClientRequestId() };
     setPersonalizedNote(note);
     setAnalysis({ ...result, draft: draftWithId });
     setDraft(draftWithId);
