@@ -1,8 +1,8 @@
 "use client";
 
 import { Loader, TextInput } from "@mantine/core";
-import { ClockCounterClockwise, Crosshair, MagnifyingGlass, MapPin, NavigationArrow, X } from "@phosphor-icons/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { CaretDown, ClockCounterClockwise, Crosshair, MagnifyingGlass, MapPin, NavigationArrow, X } from "@phosphor-icons/react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { KATHMANDU_BOUNDS, KATHMANDU_CENTER, KATHMANDU_MAP_MAX_ZOOM, KATHMANDU_PLACES, addKathmanduLabelMarkers, applyKathmanduMapTheme, isInsideKathmandu, kathmanduMapStyle, nearestKathmanduPlace, pinnedKathmanduLocation } from "../lib/kathmandu-locations";
 import { savedPlaceIconOptions } from "../lib/saved-places";
 import type { SavedPlace, SavedPlaceDraft, SavedPlaceIconName, TransactionLocationDraft } from "../types";
@@ -29,13 +29,17 @@ interface LocationSearchResult {
 }
 
 export function LocationPicker({ open, value, recentLocations, savedPlaces, onClose, onSelect, mode = "transaction", onSavePlace }: LocationPickerProps) {
-  const mapNode = useRef<HTMLDivElement>(null);
+  const [mapNode, setMapNode] = useState<HTMLDivElement | null>(null);
   const map = useRef<import("maplibre-gl").Map | null>(null);
   const marker = useRef<import("maplibre-gl").Marker | null>(null);
   const mapModule = useRef<typeof import("maplibre-gl") | null>(null);
   const candidateRef = useRef<TransactionLocationDraft | null>(value);
   const [candidate, setCandidate] = useState<TransactionLocationDraft | null>(value);
   const [query, setQuery] = useState("");
+  const [placesExpanded, setPlacesExpanded] = useState(false);
+  const placesPanelId = useId();
+  const placesToggle = useRef<HTMLButtonElement>(null);
+  const placesTools = useRef<HTMLDivElement>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
@@ -88,10 +92,13 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
   };
 
   useEffect(() => {
-    if (!open) return;
+    // AnimatedOverlay mounts its contents after opening. A cached import can
+    // finish before that commit, so initialize when the container is attached.
+    if (!open || !mapNode) return;
     candidateRef.current = value;
     setCandidate(value);
     setQuery("");
+    setPlacesExpanded(false);
     setLocationError(null);
     setMapError(null);
     setSearching(false);
@@ -104,12 +111,12 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
     let removeLabels = () => {};
     let resizeObserver: ResizeObserver | null = null;
     void import("maplibre-gl").then((module) => {
-      if (!active || !mapNode.current) return;
+      if (!active) return;
       mapModule.current = module;
       const initialCandidate = candidateRef.current;
       const center: [number, number] = initialCandidate ? [initialCandidate.longitude, initialCandidate.latitude] : KATHMANDU_CENTER;
       const instance = new module.Map({
-        container: mapNode.current,
+        container: mapNode,
         style: kathmanduMapStyle(),
         center,
         zoom: initialCandidate ? 16 : 12.5,
@@ -122,7 +129,7 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
       instance.on("style.load", () => applyKathmanduMapTheme(instance));
       removeLabels = addKathmanduLabelMarkers(instance, module.Marker);
       resizeObserver = new ResizeObserver(() => instance.resize());
-      resizeObserver.observe(mapNode.current);
+      resizeObserver.observe(mapNode);
       instance.on("error", (event) => {
         const message = event.error?.message ?? "";
         if (/AJAXError|Failed to fetch|tile/i.test(message)) {
@@ -150,7 +157,7 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
       map.current = null;
       mapModule.current = null;
     };
-  }, [open]);
+  }, [open, mapNode]);
 
   useEffect(() => {
     if (!open) return;
@@ -162,6 +169,12 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
       window.clearTimeout(timer);
     };
   }, [open]);
+
+  useEffect(() => {
+    if (placesExpanded && window.matchMedia("(max-width: 1024px)").matches) {
+      placesTools.current?.scrollIntoView({ block: "nearest", behavior: "instant" });
+    }
+  }, [placesExpanded]);
 
   useEffect(() => {
     if (!open) return;
@@ -196,15 +209,21 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
     };
   }, [open, query]);
 
-  const choosePlace = (place: LocationSearchResult | TransactionLocationDraft) => moveMarker({
-    label: place.label,
-    address: place.address,
-    latitude: place.latitude,
-    longitude: place.longitude,
-    accuracy: null,
-    source: "savedPlaceId" in place && "source" in place && place.source === "saved" ? "saved" : "search",
-    savedPlaceId: "savedPlaceId" in place ? place.savedPlaceId : null,
-  });
+  const choosePlace = (place: LocationSearchResult | TransactionLocationDraft) => {
+    moveMarker({
+      label: place.label,
+      address: place.address,
+      latitude: place.latitude,
+      longitude: place.longitude,
+      accuracy: null,
+      source: "savedPlaceId" in place && "source" in place && place.source === "saved" ? "saved" : "search",
+      savedPlaceId: "savedPlaceId" in place ? place.savedPlaceId : null,
+    });
+    if (window.matchMedia("(max-width: 1024px)").matches) {
+      setPlacesExpanded(false);
+      placesToggle.current?.focus({ preventScroll: true });
+    }
+  };
   const useCurrentLocation = () => {
     setLocationError(null);
     if (!navigator.geolocation) { setLocationError("Location is not supported by this browser."); return; }
@@ -263,8 +282,15 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
         <div><span className="eyebrow">Kathmandu only</span><h2 id="location-picker-title">{mode === "saved-place" ? "Save a place" : "Choose transaction location"}</h2><p>{mode === "saved-place" ? "Choose the exact spot, then give it a name and icon." : "Search an area, use your device, or click the exact spot on the map."}</p></div>
         <button className="icon-button" onClick={onClose} aria-label="Close location picker"><X size={21} /></button>
       </header>
-      <div className="location-picker-body">
-        <aside className="location-picker-panel">
+      <div className="location-picker-body" data-places-expanded={placesExpanded}>
+        <div className="location-map-wrap">
+          <div ref={setMapNode} className="location-map" />
+          <span className="map-area-badge"><NavigationArrow size={14} weight="fill" />Kathmandu map area</span>
+          {mapError && <span className="map-load-warning" role="status">{mapError}</span>}
+        </div>
+        <aside className="location-picker-panel" data-expanded={placesExpanded}>
+          <button ref={placesToggle} type="button" className="location-places-toggle" aria-expanded={placesExpanded} aria-controls={placesPanelId} onClick={() => setPlacesExpanded((current) => !current)}><MagnifyingGlass size={18} /><span>{mode === "saved-place" ? "Search & recent places" : "Search & saved places"}</span><CaretDown size={18} /></button>
+          <div ref={placesTools} id={placesPanelId} className="location-picker-tools">
           <button type="button" className="secondary-button full-width" disabled={locating} onClick={useCurrentLocation}><Crosshair size={18} />{locating ? "Finding your location…" : "Use current location"}</button>
           <FormError message={locationError} />
           <TextInput value={query} onChange={(event) => setQuery(event.target.value)} leftSection={<MagnifyingGlass size={17} />} rightSection={searching ? <Loader size={15} /> : undefined} label="Search Kathmandu" placeholder="Place, landmark, or address…" />
@@ -278,12 +304,8 @@ export function LocationPicker({ open, value, recentLocations, savedPlaces, onCl
             })}
             {query.trim().length >= 2 && !searching && !visibleLocations.length && !locationError && <p>No Kathmandu places matched that search.</p>}
           </div>
+          </div>
         </aside>
-        <div className="location-map-wrap">
-          <div ref={mapNode} className="location-map" />
-          <span className="map-area-badge"><NavigationArrow size={14} weight="fill" />Kathmandu map area</span>
-          {mapError && <span className="map-load-warning" role="status">{mapError}</span>}
-        </div>
       </div>
       <footer className={mode === "saved-place" ? "location-picker-footer save-place-mode" : "location-picker-footer"}>
         <div className="selected-location">
