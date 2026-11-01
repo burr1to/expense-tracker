@@ -1,3 +1,4 @@
+import { countsAsIncomeOrSpending } from "./categories";
 import type { LedgerTransaction } from "../types";
 
 export interface DailyCashFlow {
@@ -10,6 +11,7 @@ export function dailyCashFlow(transactions: readonly LedgerTransaction[]): Map<s
   const totals = new Map<string, DailyCashFlow>();
 
   transactions.forEach((transaction) => {
+    if (!countsAsIncomeOrSpending(transaction)) return;
     const current = totals.get(transaction.occurredOn) ?? { income: 0, expenses: 0, net: 0 };
     current[transaction.kind === "income" ? "income" : "expenses"] += transaction.amountMinor;
     current.net = current.income - current.expenses;

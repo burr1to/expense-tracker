@@ -1,4 +1,6 @@
-import { addMonths, differenceInCalendarMonths, endOfMonth, isBefore, isValid, parseISO, startOfDay, startOfMonth } from "date-fns";
+import { differenceInCalendarMonths, format, isBefore, isValid, parseISO, startOfDay, startOfMonth } from "date-fns";
+import { isLoanCategory } from "./categories";
+import { todayInAppZone } from "./period";
 
 export interface CalculatorTransaction {
   kind: "income" | "expense";
@@ -43,21 +45,73 @@ export interface EqualSplitResult {
   sharesMinor: number[];
 }
 
-export function calculateCategoryMonthlyAverages(transactions: readonly CalculatorTransaction[], months: number, referenceMonth: Date): CategoryMonthlyAverage[] {
-  const lookbackMonths = Math.max(1, Math.min(24, Math.floor(months) || 1));
-  const start = startOfMonth(addMonths(referenceMonth, -(lookbackMonths - 1)));
-  const end = endOfMonth(referenceMonth);
+/** The completed months an average is built from. */
+export interface AveragingWindow {
+  /** Inclusive first day, `YYYY-MM-DD`. */
+  start: string;
+  /** Exclusive end: the first day of the current month, so the unfinished month never counts. */
+  endExclusive: string;
+  /** What totals are divided by: min(lookback, completed months since the first entry). 0 means no completed month yet. */
+  months: number;
+  /** `YYYY-MM` of the first and last month used, or null when `months` is 0. */
+  firstMonth: string | null;
+  lastMonth: string | null;
+}
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const monthStartOf = (iso: string) => `${iso.slice(0, 7)}-01`;
+const monthIndex = (iso: string) => Number(iso.slice(0, 4)) * 12 + Number(iso.slice(5, 7)) - 1;
+const monthStartFromIndex = (index: number) => `${String(Math.floor(index / 12)).padStart(4, "0")}-${String((index % 12) + 1).padStart(2, "0")}-01`;
+const normalizeLookback = (months: number) => Math.max(1, Math.min(24, Math.floor(months) || 1));
+
+/**
+ * The last `lookbackMonths` COMPLETED months before `today` (Kathmandu), never
+ * the current or a future month, trimmed to start at the month of the first
+ * entry. Dividing a partial month by a whole one made suggestions about a third
+ * too low early in a month, and a new user's one month was divided by three.
+ */
+export function completedMonthsWindow(transactions: readonly { occurredOn: string }[], lookbackMonths: number, today: string = todayInAppZone()): AveragingWindow {
+  const endExclusive = monthStartOf(today);
+  let first: string | null = null;
+  for (const transaction of transactions) {
+    if (!DATE_ONLY.test(transaction.occurredOn) || transaction.occurredOn >= endExclusive) continue;
+    if (first === null || transaction.occurredOn < first) first = transaction.occurredOn;
+  }
+  if (!first) return { start: endExclusive, endExclusive, months: 0, firstMonth: null, lastMonth: null };
+  const endIndex = monthIndex(endExclusive);
+  const startIndex = Math.max(endIndex - normalizeLookback(lookbackMonths), monthIndex(first));
+  return {
+    start: monthStartFromIndex(startIndex),
+    endExclusive,
+    months: endIndex - startIndex,
+    firstMonth: monthStartFromIndex(startIndex).slice(0, 7),
+    lastMonth: monthStartFromIndex(endIndex - 1).slice(0, 7),
+  };
+}
+
+/** "Jul – Sep 2026", "Sep 2026" or "Nov 2025 – Jan 2026" for the months a window used. */
+export function averagingWindowLabel(window: AveragingWindow): string {
+  if (!window.firstMonth || !window.lastMonth) return "";
+  const first = parseISO(`${window.firstMonth}-01`);
+  const last = parseISO(`${window.lastMonth}-01`);
+  if (window.firstMonth === window.lastMonth) return format(last, "MMM yyyy");
+  return window.firstMonth.slice(0, 4) === window.lastMonth.slice(0, 4) ? `${format(first, "MMM")} – ${format(last, "MMM yyyy")}` : `${format(first, "MMM yyyy")} – ${format(last, "MMM yyyy")}`;
+}
+
+/** Average monthly spending per category over the completed months before `today`. Loan movements are not spending. */
+export function calculateCategoryMonthlyAverages(transactions: readonly CalculatorTransaction[], months: number, today: string = todayInAppZone()): CategoryMonthlyAverage[] {
+  const window = completedMonthsWindow(transactions, months, today);
+  if (!window.months) return [];
   const totals = new Map<string, number>();
 
   for (const transaction of transactions) {
-    if (transaction.kind !== "expense") continue;
-    const occurredOn = parseISO(transaction.occurredOn);
-    if (!isValid(occurredOn) || occurredOn < start || occurredOn > end) continue;
+    if (transaction.kind !== "expense" || isLoanCategory(transaction.category)) continue;
+    if (transaction.occurredOn < window.start || transaction.occurredOn >= window.endExclusive || !DATE_ONLY.test(transaction.occurredOn)) continue;
     totals.set(transaction.category, (totals.get(transaction.category) ?? 0) + Math.max(0, Math.round(transaction.amountMinor)));
   }
 
   return [...totals.entries()]
-    .map(([category, totalMinor]) => ({ category, totalMinor, averageMinor: Math.ceil(totalMinor / lookbackMonths) }))
+    .map(([category, totalMinor]) => ({ category, totalMinor, averageMinor: Math.ceil(totalMinor / window.months) }))
     .sort((left, right) => right.averageMinor - left.averageMinor);
 }
 

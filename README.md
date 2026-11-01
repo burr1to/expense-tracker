@@ -71,10 +71,10 @@ Supabase hosts PostgreSQL and the private receipt Storage bucket. The browser up
 
 1. Create a Supabase project and copy its PostgreSQL pooler connection string.
 2. Copy `.env.example` to `.env.local`.
-3. Set `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and the comma-separated `BETA_ALLOWED_EMAILS` allowlist.
+3. Set `DATABASE_URL`, `BETTER_AUTH_SECRET`, and `BETTER_AUTH_URL`.
 4. Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and the server-only `SUPABASE_SECRET_KEY`. A legacy `SUPABASE_SERVICE_ROLE_KEY` is also accepted. `SUPABASE_RECEIPTS_BUCKET` defaults to `receipts`; the private bucket is created on the first upload with the app's 3 MB and MIME-type restrictions.
 5. To test receipt analysis, statement extraction, unrecognised bank SMS, or optional Learning, create a key at [Google AI Studio](https://aistudio.google.com/app/apikey) and set the server-only `GEMINI_API_KEY`. Never use a `NEXT_PUBLIC_` prefix or paste the key into client code. The Gemini free tier may use submitted images and data to improve Google products, so use synthetic/test data until the project is moved to an appropriate paid/private processing tier. Learning excludes receipts, GPS, addresses, payment-account details, exact amounts, email, and transaction IDs, but does send aggregated place/category strings after explicit user action. Bank SMS text is sent to Gemini **only** when no on-device template matches the message; recognised formats never leave the browser.
-6. For production password-reset mail, set `RESEND_API_KEY` and `AUTH_EMAIL_FROM`. In development, reset links are printed in the server terminal when Resend is not configured.
+6. For production password-reset mail, set `RESEND_API_KEY` and `AUTH_EMAIL_FROM`. In development, reset links are printed in the server terminal when Resend is not configured. Reminder emails use the same setup; also set `CRON_SECRET` to a long random string so the daily run in `vercel.json` (01:15 UTC, 07:00 in Nepal) can call `/api/cron/reminders`, which Vercel Cron authenticates with `Authorization: Bearer $CRON_SECRET`. Without it the endpoint answers 503 and reminder emails go out only the first time someone opens the app that day.
 7. Optionally set `NEXT_PUBLIC_MAP_STYLE_URL` and `PHOTON_SEARCH_URL` for alternative production map providers. Development defaults to OpenFreeMap Positron vector tiles and Photon search with visible attribution.
 8. Apply the checked-in schema and generate the client:
 
@@ -85,6 +85,10 @@ npm run db:generate
 ```
 
 Prisma owns the complete schema in `prisma/schema.prisma`; the initial deployable migration is in `prisma/migrations`.
+
+### Apply the latest migration
+
+Every existing database must run `npm run db:deploy` before this version starts. Migration `20261007090000_add_request_ids_account_tails_and_ai_usage` adds the request ids that stop a retried save from being recorded twice, the account-number tails used to match bank SMS, and the `AiUsage` table behind the daily Gemini limits (20 receipt scans, 10 statement imports, 50 SMS reads and 5 personalization runs per person per Nepal day). Set the optional `GEMINI_DAILY_CAP` to also cap Gemini calls across all users per day.
 
 ## Run
 
@@ -104,7 +108,6 @@ The app requires a working PostgreSQL connection. Sign-up creates the user, cred
 - Password verification for the privacy lock
 - Password-confirmed account deletion, cascading through all ledger data
 - Server-side session validation plus `userId` ownership filtering on every ledger mutation
-- Server-side beta allowlisting for sign-up, sign-in, password resets, and every protected data endpoint
 
 ## CSV import format
 

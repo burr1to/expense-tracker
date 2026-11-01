@@ -4,15 +4,15 @@ import { useLedgerWorkspace } from "../../../context/LedgerWorkspaceContext";
 import { CalculatorPage } from "../../../views/CalculatorPage";
 
 export default function CalculatorRoute() {
-  const { ledger, month } = useLedgerWorkspace();
+  const { ledger, period } = useLedgerWorkspace();
 
   return <CalculatorPage
     currency={ledger.profile.currency}
-    month={month}
+    period={period}
     transactions={ledger.transactions}
     customCategories={ledger.customCategories}
     goals={ledger.goals}
     onSaveGoal={ledger.saveGoal}
-    onSaveBudget={ledger.saveBudget}
+    onSaveBudgets={ledger.saveBudgets}
   />;
 }

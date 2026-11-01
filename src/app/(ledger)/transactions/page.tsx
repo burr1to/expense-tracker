@@ -6,8 +6,8 @@ import { TransactionsPage } from "../../../views/TransactionsPage";
 export default function TransactionsRoute() {
   const {
     ledger,
-    month,
-    setMonth,
+    period,
+    setPeriod,
     openAddForDate,
     openDuplicate,
     openEdit,
@@ -20,19 +20,9 @@ export default function TransactionsRoute() {
     completeOnboardingStep("import");
     return job;
   };
-  const saveTransaction = async (...args: Parameters<typeof ledger.saveTransaction>) => {
-    const id = await ledger.saveTransaction(...args);
-    completeOnboardingStep("transaction");
-    return id;
-  };
-  const saveReceiptSplit = async (...args: Parameters<typeof ledger.saveReceiptSplit>) => {
-    const count = await ledger.saveReceiptSplit(...args);
-    completeOnboardingStep("transaction");
-    return count;
-  };
 
   return <TransactionsPage
-    month={month}
+    period={period}
     calendarSystem={ledger.profile.calendarSystem}
     currency={ledger.profile.currency}
     transactions={ledger.transactions}
@@ -40,7 +30,7 @@ export default function TransactionsRoute() {
     customCategories={ledger.customCategories}
     customSubcategories={ledger.customSubcategories}
     paymentAccounts={ledger.paymentAccounts}
-    onMonthChange={setMonth}
+    onPeriodChange={setPeriod}
     onAdd={openAddForDate}
     onDuplicate={openDuplicate}
     onEdit={openEdit}
@@ -49,8 +39,5 @@ export default function TransactionsRoute() {
     onImport={importPastTransactions}
     importJobs={ledger.importJobs}
     onDismissImportJob={ledger.dismissImportJob}
-    onSaveReceiptSplit={saveReceiptSplit}
-    learning={ledger.profile.learning}
-    onSaveTransaction={saveTransaction}
   />;
 }

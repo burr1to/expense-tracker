@@ -47,6 +47,7 @@ model User {
   learningProfile   LearningProfile?
   householdMembership HouseholdMember?
   activityLogs      ActivityLog[]
+  aiUsage           AiUsage[]
 }
 
 model Household {
@@ -166,6 +167,7 @@ model Transaction {
   receiptScanId     String?
   importJobId       String?
   shared            Boolean            @default(false)
+  clientRequestId   String?
   deletedAt         DateTime?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
@@ -176,6 +178,7 @@ model Transaction {
   receiptScan       ReceiptScan?       @relation(fields: [receiptScanId], references: [id], onDelete: SetNull)
   importJob         ImportJob?        @relation(fields: [importJobId], references: [id], onDelete: SetNull)
 
+  @@unique([userId, clientRequestId])
   @@index([userId, occurredOn])
   @@index([userId, deletedAt])
   @@index([paymentAccountId])
@@ -248,6 +251,7 @@ model PaymentAccount {
   type              String
   provider          String
   label             String            @default("")
+  accountTail       String?
   shared            Boolean           @default(false)
   balanceMinor      Int               @default(0)
   balanceAsOf       DateTime          @default(now()) @db.Date
@@ -298,11 +302,13 @@ model AccountTransfer {
   amountMinor   Int
   occurredOn    DateTime       @db.Date
   note          String         @default("")
+  clientRequestId String?
   createdAt     DateTime       @default(now())
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   fromAccount   PaymentAccount @relation("TransferFrom", fields: [fromAccountId], references: [id], onDelete: Cascade)
   toAccount     PaymentAccount @relation("TransferTo", fields: [toAccountId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, clientRequestId])
   @@index([userId, occurredOn])
   @@index([fromAccountId])
   @@index([toAccountId])
@@ -439,11 +445,14 @@ model DuePayment {
   occurredOn    DateTime @db.Date
   note          String   @default("")
   transactionId String?
+  clientRequestId String?
   createdAt     DateTime @default(now())
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   dueItem       DueItem  @relation(fields: [dueItemId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, clientRequestId])
   @@index([userId, dueItemId])
+  @@index([dueItemId])
 }
 
 model ReceiptAttachment {
@@ -476,4 +485,18 @@ model ReceiptScan {
   transactions Transaction[]
 
   @@index([userId])
+}
+
+// Daily Gemini usage per user and feature, so one account cannot drain the shared AI quota.
+model AiUsage {
+  id        String   @id @default(cuid())
+  userId    String
+  day       DateTime @db.Date
+  feature   String
+  count     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, day, feature])
 }

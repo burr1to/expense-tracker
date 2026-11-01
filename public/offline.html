@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#3f6653">
+  <title>You’re offline · SaveYoRupee</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <style>
+    :root { --paper: #f2efe2; --paper-strong: #faf8ee; --ink: #24332b; --muted: #5c6e63; --line: #cbd3c9; --blue: #557f69; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body { min-height: 100svh; display: grid; place-items: center; padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); background: var(--paper); color: var(--ink); font-family: "IBM Plex Sans Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { width: min(100%, 360px); padding: 24px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper-strong); box-shadow: 0 18px 48px rgba(36, 51, 43, .1); }
+    .brand { display: flex; align-items: center; gap: 11px; margin-bottom: 20px; font-weight: 700; }
+    .brand svg { width: 38px; height: 38px; flex: 0 0 auto; }
+    h1 { margin: 0 0 8px; font-size: 22px; font-weight: 650; }
+    p { margin: 0 0 20px; color: var(--muted); font-size: 14px; line-height: 1.55; }
+    button { min-height: 44px; width: 100%; padding: 0 18px; border: 0; border-radius: 10px; background: var(--blue); color: #fff; font: inherit; font-weight: 750; cursor: pointer; box-shadow: 0 6px 16px rgba(63, 102, 83, .2); }
+    button:focus-visible { outline: 3px solid rgba(85, 127, 105, .35); outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">
+      <svg viewBox="0 0 256 256" aria-hidden="true"><defs><linearGradient id="bg" x1="32" y1="24" x2="224" y2="240" gradientUnits="userSpaceOnUse"><stop stop-color="#32A66A"/><stop offset="1" stop-color="#0B5D38"/></linearGradient></defs><rect width="256" height="256" rx="68" fill="#10231B"/><rect x="12" y="12" width="232" height="232" rx="56" fill="url(#bg)"/><path d="M216 64H40a12 12 0 0 0-12 12v104a12 12 0 0 0 12 12h176a12 12 0 0 0 12-12V76a12 12 0 0 0-12-12Zm-48.8 104H88.8A52.2 52.2 0 0 0 52 131.2v-6.4A52.2 52.2 0 0 0 88.8 88h78.4a52.2 52.2 0 0 0 36.8 36.8v6.4a52.2 52.2 0 0 0-36.8 36.8ZM204 101.5A28.3 28.3 0 0 1 190.5 88H204ZM65.5 88A28.3 28.3 0 0 1 52 101.5V88ZM52 154.5A28.3 28.3 0 0 1 65.5 168H52ZM190.5 168a28.3 28.3 0 0 1 13.5-13.5V168ZM128 96a32 32 0 1 0 32 32 32 32 0 0 0-32-32Zm0 40a8 8 0 1 1 8-8 8 8 0 0 1-8 8Z" fill="#F7FFF9"/></svg>
+      <span>SaveYoRupee</span>
+    </div>
+    <h1>You’re offline</h1>
+    <p>Your ledger lives on the server, so it needs a connection to open. Nothing you saved is lost. Try again once you’re back online.</p>
+    <button type="button" onclick="location.reload()">Try again</button>
+  </main>
+  <script>window.addEventListener("online", function () { location.reload(); });</script>
+</body>
+</html>

@@ -6,17 +6,17 @@ import { ReportsPage } from "../../../views/ReportsPage";
 
 export default function ReportsRoute() {
   const { user, isDemo } = useAuth();
-  const { ledger, month, setMonth, openAdd } = useLedgerWorkspace();
+  const { ledger, period, setPeriod, openAdd } = useLedgerWorkspace();
 
   return <ReportsPage
-    month={month}
+    period={period}
     calendarSystem={ledger.profile.calendarSystem}
     currency={ledger.profile.currency}
     transactions={ledger.transactions}
     customCategories={ledger.customCategories}
     paymentAccounts={ledger.paymentAccounts}
     dueItems={ledger.dueItems}
-    onMonthChange={setMonth}
+    onPeriodChange={setPeriod}
     onAdd={openAdd}
     allowPdfDownload={Boolean(user && !isDemo)}
   />;

@@ -1,14 +1,21 @@
 import {
   addMonthsToKey,
+  daysBetweenIso,
   currentMonthKey as currentPeriodKey,
   isMonthKey,
   monthLabel,
   periodBounds,
   toStorageKey,
+  todayInAppZone,
 } from "./period";
+import { countsAsIncomeOrSpending } from "./categories";
+// Registers the fiscal-year resolver (and through it the BS calendar) with period.ts.
+import { addFiscalYears, fiscalYearLabel, isFiscalYearKey } from "./fiscal-year";
+import { ALL_SPENDING_CATEGORY, ALL_SPENDING_LABEL } from "./budgets";
 import type { CurrencyCode } from "../types";
 
 const MONTH_KEY = /^(\d{4})-(0[1-9]|1[0-2])$/;
+const BS_MONTH_KEY = /^BS:\d{4}-(0[1-9]|1[0-2])$/;
 
 export interface MonthlyReportTransaction {
   id: string;
@@ -88,6 +95,12 @@ interface AmountGroup {
 export interface MonthlyReport {
   monthKey: string;
   monthLabel: string;
+  /** First day of the period, `YYYY-MM-DD`; day N of the report is `periodStart` + N - 1. */
+  periodStart: string;
+  /** Days in the period: 28-31 for AD, 29-32 for a BS month, 365 or 366 for a fiscal year. */
+  dayCount: number;
+  /** What "prior" compares against: the previous month, or the previous fiscal year. */
+  periodNoun: "month" | "year";
   displayName: string;
   currency: CurrencyCode;
   generatedOn: string;
@@ -119,26 +132,60 @@ export function previousMonthKey(now = new Date()) {
   return toStorageKey(addMonthsToKey(currentPeriodKey("AD", now), -1));
 }
 
-export function isCompletedReportMonth(monthKey: string, now = new Date()) {
-  return MONTH_KEY.test(monthKey) && monthKey < currentMonthKey(now);
+/**
+ * Periods the PDF route serves: a stored Gregorian month (`2026-08`), a Bikram
+ * Sambat month (`BS:2083-06`), or a Nepali fiscal year (`FY:2082-83`).
+ */
+export function isReportPeriodKey(key: string) {
+  return MONTH_KEY.test(key) || BS_MONTH_KEY.test(key) || isFiscalYearKey(key);
 }
 
-export function monthlyReportNotice(now = new Date()) {
+/** A report period that has fully ended in Kathmandu. */
+export function isCompletedReportMonth(monthKey: string, now = new Date()) {
+  if (!isReportPeriodKey(monthKey)) return false;
+  try { return periodBounds(monthKey).endExclusive <= todayInAppZone(now); } catch { return false; }
+}
+
+/** A report key as it may appear in a file name: `BS:2083-06` -> `BS-2083-06`. */
+export function reportFileKey(key: string) {
+  return key.replace(/:/g, "-");
+}
+
+/** How many days into a month the bell keeps offering last month's report. */
+export const MONTHLY_REPORT_NOTICE_DAYS = 7;
+
+/** localStorage key that remembers a dismissed or downloaded report notice, per user and month. */
+export function monthlyReportNoticeStorageKey(userId: string, monthKey: string) {
+  return `syr:monthly-report-notice:${userId}:${monthKey}`;
+}
+
+/**
+ * "Last month's report is ready": only during the first week of a Kathmandu
+ * month, and only when the viewer logged something last month (the PDF covers
+ * their own entries). Dismissal is remembered with `monthlyReportNoticeStorageKey`.
+ */
+export function monthlyReportNotice(transactions: readonly { occurredOn: string; userId?: string }[], { now = new Date(), viewerId }: { now?: Date; viewerId?: string } = {}) {
+  if (Number(todayInAppZone(now).slice(8, 10)) > MONTHLY_REPORT_NOTICE_DAYS) return null;
   const monthKey = previousMonthKey(now);
-  return { monthKey, monthLabel: formatMonthLabel(monthKey), href: `/api/reports/monthly?month=${monthKey}` };
+  const { start, endExclusive } = periodBounds(monthKey);
+  if (!transactions.some((item) => (!viewerId || item.userId === viewerId) && item.occurredOn >= start && item.occurredOn < endExclusive)) return null;
+  return { monthKey, monthLabel: formatMonthLabel(monthKey), href: `/api/reports/monthly?month=${monthKey}`, storageKey: viewerId ? monthlyReportNoticeStorageKey(viewerId, monthKey) : null };
 }
 
 export function reportMonthBounds(monthKey: string) {
-  if (!isMonthKey(monthKey)) throw new Error("Invalid report month.");
+  if (!isMonthKey(monthKey) && !isFiscalYearKey(monthKey)) throw new Error("Invalid report month.");
   return periodBounds(monthKey);
 }
 
+/** The period a report compares against: the previous month in the same calendar, or the previous fiscal year. */
 export function precedingMonthKey(monthKey: string) {
+  if (isFiscalYearKey(monthKey)) return addFiscalYears(monthKey, -1);
   if (!isMonthKey(monthKey)) throw new Error("Invalid report month.");
   return toStorageKey(addMonthsToKey(monthKey, -1));
 }
 
 export function formatMonthLabel(monthKey: string) {
+  if (isFiscalYearKey(monthKey)) return fiscalYearLabel(monthKey);
   if (!isMonthKey(monthKey)) throw new Error("Invalid report month.");
   return monthLabel(monthKey);
 }
@@ -165,16 +212,23 @@ function groupAmounts(items: readonly MonthlyReportTransaction[], key: (item: Mo
 }
 
 export function buildMonthlyReport(input: MonthlyReportInput, now = new Date()): MonthlyReport {
-  const incomeMinor = sumKind(input.transactions, "income");
-  const expenseMinor = sumKind(input.transactions, "expense");
-  const previousIncomeMinor = sumKind(input.previousTransactions, "income");
-  const previousExpenseMinor = sumKind(input.previousTransactions, "expense");
-  const expenseTransactions = input.transactions.filter((item) => item.kind === "expense");
+  // Loans and repayments move account balances (kept below) but are never income or spending.
+  const counted = input.transactions.filter(countsAsIncomeOrSpending);
+  const previousCounted = input.previousTransactions.filter(countsAsIncomeOrSpending);
+  const incomeMinor = sumKind(counted, "income");
+  const expenseMinor = sumKind(counted, "expense");
+  const previousIncomeMinor = sumKind(previousCounted, "income");
+  const previousExpenseMinor = sumKind(previousCounted, "expense");
+  const expenseTransactions = counted.filter((item) => item.kind === "expense");
   const spentByCategory = new Map(groupAmounts(expenseTransactions, (item) => item.category).map((item) => [item.label, item.amountMinor]));
+  const bounds = reportMonthBounds(input.monthKey);
 
   return {
     monthKey: input.monthKey,
     monthLabel: formatMonthLabel(input.monthKey),
+    periodStart: bounds.start,
+    dayCount: daysBetweenIso(bounds.start, bounds.endExclusive),
+    periodNoun: isFiscalYearKey(input.monthKey) ? "year" : "month",
     displayName: input.displayName,
     currency: input.currency,
     generatedOn: now.toISOString(),
@@ -188,12 +242,15 @@ export function buildMonthlyReport(input: MonthlyReportInput, now = new Date()):
       expenseChangePercentage: percentageChange(expenseMinor, previousExpenseMinor),
     },
     categories: groupAmounts(expenseTransactions, (item) => item.categoryLabel),
-    incomeCategories: groupAmounts(input.transactions.filter((item) => item.kind === "income"), (item) => item.categoryLabel),
+    incomeCategories: groupAmounts(counted.filter((item) => item.kind === "income"), (item) => item.categoryLabel),
     subcategories: groupAmounts(expenseTransactions, (item) => item.subcategory?.trim() || "Unspecified"),
     budgets: input.budgets.map((budget) => {
-      const spentMinor = spentByCategory.get(budget.category) ?? 0;
+      // An "All spending" limit counts every expense the report counts.
+      const allSpending = budget.category === ALL_SPENDING_CATEGORY;
+      const spentMinor = allSpending ? expenseMinor : spentByCategory.get(budget.category) ?? 0;
       return {
         ...budget,
+        ...(allSpending ? { categoryLabel: ALL_SPENDING_LABEL } : {}),
         spentMinor,
         remainingMinor: budget.amountMinor - spentMinor,
         usedPercentage: Math.round((spentMinor / budget.amountMinor) * 100),

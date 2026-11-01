@@ -1,6 +1,6 @@
 import type { CategoryIconName } from "../types";
 
-export const CATEGORY_ICON_NAMES = ["tag", "money", "work", "gift", "home", "food", "transport", "utilities", "shopping", "health", "entertainment", "education", "travel"] as const satisfies readonly CategoryIconName[];
+export const CATEGORY_ICON_NAMES = ["tag", "money", "work", "gift", "home", "food", "transport", "utilities", "shopping", "health", "entertainment", "education", "travel", "loan"] as const satisfies readonly CategoryIconName[];
 
 export const CATEGORY_ICON_OPTIONS: readonly { value: CategoryIconName; label: string }[] = [
   { value: "tag", label: "General" },
@@ -16,4 +16,5 @@ export const CATEGORY_ICON_OPTIONS: readonly { value: CategoryIconName; label: s
   { value: "entertainment", label: "Entertainment" },
   { value: "education", label: "Education" },
   { value: "travel", label: "Travel" },
+  { value: "loan", label: "Loan" },
 ];

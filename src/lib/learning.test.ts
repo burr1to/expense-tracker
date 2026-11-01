@@ -21,6 +21,15 @@ describe("learning", () => {
     expect(result.suggestions[0].subcategory).toBe("");
   });
 
+  it("never learns or suggests the loan category for a place", () => {
+    expect(aggregateLearningTransactions([base, { ...base, category: "loan", subcategory: "Lent" }, { ...base, category: "loan", subcategory: "Lent" }])).toEqual([expect.objectContaining({ category: "food", count: 1 })]);
+    const categories = [{ id: "food", label: "Food", subcategories: [] }, { id: "loan", label: "Loans", subcategories: [] }];
+    const result = normalizeLearningOutput({ suggestions: [{ place: "Ram's shop", kind: "expense", category: "loan", subcategory: null, paymentMode: "cash", confidence: 0.9, evidenceCount: 3 }], summary: [] }, categories);
+    expect(result.suggestions).toEqual([]);
+    const state: LearningState = { enabled: true, suggestions: [{ place: "Ram's shop", kind: "expense", category: "loan", subcategory: "", paymentMode: "cash", confidence: 0.9, evidenceCount: 3 }], summary: [], lastTransactionId: "t1", lastRunAt: null };
+    expect(matchLearningSuggestion(state, "Ram's shop", "expense")).toBeNull();
+  });
+
   it("matches only enabled exact learned places for the current kind", () => {
     const state: LearningState = { enabled: true, suggestions: [{ place: "Bhatbhateni", kind: "expense", category: "food", subcategory: "Groceries", paymentMode: "online", confidence: 0.9, evidenceCount: 4 }], summary: [], lastTransactionId: "t1", lastRunAt: null };
     expect(matchLearningSuggestion(state, "bhatbhateni", "expense")?.category).toBe("food");

@@ -1,9 +1,10 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { getAuthenticatedSession } from "../../../../lib/auth";
-import { CATEGORIES, SUBCATEGORIES } from "../../../../lib/categories";
+import { aiCategoryChoices } from "../../../../lib/categories";
 import { getPrisma } from "../../../../lib/prisma";
+import { AiQuotaError, consumeAiQuota } from "../../../../lib/ai-usage";
+import { serverErrorResponse } from "../../../../lib/user-messages";
 import { type LearningCategory } from "../../../../lib/learning";
 import { todayInAppZone } from "../../../../lib/period";
 import { GEMINI_RECEIPT_MODEL, interactionOutputText } from "../../../../lib/receipt-analysis";
@@ -40,12 +41,10 @@ export async function POST(request: Request) {
       db.customCategory.findMany({ where: { userId: session.user.id }, select: { id: true, name: true } }),
       db.customSubcategory.findMany({ where: { userId: session.user.id }, select: { categoryId: true, name: true } }),
     ]);
-    const categories: LearningCategory[] = [
-      ...CATEGORIES.map((category) => ({ id: category.id, label: category.label, subcategories: [...(SUBCATEGORIES[category.id]?.options ?? []), ...customSubcategories.filter((item) => item.categoryId === category.id).map((item) => item.name)] })),
-      ...customCategories.map((category) => ({ id: category.id, label: category.name, subcategories: customSubcategories.filter((item) => item.categoryId === category.id).map((item) => item.name) })),
-    ];
+    const categories: LearningCategory[] = aiCategoryChoices(customCategories, customSubcategories);
     const today = todayInAppZone();
     const prompt = smsPrompt(user.currency as CurrencyCode, categories, today);
+    await consumeAiQuota(db, session.user.id, "sms");
     const response = await fetch(GEMINI_INTERACTIONS_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
@@ -66,9 +65,11 @@ export async function POST(request: Request) {
     const analysis = normalizeSmsAnalysis(raw, user.currency as CurrencyCode, categories, today);
     return NextResponse.json({ analysis }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    if (error instanceof SmsError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { "Cache-Control": "private, no-store" } });
+    if (error instanceof SmsError || error instanceof AiQuotaError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { "Cache-Control": "private, no-store" } });
     if (error instanceof Error && error.name === "TimeoutError") return NextResponse.json({ error: "Reading this message timed out. Try again." }, { status: 504, headers: { "Cache-Control": "private, no-store" } });
-    const message = error instanceof z.ZodError ? error.issues[0]?.message : error instanceof Error ? error.message : "This message could not be read.";
-    return NextResponse.json({ error: message }, { status: 400, headers: { "Cache-Control": "private, no-store" } });
+    // Database and library failures are logged, never echoed: their text can name internal hosts.
+    const { status, message, unexpected } = serverErrorResponse(error);
+    if (unexpected) console.error("Could not read an SMS with Gemini.", error);
+    return NextResponse.json({ error: unexpected ? "This message could not be read. Try again in a moment." : message }, { status, headers: { "Cache-Control": "private, no-store" } });
   }
 }

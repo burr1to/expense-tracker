@@ -1,4 +1,4 @@
-import { ArrowsLeftRight, CalendarBlank, Trash } from "@phosphor-icons/react";
+import { ArrowsLeftRight, CalendarBlank, PencilSimple, Trash } from "@phosphor-icons/react";
 import { useContext } from "react";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { formatMoney } from "../lib/currency";
@@ -37,9 +37,10 @@ export function TransferRow({ transfer, fromLabel, toLabel, currency, onDelete, 
         </div>
       </div>
       <strong className="amount transfer">{formatMoney(transfer.amountMinor, currency)}</strong>
-      {mine && !compact && onDelete && (
+      {mine && !compact && (onDelete || workspace) && (
         <div className="row-actions">
-          <button className="icon-button danger" disabled={deletePending} onClick={onDelete} aria-label={`Delete transfer from ${fromLabel} to ${toLabel}`}>{deletePending ? <ButtonSpinner /> : <Trash size={18} />}</button>
+          {workspace && <button className="icon-button" disabled={deletePending} onClick={() => workspace.openTransfer({ transferId: transfer.id })} aria-label={`Edit transfer from ${fromLabel} to ${toLabel}`}><PencilSimple size={18} /></button>}
+          {onDelete && <button className="icon-button danger" disabled={deletePending} onClick={onDelete} aria-label={`Delete transfer from ${fromLabel} to ${toLabel}`}>{deletePending ? <ButtonSpinner /> : <Trash size={18} />}</button>}
         </div>
       )}
     </article>

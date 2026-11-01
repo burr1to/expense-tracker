@@ -15,9 +15,11 @@ import {
   UserCircle,
 } from "@phosphor-icons/react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { appRoutes } from "../lib/routes";
+import { navigateFromOverlay, useBackToClose } from "../lib/use-back-to-close";
 import type { AppView } from "../types";
 import { BrandIcon } from "./BrandIcon";
 import { ButtonSpinner } from "./ButtonSpinner";
@@ -45,6 +47,15 @@ interface AppShellProps {
 
 export function AppShell({ view, onAdd, onSignOut, signingOut, children }: AppShellProps) {
   const [moreOpen, setMoreOpen] = useState(false);
+  const router = useRouter();
+  useBackToClose(moreOpen, () => setMoreOpen(false));
+  // A destination replaces the drawer's back-gesture entry, so Back from it returns to this page.
+  const openFromMore = (event: MouseEvent<HTMLAnchorElement>, href: string) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    setMoreOpen(false);
+    navigateFromOverlay(() => router.push(href));
+  };
   const moreItems = navItems.filter((item) => item.id === "calculator" || item.id === "dues" || item.id === "reports" || item.id === "accounts" || item.id === "maps" || item.id === "logs" || item.id === "settings");
   const moreActive = moreItems.some((item) => item.id === view);
   return (
@@ -88,7 +99,7 @@ export function AppShell({ view, onAdd, onSignOut, signingOut, children }: AppSh
       <Drawer opened={moreOpen} onClose={() => setMoreOpen(false)} position="bottom" size="auto" title="More" overlayProps={{ backgroundOpacity: .48, blur: 4 }} classNames={{ content: "mobile-more-content", header: "mobile-more-header", body: "mobile-more-body", title: "mobile-more-title" }}>
         <nav className="mobile-more-links" aria-label="More destinations">
           {moreItems.map(({ id, label, icon: Icon }) => (
-            <Link key={id} href={appRoutes[id]} className={view === id ? "mobile-more-link active" : "mobile-more-link"} onClick={() => setMoreOpen(false)} aria-current={view === id ? "page" : undefined}>
+            <Link key={id} href={appRoutes[id]} className={view === id ? "mobile-more-link active" : "mobile-more-link"} onClick={(event) => openFromMore(event, appRoutes[id])} aria-current={view === id ? "page" : undefined}>
               <span><Icon size={22} weight={view === id ? "fill" : "duotone"} /></span>
               <span><strong>{label}</strong><small>{id === "calculator" ? "Split an amount into percentages and goals" : id === "dues" ? "Payments, reminders, and money between people" : id === "reports" ? "Spending patterns and monthly comparisons" : id === "accounts" ? "Balances, transfers, and account-wise transactions" : id === "maps" ? "Kathmandu income and expense locations" : id === "logs" ? "Everything you changed, kept for 90 days" : "Preferences, categories, and security"}</small></span>
             </Link>

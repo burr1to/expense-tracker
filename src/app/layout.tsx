@@ -4,8 +4,9 @@ import "@mantine/dates/styles.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "@fontsource-variable/ibm-plex-sans";
 import { MantineProvider, createTheme } from "@mantine/core";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { AppProviders } from "../components/AppProviders";
+import { APP_THEME_COLOR } from "./icons/brand-art";
 import "../styles.css";
 
 const theme = createTheme({
@@ -43,6 +44,13 @@ export const metadata: Metadata = {
     icon: "/icon.svg",
     shortcut: "/icon.svg",
   },
+  appleWebApp: { capable: true, title: "SaveYoRupee", statusBarStyle: "default" },
+  formatDetection: { telephone: false },
+};
+
+export const viewport: Viewport = {
+  themeColor: APP_THEME_COLOR,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

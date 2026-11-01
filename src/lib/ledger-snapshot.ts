@@ -83,7 +83,7 @@ export function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
   });
   const transfers: AccountTransfer[] = data.transfers.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString() }));
   const paymentAccounts: PaymentAccount[] = attachCurrentBalances(data.paymentAccounts.map((item) => ({
-    id: item.id, importId: item.importId, userId: item.userId, type: item.type as PaymentAccount["type"], provider: item.provider, label: item.label, shared: item.shared, balanceMinor: item.balanceMinor, balanceAsOf: dateOnly(item.balanceAsOf)!, balanceRecordedAt: item.balanceRecordedAt.toISOString(), currentBalanceMinor: 0, createdAt: item.createdAt.toISOString(),
+    id: item.id, importId: item.importId, userId: item.userId, type: item.type as PaymentAccount["type"], provider: item.provider, label: item.label, accountTail: item.accountTail ?? null, shared: item.shared, balanceMinor: item.balanceMinor, balanceAsOf: dateOnly(item.balanceAsOf)!, balanceRecordedAt: item.balanceRecordedAt.toISOString(), currentBalanceMinor: 0, createdAt: item.createdAt.toISOString(),
   })), transactions, transfers);
   const accountById = new Map(paymentAccounts.map((item) => [item.id, item]));
   for (const transaction of transactions) if (transaction.paymentAccountId) transaction.paymentAccount = accountById.get(transaction.paymentAccountId) ?? null;

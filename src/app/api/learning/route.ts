@@ -3,8 +3,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import type { Prisma } from "../../../generated/prisma/client";
 import { getAuthenticatedSession } from "../../../lib/auth";
-import { CATEGORIES, SUBCATEGORIES } from "../../../lib/categories";
+import { aiCategoryChoices } from "../../../lib/categories";
 import { getPrisma } from "../../../lib/prisma";
+import { AiQuotaError, consumeAiQuota } from "../../../lib/ai-usage";
 import { GEMINI_RECEIPT_MODEL, interactionOutputText } from "../../../lib/receipt-analysis";
 import { aggregateLearningTransactions, LEARNING_BATCH_SIZE, learningJsonSchema, learningPrompt, normalizeLearningOutput, type LearningCategory } from "../../../lib/learning";
 import type { LearningState, LearningSuggestion, LedgerTransaction } from "../../../types";
@@ -99,10 +100,7 @@ export async function POST(request: Request) {
       db.customCategory.findMany({ where: { userId }, select: { id: true, name: true, kind: true } }),
       db.customSubcategory.findMany({ where: { userId }, select: { categoryId: true, name: true } }),
     ]);
-    const categories: LearningCategory[] = [
-      ...CATEGORIES.map((category) => ({ id: category.id, label: category.label, subcategories: [...(SUBCATEGORIES[category.id]?.options ?? []), ...customSubcategories.filter((item) => item.categoryId === category.id).map((item) => item.name)] })),
-      ...customCategories.map((category) => ({ id: category.id, label: category.name, subcategories: customSubcategories.filter((item) => item.categoryId === category.id).map((item) => item.name) })),
-    ];
+    const categories: LearningCategory[] = aiCategoryChoices(customCategories, customSubcategories);
     const aggregates = aggregateLearningTransactions(transactions.map((transaction) => ({
       ...transaction,
       kind: transaction.kind as LedgerTransaction["kind"],
@@ -112,6 +110,7 @@ export async function POST(request: Request) {
     let normalized = { suggestions: existing.suggestions as unknown as LearningSuggestion[], summary: existing.summary };
     if (aggregates.length) {
       const prompt = learningPrompt(categories, normalized.suggestions, aggregates);
+      await consumeAiQuota(db, userId, "learning");
       const response = await fetch(GEMINI_INTERACTIONS_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": key },
@@ -144,7 +143,7 @@ export async function POST(request: Request) {
     const activity = await recordActivity(userId, [{ action: "personalization.refreshed", area: "settings", title: "Refreshed personalization", subject: `Learned from ${transactions.length} new transaction${transactions.length === 1 ? "" : "s"}`, meta: { processed: transactions.length } }]);
     return NextResponse.json({ learning: serialize(profile), processed: transactions.length, activity }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    if (error instanceof LearningError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { "Cache-Control": "private, no-store" } });
+    if (error instanceof LearningError || error instanceof AiQuotaError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { "Cache-Control": "private, no-store" } });
     if (error instanceof Error && error.name === "TimeoutError") return NextResponse.json({ error: "Personalization timed out. Try again." }, { status: 504, headers: { "Cache-Control": "private, no-store" } });
     const message = error instanceof z.ZodError ? error.issues[0]?.message : "Could not update personalization.";
     return NextResponse.json({ error: message }, { status: 400, headers: { "Cache-Control": "private, no-store" } });

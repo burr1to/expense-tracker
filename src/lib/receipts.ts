@@ -1,4 +1,5 @@
 import type { ReceiptUpload } from "../types";
+import { readResponse, responseMessage } from "./user-messages";
 
 export const RECEIPT_MAX_BYTES = 3 * 1024 * 1024;
 export const RECEIPT_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
@@ -22,8 +23,9 @@ export async function uploadReceipt(file: File, signal?: AbortSignal): Promise<R
     body: JSON.stringify({ name, mimeType: file.type, size: file.size }),
     signal,
   });
-  const ticket = await ticketResponse.json() as SignedUploadResponse & { error?: string };
-  if (!ticketResponse.ok) throw new Error(ticket.error ?? "Could not prepare this receipt upload.");
+  const parsedTicket = await readResponse<SignedUploadResponse & { error?: string }>(ticketResponse);
+  if (!ticketResponse.ok || !parsedTicket.body) throw new Error(responseMessage(parsedTicket, "Could not prepare this receipt upload."));
+  const ticket = parsedTicket.body;
 
   const form = new FormData();
   form.append("cacheControl", "3600");

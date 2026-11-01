@@ -2,17 +2,20 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { getAuthenticatedSession } from "../../../../lib/auth";
 import { getCategory } from "../../../../lib/categories";
+import { isFiscalYearKey } from "../../../../lib/fiscal-year";
 import {
   buildMonthlyReport,
   isCompletedReportMonth,
   precedingMonthKey,
+  reportFileKey,
   reportMonthBounds,
   type MonthlyReportTransaction,
 } from "../../../../lib/monthly-report";
 import { generateMonthlyReportPdf } from "../../../../lib/monthly-report-pdf";
+import { paymentAccountLabel } from "../../../../lib/payment-accounts";
 import { getPrisma } from "../../../../lib/prisma";
 import { recurrenceLabel } from "../../../../lib/recurrence";
-import type { CurrencyCode, RecurrenceUnit } from "../../../../types";
+import type { CurrencyCode, PaymentAccountType, RecurrenceUnit } from "../../../../types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -32,7 +35,7 @@ export async function GET(request: Request) {
 
   const monthKey = new URL(request.url).searchParams.get("month") ?? "";
   if (!isCompletedReportMonth(monthKey)) {
-    return NextResponse.json({ error: "Choose a completed month in YYYY-MM format." }, { status: 400 });
+    return NextResponse.json({ error: "Choose a completed month (YYYY-MM or BS:YYYY-MM) or fiscal year (FY:YYYY-YY)." }, { status: 400 });
   }
 
   const { start, endExclusive } = reportMonthBounds(monthKey);
@@ -42,7 +45,8 @@ export async function GET(request: Request) {
     db.user.findUniqueOrThrow({ where: { id: session.user.id }, select: { name: true, currency: true } }),
     db.transaction.findMany({ where: { userId: session.user.id, deletedAt: null, occurredOn: { gte: asDate(start), lt: asDate(endExclusive) } }, orderBy: [{ occurredOn: "asc" }, { createdAt: "asc" }] }),
     db.transaction.findMany({ where: { userId: session.user.id, deletedAt: null, occurredOn: { gte: asDate(previousBounds.start), lt: asDate(previousBounds.endExclusive) } }, orderBy: [{ occurredOn: "asc" }, { createdAt: "asc" }] }),
-    db.budget.findMany({ where: { userId: session.user.id, monthKey } }),
+    // A fiscal year has no budgets of its own; a month's are stored under the same key (bare AD, or BS:).
+    isFiscalYearKey(monthKey) ? Promise.resolve([]) : db.budget.findMany({ where: { userId: session.user.id, monthKey } }),
     db.customCategory.findMany({ where: { userId: session.user.id } }),
     db.paymentAccount.findMany({ where: { userId: session.user.id }, orderBy: { createdAt: "asc" } }),
     db.transaction.findMany({ where: { userId: session.user.id, deletedAt: null, paymentAccountId: { not: null } }, orderBy: [{ occurredOn: "asc" }, { createdAt: "asc" }] }),
@@ -69,7 +73,7 @@ export async function GET(request: Request) {
     const occurredOn = dateOnly(item.occurredOn);
     return occurredOn >= start && occurredOn < endExclusive;
   });
-  const accountLabels = new Map(accounts.map((account) => [account.id, account.label || account.provider]));
+  const accountLabels = new Map(accounts.map((account) => [account.id, paymentAccountLabel({ type: account.type as PaymentAccountType, provider: account.provider, label: account.label })]));
 
   const report = buildMonthlyReport({
     monthKey,
@@ -126,7 +130,7 @@ export async function GET(request: Request) {
   });
 
   const pdf = generateMonthlyReportPdf(report);
-  const fileName = `SaveYoRupee-${monthKey}-monthly-report.pdf`;
+  const fileName = `SaveYoRupee-${reportFileKey(monthKey)}-${isFiscalYearKey(monthKey) ? "summary" : "monthly-report"}.pdf`;
   return new Response(new Uint8Array(pdf), {
     headers: {
       "Content-Type": "application/pdf",

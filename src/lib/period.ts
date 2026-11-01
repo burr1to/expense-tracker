@@ -269,3 +269,37 @@ export function periodBounds(key: PeriodKey): PeriodBounds {
   }
   throw new Error(`Invalid period key: ${key}`);
 }
+
+/* ------------------------------------------------------------------ */
+/* Day arithmetic on `YYYY-MM-DD` strings (UTC, never the local zone)  */
+/* ------------------------------------------------------------------ */
+
+const isoAtUtc = (iso: string) => Date.parse(`${iso}T00:00:00Z`);
+
+/** `iso` moved by `days` calendar days. */
+export function addDaysToIso(iso: string, days: number): string {
+  return new Date(isoAtUtc(iso) + Math.trunc(days) * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** Whole days from `from` to `to`; negative when `to` is earlier. */
+export function daysBetweenIso(from: string, to: string): number {
+  return Math.round((isoAtUtc(to) - isoAtUtc(from)) / 86_400_000);
+}
+
+/** Inclusive last day of a period, `YYYY-MM-DD`. */
+export function lastDayOf(bounds: PeriodBounds): string {
+  return addDaysToIso(bounds.endExclusive, -1);
+}
+
+/**
+ * The same stretch of time as a month key in another calendar. The current
+ * month maps to the current month; any other month maps to the month holding
+ * its middle day, which is where most of its days fall.
+ */
+export function convertMonthKey(key: PeriodKey, system: CalendarSystem, now = new Date()): PeriodKey {
+  const from = parseMonthKey(key);
+  if (from.system === system) return formatMonthKey(from);
+  if (isSameMonthKey(key, currentMonthKey(from.system, now))) return currentMonthKey(system, now);
+  const { start } = monthBounds(key);
+  return monthKeyOf(addDaysToIso(start, Math.floor(daysInPeriod(key) / 2)), system);
+}

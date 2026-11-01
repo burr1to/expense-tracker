@@ -30,6 +30,40 @@ describe("filterTransactionHistory", () => {
   it("composes date, kind, payment, amount, and search filters", () => {
     expect(filterTransactionHistory([selected, early, newest], [], filters({ from: "2026-07-01", to: "2026-07-31", kind: "income", paymentMode: "online", minMinor: 200000, query: "salary" })).map((item) => item.id)).toEqual(["newest"]);
   });
+
+  it("finds an entry by its amount, the same way the Ctrl+K search does", () => {
+    const momo = transaction({ id: "momo", note: "Momo", amountMinor: 125000 });
+    const tea = transaction({ id: "tea", note: "Tea", amountMinor: 4550 });
+    const sweets = transaction({ id: "sweets", note: "Sweets", amountMinor: 1250 });
+    const search = (query: string) => filterTransactionHistory([momo, tea, sweets], [], filters({ query })).map((item) => item.id);
+    expect(search("1250")).toEqual(["momo"]);
+    expect(search("1250.00")).toEqual(["momo"]);
+    expect(search("12.50")).toEqual(["sweets"]);
+    expect(search("1,250")).toEqual(["momo"]);
+    expect(search("Rs 1250")).toEqual(["momo"]);
+    expect(search("45.50")).toEqual(["tea"]);
+    expect(search("momo 2")).toEqual([]);
+  });
+
+  it("matches a multi-word query across fields, in any order", () => {
+    const momo = transaction({ id: "momo", note: "Momo", area: "Thamel" });
+    const tea = transaction({ id: "tea", note: "Tea", area: "Thamel" });
+    const search = (query: string) => filterTransactionHistory([momo, tea], [], filters({ query })).map((item) => item.id);
+    expect(search("momo thamel")).toEqual(["momo"]);
+    expect(search("thamel  momo")).toEqual(["momo"]);
+    expect(search("momo patan")).toEqual([]);
+  });
+
+  it("matches the exact-location label and the payment account's label or provider", () => {
+    const wallet: PaymentAccount = account("wallet", "Daily wallet");
+    const pinned = transaction({ id: "pinned", note: "Coffee", locationLabel: "Himalayan Java, Thamel" });
+    const paid = transaction({ id: "paid", note: "Groceries", paymentMode: "online", paymentAccountId: "wallet" });
+    const embedded = transaction({ id: "embedded", note: "Fuel", paymentMode: "online", paymentAccountId: "nabil", paymentAccount: { ...account("nabil", ""), type: "mobile_banking", provider: "Nabil Bank" } });
+    const search = (query: string) => filterTransactionHistory([pinned, paid, embedded], [], filters({ query }), [wallet]).map((item) => item.id);
+    expect(search("himalayan java")).toEqual(["pinned"]);
+    expect(search("daily wallet")).toEqual(["paid"]);
+    expect(search("nabil")).toEqual(["embedded"]);
+  });
 });
 
 const account = (id: string, label: string): PaymentAccount => ({
@@ -63,6 +97,7 @@ describe("listLedgerActivity", () => {
     expect(listLedgerActivity([lunch], [moved], [wallet, bank], [], activityFilters({ category: "food" })).every((item) => item.type === "transaction")).toBe(true);
     expect(listLedgerActivity([lunch], [moved], [wallet, bank], [], activityFilters({ paymentMode: "cash" })).every((item) => item.type === "transaction")).toBe(true);
     expect(listLedgerActivity([lunch], [moved], [wallet, bank], [], activityFilters({ query: "salary" })).map((item) => item.type)).toEqual(["transfer"]);
+    expect(listLedgerActivity([lunch], [moved], [wallet, bank], [], activityFilters({ query: "500" })).map((item) => item.type)).toEqual(["transfer"]);
   });
 
   it("limits an account list to that account's transactions and transfers", () => {
