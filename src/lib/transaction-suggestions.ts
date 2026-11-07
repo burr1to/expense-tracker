@@ -1,4 +1,4 @@
-import type { LedgerTransaction, TransactionKind } from "../types";
+import type { LedgerTransaction, TransactionKind, TransactionLocationDraft } from "../types";
 
 export interface TransactionSuggestion {
   transaction: LedgerTransaction;
@@ -68,4 +68,30 @@ export function getTransactionSuggestions(
       return chronology(right.transaction).localeCompare(chronology(left.transaction));
     })
     .slice(0, limit);
+}
+
+/** The exact map pin an entry was saved with, or null when it has none. */
+export function locationFromTransaction(transaction?: LedgerTransaction | null): TransactionLocationDraft | null {
+  return transaction?.locationLatitude != null && transaction.locationLongitude != null ? {
+    label: transaction.locationLabel ?? transaction.area ?? "Pinned location",
+    address: transaction.locationAddress ?? "Kathmandu, Nepal",
+    latitude: transaction.locationLatitude,
+    longitude: transaction.locationLongitude,
+    accuracy: transaction.locationAccuracy,
+    source: transaction.locationSource ?? "pin",
+    savedPlaceId: transaction.savedPlaceId,
+  } : null;
+}
+
+/** The distinct pins used most recently, for the map picker's "recent" list. */
+export function recentLocationsFrom(transactions: readonly LedgerTransaction[], limit = 12): TransactionLocationDraft[] {
+  const seen = new Set<string>();
+  return transactions.flatMap((entry) => {
+    const previous = locationFromTransaction(entry);
+    if (!previous) return [];
+    const key = `${previous.latitude.toFixed(5)}-${previous.longitude.toFixed(5)}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [previous];
+  }).slice(0, limit);
 }

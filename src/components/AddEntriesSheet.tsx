@@ -2,23 +2,26 @@
 
 import { DatePicker } from "@mantine/dates";
 import { Menu, Popover } from "@mantine/core";
-import { ArrowsLeftRight, CalendarBlank, CaretDown, ChatText, Check, FileText, Keyboard, Money, Plus, Receipt, Trash, UsersThree, X } from "@phosphor-icons/react";
+import { ArrowsLeftRight, CalendarBlank, CaretDown, ChatText, Check, FileText, Keyboard, MapPin, Money, Plus, Receipt, Trash, UsersThree, X } from "@phosphor-icons/react";
 import { createPortal } from "react-dom";
 import { useMemo, useRef, useState, type CSSProperties } from "react";
 import { useToasts } from "../context/ToastContext";
-import { batchRowToDraft, batchSummary, frequentCategories, isBlankRow, newBatchRow, rowAmountValid, rowIssues, suggestFromHistory, type BatchDefaults, type BatchRow } from "../lib/batch-entry";
+import { batchRowToDraft, batchSummary, frequentCategories, isBlankRow, newBatchRow, rowAmountValid, rowChangeFromEntry, rowIssues, suggestFromHistory, type BatchDefaults, type BatchRow } from "../lib/batch-entry";
 import { getCategory, pickerCategoriesFor } from "../lib/categories";
 import { formatMoney, majorToMinor } from "../lib/currency";
 import { formatLedgerDate, todayInput } from "../lib/dates";
-import { plainAmount } from "../lib/entry-labels";
+import { paymentLabel, plainAmount } from "../lib/entry-labels";
 import { onlinePaymentAccounts, paymentAccountLabel } from "../lib/payment-accounts";
 import { shiftDateKey } from "../lib/transaction-defaults";
+import { recentLocationsFrom } from "../lib/transaction-suggestions";
 import { toUserMessage } from "../lib/user-messages";
-import type { CalendarSystem, CurrencyCode, CustomCategory, CustomSubcategory, LedgerTransaction, PaymentAccount, TransactionDraft, TransactionKind } from "../types";
+import type { CalendarSystem, CurrencyCode, CustomCategory, CustomSubcategory, LedgerTransaction, PaymentAccount, SavedPlace, TransactionDraft, TransactionKind } from "../types";
 import { AnimatedOverlay } from "./AnimatedOverlay";
 import { ButtonSpinner } from "./ButtonSpinner";
 import { CategoryPickerSheet, type CategoryPick } from "./CategoryPickerSheet";
+import { EntrySuggestions, useEntrySuggestions } from "./EntrySuggestions";
 import { FormError } from "./FormError";
+import { LocationPicker } from "./LocationPicker";
 import { AccountTile, CategoryTile } from "./ToneIcon";
 
 interface AddEntriesSheetProps {
@@ -29,6 +32,7 @@ interface AddEntriesSheetProps {
   customCategories: CustomCategory[];
   customSubcategories: CustomSubcategory[];
   paymentAccounts: PaymentAccount[];
+  savedPlaces: SavedPlace[];
   ownerId?: string;
   onClose: () => void;
   /** Saves one entry; the batch saves them one by one so a failure keeps only the unsaved ones. */
@@ -73,7 +77,7 @@ function AccountMenu({ value, accounts, onChange, label }: { value: string; acco
 }
 
 export function AddEntriesSheet(props: AddEntriesSheetProps) {
-  const { open, currency, calendarSystem, transactions, customCategories, customSubcategories, paymentAccounts, ownerId, onClose, onSave, onPasteSms, onScanReceipt, onImportStatement, onTransfer, onSplitBill, onFullForm } = props;
+  const { open, currency, calendarSystem, transactions, customCategories, customSubcategories, paymentAccounts, savedPlaces, ownerId, onClose, onSave, onPasteSms, onScanReceipt, onImportStatement, onTransfer, onSplitBill, onFullForm } = props;
   const { push: pushToast } = useToasts();
   const today = todayInput();
   const accounts = useMemo(() => onlinePaymentAccounts(paymentAccounts).filter((account) => !ownerId || account.userId === ownerId), [ownerId, paymentAccounts]);
@@ -83,6 +87,8 @@ export function AddEntriesSheet(props: AddEntriesSheetProps) {
   const [draft, setDraft] = useState<BatchRow>(() => newBatchRow({ kind: "expense", occurredOn: today, paymentMode: "cash", paymentAccountId: "" }));
   const [openId, setOpenId] = useState<string | null>(null);
   const [picking, setPicking] = useState<{ id: string; value: CategoryPick } | null>(null);
+  const [mapFor, setMapFor] = useState<string | null>(null);
+  const [suggestOpen, setSuggestOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const noteRef = useRef<HTMLInputElement>(null);
@@ -102,6 +108,16 @@ export function AddEntriesSheet(props: AddEntriesSheetProps) {
   const allRows = [...rows, ...pending];
   const summary = batchSummary(allRows);
   const draftHalfDone = pending.length > 0 && !rowAmountValid(draft);
+  const recentLocations = useMemo(() => recentLocationsFrom(transactions), [transactions]);
+  const suggestions = useEntrySuggestions(transactions, ownerId, draft.kind, draft.note, suggestOpen && !draft.categoryChosen);
+  const accountIds = useMemo(() => new Set(accounts.map((account) => account.id)), [accounts]);
+  const mapTarget = mapFor === null ? null : mapFor === draft.id ? draft : rows.find((row) => row.id === mapFor) ?? null;
+  const pickSuggestion = (entry: Parameters<typeof rowChangeFromEntry>[0]) => {
+    setDraft((current) => ({ ...current, ...rowChangeFromEntry(entry, accountIds) }));
+    setSuggestOpen(false);
+    window.setTimeout(() => amountRef.current?.focus(), 0);
+  };
+  const setLocation = (id: string, location: BatchRow["location"]) => id === draft.id ? setDraft((current) => ({ ...current, location })) : updateRow(id, { location });
 
   const applyDefaults = (change: Partial<BatchDefaults>) => {
     setDefaults((current) => ({ ...current, ...change }));
@@ -233,7 +249,7 @@ export function AddEntriesSheet(props: AddEntriesSheetProps) {
                   {tile(row)}
                   <span className="v2-row-main">
                     <strong>{title}</strong>
-                    {issues.includes("category") ? <small className="is-warning">Choose a category</small> : issues.includes("account") ? <small className="is-warning">Choose an account</small> : <small>{categoryText(row)}{!row.categoryChosen && row.category ? " · suggested" : ""}</small>}
+                    {issues.includes("category") ? <small className="is-warning">Choose a category</small> : issues.includes("account") ? <small className="is-warning">Choose an account</small> : <small>{categoryText(row)}{row.location ? ` · ${row.location.label}` : ""}{!row.categoryChosen && row.category ? " · suggested" : ""}</small>}
                     {differs.length > 0 && <span className="v2-add-differs">{differs.map((text) => <span key={text}>{text}</span>)}</span>}
                   </span>
                   <strong className={row.kind === "income" ? "v2-money is-in amount" : "v2-money amount"}>{row.kind === "income" ? "+" : "−"}{rowAmountValid(row) ? plainAmount(majorToMinor(row.amount)) : "No amount"}</strong>
@@ -247,6 +263,7 @@ export function AddEntriesSheet(props: AddEntriesSheetProps) {
                     <button type="button" className={row.category ? "v2-pick" : "v2-pick is-missing"} onClick={() => openPicker(row)}>{row.category ? <CategoryTile category={row.category} custom={customCategories} size={24} /> : null}{categoryText(row) || "Choose a category"}<CaretDown size={13} weight="bold" /></button>
                     <AccountMenu label="Account" value={row.paymentMode === "online" ? row.paymentAccountId : ""} accounts={accounts} onChange={(id) => updateRow(row.id, accountChange(id))} />
                     <DateMenu label="Date" value={row.occurredOn} today={today} calendarSystem={calendarSystem} onChange={(occurredOn) => updateRow(row.id, { occurredOn })} />
+                    <button type="button" className={row.location ? "v2-pick has-place" : "v2-pick"} onClick={() => setMapFor(row.id)}><MapPin size={17} weight={row.location ? "fill" : "regular"} />{row.location ? row.location.label : "Add place"}</button>
                     <button type="button" className={`v2-pick is-${row.kind}`} onClick={() => updateRow(row.id, kindChange(row, row.kind === "expense" ? "income" : "expense"))} aria-label={`${KIND_LABEL[row.kind]}. Switch to ${row.kind === "expense" ? "income" : "expense"}`}>{KIND_LABEL[row.kind]}</button>
                   </div>
                   <div className="v2-add-detail-actions">
@@ -261,7 +278,10 @@ export function AddEntriesSheet(props: AddEntriesSheetProps) {
           <form className={`v2-add-draft is-${draft.kind}`} onSubmit={(event) => { event.preventDefault(); addDraft(); }}>
             <div className="v2-add-line">
               <button type="button" className="v2-add-tile" onClick={() => openPicker(draft)} aria-label={draft.category ? `Category: ${categoryText(draft)}. Change` : "Choose a category"}>{tile(draft, 46)}</button>
-              <input ref={noteRef} className="v2-add-note" aria-label="What was it for?" placeholder={draft.kind === "income" ? "Where did it come from?" : "What was it for?"} value={draft.note} onChange={(event) => changeDraftNote(event.target.value)} />
+              <div className="entry-suggest-wrap">
+                <input ref={noteRef} className="v2-add-note" aria-label="What was it for?" placeholder={draft.kind === "income" ? "Where did it come from?" : "What was it for?"} value={draft.note} autoComplete="off" onFocus={() => setSuggestOpen(true)} onBlur={() => setSuggestOpen(false)} onChange={(event) => { setSuggestOpen(true); changeDraftNote(event.target.value); }} />
+                <EntrySuggestions suggestions={suggestions} customCategories={customCategories} accountText={(entry) => paymentLabel(entry, paymentAccounts)} onPick={pickSuggestion} />
+              </div>
             </div>
             <div className="v2-add-line">
               <label className="v2-add-amount"><span>{currency}</span><input ref={amountRef} aria-label={`Amount in ${currency}`} inputMode="decimal" placeholder="0" value={draft.amount} onChange={(event) => setDraft((current) => ({ ...current, amount: sanitizeAmount(event.target.value) }))} /></label>
@@ -273,7 +293,11 @@ export function AddEntriesSheet(props: AddEntriesSheetProps) {
                 {quick.map((category) => <button type="button" key={category.id} aria-pressed={draft.category === category.id} className={draft.category === category.id ? "v2-chip active" : "v2-chip"} onClick={() => setDraft((current) => ({ ...current, category: category.id, subcategory: current.category === category.id ? current.subcategory : "", categoryChosen: true }))}><CategoryTile category={category.id} custom={customCategories} size={24} />{category.label}</button>)}
                 <button type="button" className="v2-chip" onClick={() => openPicker(draft)}>More…</button>
               </div>}
-            <p className="v2-add-hint">Type what it was and the amount, then press Enter. Need a place, receipt or group? <button type="button" className="v2-link" onClick={() => onFullForm(draft.occurredOn)}>Use the full form</button></p>
+            <div className="v2-add-place">
+              <button type="button" className={draft.location ? "v2-pick has-place" : "v2-pick"} onClick={() => setMapFor(draft.id)}><MapPin size={17} weight={draft.location ? "fill" : "regular"} />{draft.location ? draft.location.label : "Add place on map"}</button>
+              {draft.location && <button type="button" className="v2-link" onClick={() => setLocation(draft.id, null)}>Remove place</button>}
+            </div>
+            <p className="v2-add-hint">Type what it was and the amount, then press Enter. Need a receipt or group? <button type="button" className="v2-link" onClick={() => onFullForm(draft.occurredOn)}>Use the full form</button></p>
           </form>
           <FormError message={error} />
         </div>
@@ -288,6 +312,7 @@ export function AddEntriesSheet(props: AddEntriesSheetProps) {
         </footer>
       </section>
     </AnimatedOverlay>
+    <LocationPicker open={mapFor !== null} value={mapTarget?.location ?? null} recentLocations={recentLocations} savedPlaces={savedPlaces} onClose={() => setMapFor(null)} onSelect={(location) => { if (mapFor) setLocation(mapFor, location); setMapFor(null); }} />
     <CategoryPickerSheet value={picking?.value ?? null} customCategories={customCategories} customSubcategories={customSubcategories} onPick={applyPick} onClose={() => setPicking(null)} />
   </>, document.body);
 }

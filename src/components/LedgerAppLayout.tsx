@@ -440,6 +440,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         customCategories={ledger.customCategories}
         customSubcategories={ledger.customSubcategories}
         paymentAccounts={ledger.paymentAccounts}
+        savedPlaces={ledger.savedPlaces}
         ownerId={ledger.profile.id}
         onClose={() => setAddSheetOpen(false)}
         onSave={(draft) => saveTransaction(draft)}
