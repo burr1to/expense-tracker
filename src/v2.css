@@ -131,12 +131,13 @@ button.v2-row:hover, a.v2-row:hover { background: #f7f8f3; box-shadow: -8px 0 0 
 .v2-bar { display: block; height: 6px; max-width: 100%; border-radius: 3px; transition: width .4s cubic-bezier(.22,1,.36,1); }
 .v2-row-main .v2-bar:first-of-type { margin-top: 3px; }
 .v2-delta { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.v2-delta.is-up { color: var(--v2-up); }
-.v2-delta.is-down { color: var(--v2-down); }
+/* Green when a number rises (▲), red when it falls (▼). */
+.v2-delta.is-up { color: var(--v2-down); }
+.v2-delta.is-down { color: var(--v2-up); }
 .v2-delta.is-flat { color: var(--v2-muted); }
 .v2-delta.is-pill { padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 700; }
-.v2-delta.is-pill.is-up { background: var(--v2-up-bg); }
-.v2-delta.is-pill.is-down { background: var(--v2-down-bg); }
+.v2-delta.is-pill.is-up { background: var(--v2-down-bg); }
+.v2-delta.is-pill.is-down { background: var(--v2-up-bg); }
 .v2-delta.is-pill.is-flat { background: #eeefe7; }
 .v2-empty { margin: 10px 0 14px; color: var(--v2-muted); }
 .v2-footnote { margin: 4px 0 8px; color: var(--v2-muted); font-size: 12px; }
@@ -719,3 +720,52 @@ button.v2-row:hover, a.v2-row:hover { background: #f7f8f3; box-shadow: -8px 0 0 
 
 /* Narrow phones: smaller page title so it fits beside the month stepper */
 @media (max-width: 380px) { .v2-page-head h1 { font-size: 21px; } }
+
+/* ---- Type toggle: a larger, clearer Expense / Income switch ---- */
+.kind-toggle { display: inline-grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border: 1px solid var(--v2-line); border-radius: 999px; background: #ebeee3; width: fit-content; }
+.kind-toggle .kind-toggle-option { min-width: 104px; min-height: 42px; padding: 0 22px; border: 0; border-radius: 999px; background: transparent; color: #4a5c52; font-size: 14.5px; font-weight: 700; letter-spacing: .01em; }
+.kind-toggle .kind-toggle-option:hover:not(.on) { background: rgba(36,80,61,.08); color: var(--v2-ink); }
+.kind-toggle .kind-toggle-option.on { color: #fff; box-shadow: 0 2px 8px rgba(20,32,26,.18); }
+.kind-toggle .kind-toggle-option.is-expense.on { background: #c0412d; }
+.kind-toggle .kind-toggle-option.is-income.on { background: #1f7a45; }
+.category-picker-body .kind-toggle { width: 100%; }
+
+/* ---- Category picker tiles ---- */
+.category-picker-body .category-choice { min-height: 92px; padding: 12px 6px; border-radius: 14px; font-weight: 600; }
+.category-picker-body .category-choice.selected { border-color: var(--v2-green); background: #e3efe7; box-shadow: 0 0 0 1px var(--v2-green) inset; }
+.category-picker-body .category-choice > svg { color: var(--v2-green); }
+
+/* ---- Add entries sheet: roomier controls ---- */
+.v2-pick { min-height: 46px; padding: 0 15px; border-radius: 14px; }
+.v2-pick:has(.v2-tile) { padding-left: 9px; }
+.v2-pick.has-place { border-color: #9cc3ad; background: #eaf3ed; color: var(--v2-green); }
+.v2-add-draft { gap: 14px; padding: 18px; }
+.v2-add-next { min-width: 104px; padding: 0 24px; font-size: 15px; }
+.v2-add-place { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.v2-add-place .v2-pick { max-width: 100%; }
+.v2-add-place .v2-pick.has-place { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-sidebar-add { height: 50px; font-size: 15px; box-shadow: 0 6px 14px rgba(36,80,61,.22); }
+.v2-sidebar-add:focus-visible { outline: 2px solid var(--v2-green); outline-offset: 3px; }
+
+/* ---- Add multiple page ---- */
+.multi-option, .multi-chip { min-height: 40px; padding: 0 16px; font-weight: 600; }
+.multi-option.on { background: var(--v2-green); border-color: var(--v2-green); }
+.multi-option svg { margin-right: 6px; vertical-align: -2px; }
+.multi-select { min-height: 42px; }
+.multi-chip.on { background: var(--v2-green); border-color: var(--v2-green); color: #fff; }
+.multi-place { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.multi-entry { gap: 14px; }
+
+/* ---- Earlier-entry suggestions under the note field ---- */
+.entry-suggest-wrap { position: relative; flex: 1; min-width: 0; }
+.entry-suggest-wrap > input { width: 100%; box-sizing: border-box; }
+.entry-suggest { position: absolute; z-index: 40; top: calc(100% + 6px); left: -8px; right: -8px; margin: 0; padding: 6px; list-style: none; display: grid; gap: 2px; max-height: 300px; overflow-y: auto; border: 1px solid var(--v2-control-line, #d5d9cc); border-radius: 16px; background: #fff; box-shadow: 0 14px 34px rgba(20,32,26,.18); }
+.entry-suggest-option { width: 100%; min-height: 56px; display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 0; border-radius: 12px; background: transparent; color: var(--v2-ink); font: inherit; text-align: left; cursor: pointer; }
+.entry-suggest-option:hover, .entry-suggest-option:focus-visible { background: #eef3ea; }
+.entry-suggest-option > svg { flex: none; color: var(--v2-muted); }
+.entry-suggest-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.entry-suggest-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 650; }
+.entry-suggest-text small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--v2-muted); font-size: 12.5px; }
+.entry-suggest-text small svg { vertical-align: -1px; margin-right: 2px; }
+.entry-suggest-end { flex: none; display: grid; justify-items: end; gap: 2px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.entry-suggest-end small { color: var(--v2-muted); font-size: 11.5px; font-weight: 600; }

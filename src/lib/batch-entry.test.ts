@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { batchRowToDraft, batchSummary, frequentCategories, isBlankRow, newBatchRow, rowIssues, suggestFromHistory, type BatchDefaults } from "./batch-entry";
+import { batchRowToDraft, batchSummary, frequentCategories, isBlankRow, newBatchRow, rowChangeFromEntry, rowIssues, suggestFromHistory, type BatchDefaults } from "./batch-entry";
 import type { LedgerTransaction } from "../types";
 
 const defaults: BatchDefaults = { kind: "expense", occurredOn: "2026-10-30", paymentMode: "cash", paymentAccountId: "" };
@@ -56,5 +56,21 @@ describe("frequentCategories", () => {
   it("orders this owner's categories for a kind by how often they were used", () => {
     const history = [entry({ category: "food" }), entry({ category: "transport" }), entry({ category: "transport" }), entry({ category: "salary", kind: "income" }), entry({ category: "health", userId: "u2" })];
     expect(frequentCategories("expense", history, "u1")).toEqual(["transport", "food"]);
+  });
+});
+
+describe("picking an earlier entry", () => {
+  const pinned = entry({ note: "Aambo Momo", subcategory: "Lunch", paymentMode: "online", paymentAccountId: "a1", locationLabel: "Thamel", locationLatitude: 27.715, locationLongitude: 85.312, locationSource: "pin" });
+
+  it("fills the note, category, account and map pin, and sends the pin when saved", () => {
+    const change = rowChangeFromEntry(pinned, new Set(["a1"]));
+    expect(change).toMatchObject({ note: "Aambo Momo", category: "food", subcategory: "Lunch", categoryChosen: true, paymentMode: "online", paymentAccountId: "a1" });
+    const draft = batchRowToDraft(newBatchRow(defaults, { ...change, amount: "490" }));
+    expect(draft.location).toMatchObject({ label: "Thamel", latitude: 27.715 });
+    expect(draft.area).toBe("Thamel");
+  });
+
+  it("keeps the line's own account when the old one is no longer usable", () => {
+    expect(rowChangeFromEntry(pinned, new Set())).not.toHaveProperty("paymentAccountId");
   });
 });

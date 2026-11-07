@@ -11,7 +11,7 @@ import { formatLedgerDate, todayInput } from "../lib/dates";
 import { entryDateLabel, newClientRequestId, pickTransactionDefaults, shiftDateKey } from "../lib/transaction-defaults";
 import { discardReceipt, uploadReceipt } from "../lib/receipts";
 import { paymentAccountLabel } from "../lib/payment-accounts";
-import { getTransactionSuggestions, transactionSuggestionTitle, type TransactionSuggestion } from "../lib/transaction-suggestions";
+import { getTransactionSuggestions, locationFromTransaction, recentLocationsFrom, transactionSuggestionTitle, type TransactionSuggestion } from "../lib/transaction-suggestions";
 import { matchLearningSuggestion } from "../lib/learning";
 import { parseVoiceTransaction, transactionWarnings } from "../lib/transaction-intelligence";
 import { createVoiceCapture } from "../lib/voice-capture";
@@ -73,18 +73,6 @@ interface TransactionFormProps {
   onSplitBill?: (prefill: { amount?: string; note?: string }) => void;
 }
 
-function locationFromTransaction(transaction?: LedgerTransaction | null): TransactionLocationDraft | null {
-  return transaction?.locationLatitude != null && transaction.locationLongitude != null ? {
-    label: transaction.locationLabel ?? transaction.area ?? "Pinned location",
-    address: transaction.locationAddress ?? "Kathmandu, Nepal",
-    latitude: transaction.locationLatitude,
-    longitude: transaction.locationLongitude,
-    accuracy: transaction.locationAccuracy,
-    source: transaction.locationSource ?? "pin",
-    savedPlaceId: transaction.savedPlaceId,
-  } : null;
-}
-
 export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, initialLocation, initialKind = "expense", transactions, customCategories, customSubcategories, paymentAccounts, savedPlaces, learning, shareWithHousehold = false, calendarSystem = "AD", ownerId, transactionGroups = [], onClose, onSave, onPasteSms, onScanReceipt, onTransfer, onSplitBill }: TransactionFormProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ReceiptUpload | undefined>();
@@ -114,17 +102,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
   const suggestedGroup = (day: string) => { const covering = groupsCovering(day, transactionGroups); return covering.length === 1 ? covering[0].id : ""; };
   const source = transaction ?? template;
   const freshEntry = !transaction && !template && !initialLocation;
-  const recentLocations = useMemo(() => {
-    const seen = new Set<string>();
-    return transactions.flatMap((entry) => {
-      const previous = locationFromTransaction(entry);
-      if (!previous) return [];
-      const key = `${previous.latitude.toFixed(5)}-${previous.longitude.toFixed(5)}`;
-      if (seen.has(key)) return [];
-      seen.add(key);
-      return [previous];
-    }).slice(0, 12);
-  }, [transactions]);
+  const recentLocations = useMemo(() => recentLocationsFrom(transactions), [transactions]);
   const [location, setLocation] = useState<TransactionLocationDraft | null>(null);
   const smartDefaults = (forKind: TransactionKind) => {
     const choices = allCategoriesFor(forKind, customCategories);

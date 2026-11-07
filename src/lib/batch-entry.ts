@@ -1,6 +1,7 @@
 import { majorToMinor } from "./currency";
 import { newClientRequestId } from "./transaction-defaults";
-import type { LedgerTransaction, PaymentMode, TransactionCategory, TransactionDraft, TransactionKind } from "../types";
+import { locationFromTransaction } from "./transaction-suggestions";
+import type { LedgerTransaction, PaymentMode, TransactionCategory, TransactionDraft, TransactionKind, TransactionLocationDraft } from "../types";
 
 /** One line of the Add multiple page. Category stays empty until it is chosen or remembered from an earlier entry. */
 export interface BatchRow {
@@ -16,6 +17,8 @@ export interface BatchRow {
   paymentAccountId: string;
   /** Set once the person picks the category, so a later note edit never overwrites their choice. */
   categoryChosen: boolean;
+  /** An exact pin on the Kathmandu map, when the person chose one. */
+  location: TransactionLocationDraft | null;
 }
 
 export interface BatchDefaults {
@@ -37,6 +40,7 @@ export function newBatchRow(defaults: BatchDefaults, overrides: Partial<BatchRow
     paymentMode: defaults.paymentMode,
     paymentAccountId: defaults.paymentAccountId,
     categoryChosen: false,
+    location: null,
     ...overrides,
   };
 }
@@ -110,10 +114,27 @@ export function batchRowToDraft(row: BatchRow): TransactionDraft {
     occurredOn: row.occurredOn,
     note: row.note.trim(),
     subcategory: row.subcategory.trim(),
-    area: "",
+    area: row.location?.label ?? "",
     paymentMode: row.paymentMode,
     paymentAccountId: row.paymentMode === "online" ? row.paymentAccountId : "",
     shared: false,
+    location: row.location,
     clientRequestId: row.id,
+  };
+}
+
+/**
+ * What picking an earlier entry from the suggestions fills in: its note, category, account and pin.
+ * An account the person can no longer pay with falls back to the line's own.
+ */
+export function rowChangeFromEntry(entry: LedgerTransaction, usableAccountIds: ReadonlySet<string>): Partial<BatchRow> {
+  const accountOk = entry.paymentMode === "online" ? Boolean(entry.paymentAccountId && usableAccountIds.has(entry.paymentAccountId)) : entry.paymentMode === "cash";
+  return {
+    note: entry.note.trim() || entry.locationLabel?.trim() || entry.area?.trim() || "",
+    category: entry.category,
+    subcategory: entry.subcategory ?? "",
+    categoryChosen: true,
+    location: locationFromTransaction(entry),
+    ...(accountOk ? { paymentMode: entry.paymentMode, paymentAccountId: entry.paymentAccountId ?? "" } : {}),
   };
 }

@@ -13,6 +13,7 @@ export default function AddMultipleRoute() {
     customCategories={ledger.customCategories}
     customSubcategories={ledger.customSubcategories}
     paymentAccounts={ledger.paymentAccounts}
+    savedPlaces={ledger.savedPlaces}
     ownerId={ledger.profile.id}
     onImport={async (drafts) => {
       const job = await ledger.importTransactions(drafts);

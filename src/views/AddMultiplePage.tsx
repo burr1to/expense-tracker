@@ -2,23 +2,27 @@
 
 import { DatePicker } from "@mantine/dates";
 import { Popover } from "@mantine/core";
-import { CaretDown, CaretLeft, Check, Plus, SquaresFour } from "@phosphor-icons/react";
+import { CaretDown, CaretLeft, Check, MapPin, Plus, SquaresFour } from "@phosphor-icons/react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { CategoryIcon } from "../components/CategoryIcon";
 import { CategoryPickerSheet, type CategoryPick } from "../components/CategoryPickerSheet";
+import { EntrySuggestions, useEntrySuggestions } from "../components/EntrySuggestions";
 import { FormError } from "../components/FormError";
+import { LocationPicker } from "../components/LocationPicker";
 import { useToasts } from "../context/ToastContext";
-import { batchRowToDraft, batchSummary, frequentCategories, isBlankRow, newBatchRow, rowAmountValid, rowIssues, suggestFromHistory, type BatchDefaults, type BatchRow } from "../lib/batch-entry";
+import { batchRowToDraft, batchSummary, frequentCategories, isBlankRow, newBatchRow, rowAmountValid, rowChangeFromEntry, rowIssues, suggestFromHistory, type BatchDefaults, type BatchRow } from "../lib/batch-entry";
 import { getCategory, pickerCategoriesFor } from "../lib/categories";
 import { formatMoney, majorToMinor } from "../lib/currency";
 import { formatLedgerDate, todayInput } from "../lib/dates";
+import { paymentLabel } from "../lib/entry-labels";
 import { onlinePaymentAccounts, paymentAccountLabel } from "../lib/payment-accounts";
 import { shiftDateKey } from "../lib/transaction-defaults";
+import { recentLocationsFrom } from "../lib/transaction-suggestions";
 import { toUserMessage } from "../lib/user-messages";
-import type { CalendarSystem, CurrencyCode, CustomCategory, CustomSubcategory, ImportJob, LedgerTransaction, PaymentAccount, TransactionDraft, TransactionKind } from "../types";
+import type { CalendarSystem, CurrencyCode, CustomCategory, CustomSubcategory, ImportJob, LedgerTransaction, PaymentAccount, SavedPlace, TransactionDraft, TransactionKind } from "../types";
 
 interface AddMultiplePageProps {
   currency: CurrencyCode;
@@ -27,6 +31,7 @@ interface AddMultiplePageProps {
   customCategories: CustomCategory[];
   customSubcategories: CustomSubcategory[];
   paymentAccounts: PaymentAccount[];
+  savedPlaces: SavedPlace[];
   ownerId?: string;
   onImport: (drafts: TransactionDraft[]) => Promise<ImportJob | null>;
 }
@@ -68,7 +73,7 @@ export function AccountChoice({ value, options, onChange }: { value: string; opt
   </Popover>;
 }
 
-export function AddMultiplePage({ currency, calendarSystem, transactions, customCategories, customSubcategories, paymentAccounts, ownerId, onImport }: AddMultiplePageProps) {
+export function AddMultiplePage({ currency, calendarSystem, transactions, customCategories, customSubcategories, paymentAccounts, savedPlaces, ownerId, onImport }: AddMultiplePageProps) {
   const router = useRouter();
   const { push: pushToast } = useToasts();
   const today = todayInput();
@@ -78,6 +83,8 @@ export function AddMultiplePage({ currency, calendarSystem, transactions, custom
   const [draft, setDraft] = useState<BatchRow>(() => newBatchRow({ kind: "expense", occurredOn: today, paymentMode: "cash", paymentAccountId: "" }));
   const [openId, setOpenId] = useState<string | null>(null);
   const [picking, setPicking] = useState<{ id: string; value: CategoryPick } | null>(null);
+  const [mapFor, setMapFor] = useState<string | null>(null);
+  const [suggestOpen, setSuggestOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const noteRef = useRef<HTMLInputElement>(null);
@@ -97,6 +104,16 @@ export function AddMultiplePage({ currency, calendarSystem, transactions, custom
   const allRows = [...rows, ...pending];
   const summary = batchSummary(allRows);
   const draftHasAmountOnly = pending.length > 0 && !rowAmountValid(draft);
+  const recentLocations = useMemo(() => recentLocationsFrom(transactions), [transactions]);
+  const suggestions = useEntrySuggestions(transactions, ownerId, draft.kind, draft.note, suggestOpen && !draft.categoryChosen);
+  const accountIds = useMemo(() => new Set(accounts.map((account) => account.id)), [accounts]);
+  const mapTarget = mapFor === null ? null : mapFor === draft.id ? draft : rows.find((row) => row.id === mapFor) ?? null;
+  const pickSuggestion = (entry: Parameters<typeof rowChangeFromEntry>[0]) => {
+    setDraft((current) => ({ ...current, ...rowChangeFromEntry(entry, accountIds) }));
+    setSuggestOpen(false);
+    window.setTimeout(() => amountRef.current?.focus(), 0);
+  };
+  const setLocation = (id: string, location: BatchRow["location"]) => id === draft.id ? setDraft((current) => ({ ...current, location })) : updateRow(id, { location });
 
   const applyDefaults = (change: Partial<BatchDefaults>) => {
     setDefaults((current) => ({ ...current, ...change }));
@@ -185,7 +202,7 @@ export function AddMultiplePage({ currency, calendarSystem, transactions, custom
         {rows.map((row) => {
           const issues = rowIssues(row);
           const open = openId === row.id;
-          const meta = [categoryText(row), row.occurredOn !== defaults.occurredOn ? formatLedgerDate(row.occurredOn, calendarSystem) : "", row.paymentMode !== defaults.paymentMode || row.paymentAccountId !== defaults.paymentAccountId ? accountLabel(row) : ""].filter(Boolean).join(" · ");
+          const meta = [categoryText(row), row.location?.label ?? "", row.occurredOn !== defaults.occurredOn ? formatLedgerDate(row.occurredOn, calendarSystem) : "", row.paymentMode !== defaults.paymentMode || row.paymentAccountId !== defaults.paymentAccountId ? accountLabel(row) : ""].filter(Boolean).join(" · ");
           const title = row.note || (row.category ? getCategory(row.category, customCategories).label : "No note");
           return <li key={row.id} className={open ? "multi-item is-open" : "multi-item"}>
             <div className="multi-item-row">
@@ -201,6 +218,7 @@ export function AddMultiplePage({ currency, calendarSystem, transactions, custom
               <div className="multi-field"><span>Type</span><KindToggle value={row.kind} onChange={(kind) => updateRow(row.id, kindChange(row, kind))} /></div>
               <div className="multi-field"><span>Category</span><button type="button" className={row.category ? "multi-category-button" : "multi-category-button is-missing"} onClick={() => openPicker(row)}>{renderIcon(row, 30)}<span>{categoryText(row) || "Choose a category"}</span><em>Change</em></button></div>
               <div className="multi-field"><span>Paid with</span><AccountChoice value={row.paymentMode === "online" ? row.paymentAccountId : ""} options={accountOptions} onChange={(id) => updateRow(row.id, accountChange(id))} /></div>
+              <div className="multi-field"><span>Place</span><div className="multi-place"><button type="button" className={row.location ? "multi-option on" : "multi-option"} onClick={() => setMapFor(row.id)}><MapPin size={15} weight={row.location ? "fill" : "regular"} />{row.location ? row.location.label : "Add place on map"}</button>{row.location && <button type="button" className="multi-remove" onClick={() => setLocation(row.id, null)}>Remove place</button>}</div></div>
               <div className="multi-field"><span>Date</span><DateChoice value={row.occurredOn} today={today} calendarSystem={calendarSystem} onChange={(occurredOn) => updateRow(row.id, { occurredOn })} /></div>
               <div className="multi-details-actions"><button type="button" className="multi-remove" onClick={() => removeRow(row.id)}>Remove</button><button type="button" className="secondary-button" onClick={() => setOpenId(null)}>Done</button></div>
             </div>}
@@ -212,13 +230,20 @@ export function AddMultiplePage({ currency, calendarSystem, transactions, custom
         <KindToggle value={draft.kind} onChange={changeDraftKind} />
         <div className={`multi-entry-line is-${draft.kind}`}>
           <button type="button" className="multi-icon-button" aria-label={draft.category ? `Category: ${categoryText(draft)}. Change` : "Choose a category"} onClick={() => openPicker(draft)}>{renderIcon(draft, 34)}</button>
-          <input ref={noteRef} className="multi-note" aria-label="What was it for?" placeholder={draft.kind === "income" ? "Where did it come from?" : "What was it for?"} value={draft.note} onChange={(event) => changeDraftNote(event.target.value)} autoFocus />
+          <div className="entry-suggest-wrap">
+            <input ref={noteRef} className="multi-note" aria-label="What was it for?" placeholder={draft.kind === "income" ? "Where did it come from?" : "What was it for?"} value={draft.note} autoComplete="off" onFocus={() => setSuggestOpen(true)} onBlur={() => setSuggestOpen(false)} onChange={(event) => { setSuggestOpen(true); changeDraftNote(event.target.value); }} autoFocus />
+            <EntrySuggestions suggestions={suggestions} customCategories={customCategories} accountText={(entry) => paymentLabel(entry, paymentAccounts)} onPick={pickSuggestion} />
+          </div>
           <input ref={amountRef} className="multi-amount-input" aria-label="Amount" inputMode="decimal" placeholder="0" value={draft.amount} onChange={(event) => setDraft((current) => ({ ...current, amount: event.target.value.replace(/[^\d.,]/g, "") }))} />
           <button type="submit" className="multi-add" aria-label="Add to list" disabled={!rowAmountValid(draft)}><Plus size={18} weight="bold" /></button>
         </div>
         <div className="multi-strip" role="group" aria-label="Category">
           {quick.map((category) => <button type="button" key={category.id} aria-pressed={draft.category === category.id} className={draft.category === category.id ? "multi-chip on" : "multi-chip"} onClick={() => setDraft((current) => ({ ...current, category: category.id, subcategory: current.category === category.id ? current.subcategory : "", categoryChosen: true }))}><CategoryIcon category={category.id} icon={category.icon} size={15} />{draft.category === category.id && draft.subcategory ? `${category.label} · ${draft.subcategory}` : category.label}</button>)}
           <button type="button" className="multi-chip is-all" onClick={() => openPicker(draft)}><SquaresFour size={15} />All categories</button>
+        </div>
+        <div className="multi-place">
+          <button type="button" className={draft.location ? "multi-option on" : "multi-option"} onClick={() => setMapFor(draft.id)}><MapPin size={15} weight={draft.location ? "fill" : "regular"} />{draft.location ? draft.location.label : "Add place on map"}</button>
+          {draft.location && <button type="button" className="multi-remove" onClick={() => setLocation(draft.id, null)}>Remove place</button>}
         </div>
         <p className="multi-hint">Type what it was and the amount, then press Enter. Tap a line to edit it, or its pill to switch between expense and income.</p>
       </form>
@@ -230,6 +255,7 @@ export function AddMultiplePage({ currency, calendarSystem, transactions, custom
         <button type="button" className="primary-button" disabled={!summary.ready || saving} onClick={() => void save()}>{saving ? <ButtonSpinner /> : null}Save {summary.count || ""}</button>
       </div>
     </section>
+    <LocationPicker open={mapFor !== null} value={mapTarget?.location ?? null} recentLocations={recentLocations} savedPlaces={savedPlaces} onClose={() => setMapFor(null)} onSelect={(location) => { if (mapFor) setLocation(mapFor, location); setMapFor(null); }} />
     <CategoryPickerSheet value={picking?.value ?? null} customCategories={customCategories} customSubcategories={customSubcategories} onPick={applyPick} onClose={() => setPicking(null)} />
   </div>;
 }
