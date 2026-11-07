@@ -22,10 +22,12 @@ interface AnimatedOverlayProps {
   dismissOnBackdrop?: boolean;
   onClose?: () => void | Promise<void>;
   onExited?: () => void;
+  /** Close this overlay when a page change starts from inside it (navigateFromOverlay), instead of staying open. */
+  leaveOnNavigate?: boolean;
 }
 
 /** Keeps custom dialogs mounted long enough for their exit motion to finish. */
-export function AnimatedOverlay({ open, children, className, dismissOnBackdrop = false, onClose, onExited }: AnimatedOverlayProps) {
+export function AnimatedOverlay({ open, children, className, dismissOnBackdrop = false, onClose, onExited, leaveOnNavigate = false }: AnimatedOverlayProps) {
   const [mounted, setMounted] = useState(open);
   const [phase, setPhase] = useState<"pre" | "open" | "closing">("pre");
   const exitFinished = useRef(false);
@@ -39,7 +41,7 @@ export function AnimatedOverlay({ open, children, className, dismissOnBackdrop =
   useBackToClose(open && Boolean(onClose), useCallback(() => {
     if (containerRef.current?.querySelector('[aria-busy="true"]')) return;
     void onCloseRef.current?.();
-  }, []), { leaveOnNavigate: false });
+  }, []), { leaveOnNavigate });
 
   useEffect(() => {
     const container = containerRef.current;

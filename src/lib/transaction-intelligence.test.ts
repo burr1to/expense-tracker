@@ -40,4 +40,12 @@ describe("transaction intelligence", () => {
     const result = parseVoiceTransaction("Expense four hundred fifty food at Thamel via eSewa yesterday", CATEGORIES, [account], new Date("2026-08-11T08:00:00Z"));
     expect(result).toMatchObject({ amount: "450", kind: "expense", category: "food", area: "Thamel", paymentMode: "online", paymentAccountId: "p1", occurredOn: "2026-08-10" });
   });
+
+  it.each([
+    "I spent four hundred fifty on food today",
+    "I paid four hundred and fifty rupees for food today",
+    "For food I spent four hundred fifty rupees today",
+  ])("finds a spoken amount in a natural sentence: %s", (transcript) => {
+    expect(parseVoiceTransaction(transcript, CATEGORIES, [])).toMatchObject({ amount: "450", kind: "expense", category: "food" });
+  });
 });

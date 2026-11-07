@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
     accountReconciliation: { deleteMany: deleteMany(), createMany: createMany() },
     accountTransfer: { deleteMany: deleteMany(), createMany: createMany() },
     transaction: { deleteMany: deleteMany(), createMany: createMany() },
+    transactionGroup: { deleteMany: deleteMany(), createMany: createMany() },
     receiptScan: { deleteMany: deleteMany(), createMany: createMany() },
     budget: { deleteMany: deleteMany(), createMany: createMany() },
     recurringEntry: { deleteMany: deleteMany(), createMany: createMany() },
@@ -30,6 +31,7 @@ const mocks = vi.hoisted(() => {
     paymentAccount: { findMany: vi.fn() },
     accountReconciliation: { findMany: vi.fn() },
     transaction: { findMany: vi.fn() },
+    transactionGroup: { findMany: vi.fn() },
     accountTransfer: { findMany: vi.fn() },
     budget: { findMany: vi.fn() },
     recurringEntry: { findMany: vi.fn() },
@@ -85,9 +87,13 @@ const accounts = [
   { id: "acct-2", importId: "22222222-2222-4222-8222-222222222222", userId: "user-1", type: "cash", provider: "Cash in hand", label: "", accountTail: null, shared: false, balanceMinor: 5_000, balanceAsOf: day("2026-09-01"), balanceRecordedAt: at("2026-09-01T07:00:00.000Z"), ...stamp },
 ];
 const reconciliations = [{ id: "rec-1", userId: "user-1", paymentAccountId: "acct-1", monthKey: "2026-09", checkedOn: day("2026-09-30"), startingBalanceMinor: 100_000, startingBalanceAsOf: day("2026-08-31"), incomeMinor: 50_000, expenseMinor: 25_000, transfersInMinor: 1_000, transfersOutMinor: 1_000, expectedBalanceMinor: 125_000, actualBalanceMinor: 124_000, adjustmentMinor: -1_000, adjustmentNote: "Fee", approvedAt: at("2026-10-01T03:00:00.000Z"), createdAt: at("2026-10-01T03:00:00.000Z") }];
+const groups = [
+  { id: "group-1", userId: "user-1", name: "Pokhara trip", icon: "mountain", startOn: day("2026-09-04"), endOn: day("2026-09-08"), note: "With college friends", ...stamp },
+  { id: "group-2", userId: "user-1", name: "Sita's wedding", icon: "wedding", startOn: null, endOn: null, note: "", ...stamp },
+];
 const transactions = [
-  { id: "tx-1", userId: "user-1", kind: "expense", category: "cat-1", amountMinor: 75_000, occurredOn: day("2026-09-05"), note: "Lunch, \"team\"", subcategory: "Mutual funds", area: "Thamel", paymentMode: "online", paymentAccountId: "acct-1", locationLabel: "Office", locationAddress: "Thamel", locationLatitude: 27.715, locationLongitude: 85.312, locationAccuracy: 25, locationSource: "saved", savedPlaceId: "place-1", receiptScanId: "scan-1", importJobId: null, shared: true, clientRequestId: "7f9c2d1e-1111-4000-8000-000000000000", deletedAt: null, ...stamp },
-  { id: "tx-2", userId: "user-1", kind: "expense", category: "loan", amountMinor: 500_000, occurredOn: day("2026-09-06"), note: "Lent to Ram · Bike repair", subcategory: "Lent", area: null, paymentMode: "cash", paymentAccountId: null, locationLabel: null, locationAddress: null, locationLatitude: null, locationLongitude: null, locationAccuracy: null, locationSource: null, savedPlaceId: null, receiptScanId: null, importJobId: null, shared: false, clientRequestId: "due-open:due-1", deletedAt: null, ...stamp },
+  { id: "tx-1", userId: "user-1", kind: "expense", category: "cat-1", amountMinor: 75_000, occurredOn: day("2026-09-05"), note: "Lunch, \"team\"", subcategory: "Mutual funds", area: "Thamel", paymentMode: "online", paymentAccountId: "acct-1", locationLabel: "Office", locationAddress: "Thamel", locationLatitude: 27.715, locationLongitude: 85.312, locationAccuracy: 25, locationSource: "saved", savedPlaceId: "place-1", receiptScanId: "scan-1", groupId: "group-1", importJobId: null, shared: true, clientRequestId: "7f9c2d1e-1111-4000-8000-000000000000", deletedAt: null, ...stamp },
+  { id: "tx-2", userId: "user-1", kind: "expense", category: "loan", amountMinor: 500_000, occurredOn: day("2026-09-06"), note: "Lent to Ram · Bike repair", subcategory: "Lent", area: null, paymentMode: "cash", paymentAccountId: null, locationLabel: null, locationAddress: null, locationLatitude: null, locationLongitude: null, locationAccuracy: null, locationSource: null, savedPlaceId: null, receiptScanId: null, groupId: null, importJobId: null, shared: false, clientRequestId: "due-open:due-1", deletedAt: null, ...stamp },
 ];
 const transfers = [{ id: "tr-1", userId: "user-1", fromAccountId: "acct-1", toAccountId: "acct-2", amountMinor: 1_000, occurredOn: day("2026-09-07"), note: "ATM", clientRequestId: "a-transfer-request", createdAt: stamp.createdAt }];
 const budgets = [
@@ -97,8 +103,8 @@ const budgets = [
 const recurring = [{ id: "recurring-1", userId: "user-1", kind: "expense", category: "cat-1", amountMinor: 2_000_000, paymentAccountId: "acct-1", note: "Rent", tags: ["home"], dayOfMonth: 5, recurrenceUnit: "month", recurrenceInterval: 1, anchorDate: day("2026-09-05"), nextDueOn: day("2026-10-05"), active: true, ...stamp }];
 const contributions = [{ id: "contribution-1", userId: "user-1", goalId: "goal-1", amountMinor: 10_000, isOpeningBalance: true, createdAt: stamp.createdAt }];
 const goals = [{ id: "goal-1", userId: "user-1", name: "Laptop", targetMinor: 15_000_000, savedMinor: 10_000, targetDate: day("2027-03-01"), ...stamp, contributions }];
-const payments = [{ id: "pay-1", userId: "user-1", dueItemId: "due-1", amountMinor: 100_000, occurredOn: day("2026-09-20"), note: "First part", transactionId: "tx-2", clientRequestId: "a-payment-request", createdAt: stamp.createdAt }];
-const dues = [{ id: "due-1", userId: "user-1", kind: "lent", title: "Bike repair", person: "Ram", amountMinor: 500_000, category: "loan", occurredOn: day("2026-09-06"), dueOn: day("2026-10-06"), remindOn: day("2026-10-04"), snoozedUntil: day("2026-10-05"), note: "Pay back after Dashain", status: "open", annualRatePercent: 12.5, completedOn: null, ...stamp, payments }];
+const payments = [{ id: "pay-1", userId: "user-1", dueItemId: "due-1", amountMinor: 100_000, occurredOn: day("2026-09-20"), note: "First part", transactionId: "tx-2", linked: false, linkedRestoreCategory: null, linkedRestoreSubcategory: null, clientRequestId: "a-payment-request", createdAt: stamp.createdAt }];
+const dues = [{ id: "due-1", userId: "user-1", kind: "lent", title: "Bike repair", person: "Ram", amountMinor: 500_000, category: "loan", occurredOn: day("2026-09-06"), dueOn: day("2026-10-06"), remindOn: day("2026-10-04"), snoozedUntil: day("2026-10-05"), note: "Pay back after Dashain", status: "open", annualRatePercent: 12.5, completedOn: null, linkedTransactionId: "tx-1", linkedRestoreCategory: "cat-1", linkedRestoreSubcategory: "Mutual funds", ...stamp, payments }];
 const receipts = [{ id: "receipt-1", userId: "user-1", transactionId: null, dueItemId: "due-1", name: "bill.png", mimeType: "image/png", size: 2, storagePath: "user-1/old-bill.png", data: null, createdAt: stamp.createdAt }];
 const receiptScans = [{ id: "scan-1", userId: "user-1", name: "camera.jpg", mimeType: "image/jpeg", size: 2, storagePath: "user-1/old-scan.jpg", createdAt: stamp.createdAt }];
 
@@ -130,6 +136,7 @@ beforeEach(() => {
   mocks.db.paymentAccount.findMany.mockResolvedValue(accounts);
   mocks.db.accountReconciliation.findMany.mockResolvedValue(reconciliations);
   mocks.db.transaction.findMany.mockResolvedValue(transactions);
+  mocks.db.transactionGroup.findMany.mockResolvedValue(groups);
   mocks.db.accountTransfer.findMany.mockResolvedValue(transfers);
   mocks.db.budget.findMany.mockResolvedValue(budgets);
   mocks.db.recurringEntry.findMany.mockResolvedValue(recurring);
@@ -165,6 +172,7 @@ describe("full backup round trip", () => {
     const place = idMap(places, restored(tx.savedPlace));
     const scan = idMap(receiptScans, restored(tx.receiptScan));
     const transaction = idMap(transactions, restored(tx.transaction));
+    const group = idMap(groups, restored(tx.transactionGroup));
     const goal = idMap(goals, restored(tx.savingsGoal));
     const due = idMap(dues, restored(tx.dueItem));
 
@@ -174,7 +182,8 @@ describe("full backup round trip", () => {
     expectSurvives("payment_account", accounts, restored(tx.paymentAccount));
     expectSurvives("account_reconciliation", reconciliations, restored(tx.accountReconciliation), { paymentAccountId: account });
     // The loan's opening movement must still point at its due, whose id changed.
-    expectSurvives("transaction", transactions, restored(tx.transaction), { category, paymentAccountId: account, savedPlaceId: place, receiptScanId: scan, clientRequestId: new Map([["due-open:due-1", `due-open:${due.get("due-1")}`]]) }, ["importJobId", "deletedAt"]);
+    expectSurvives("transaction_group", groups, restored(tx.transactionGroup));
+    expectSurvives("transaction", transactions, restored(tx.transaction), { category, paymentAccountId: account, savedPlaceId: place, receiptScanId: scan, groupId: group, clientRequestId: new Map([["due-open:due-1", `due-open:${due.get("due-1")}`]]) }, ["importJobId", "deletedAt"]);
     expect(restored(tx.transaction)[1].clientRequestId).toMatch(/^due-open:(?!due-1$)/);
     // Transfer and repayment request ids only dedupe a retry of the original save; a backup leaves them out.
     expectSurvives("account_transfer", transfers, restored(tx.accountTransfer), { fromAccountId: account, toAccountId: account }, ["clientRequestId"]);
@@ -182,7 +191,7 @@ describe("full backup round trip", () => {
     expectSurvives("recurring_entry", recurring, restored(tx.recurringEntry), { category, paymentAccountId: account });
     expectSurvives("savings_goal", goals, restored(tx.savingsGoal));
     expectSurvives("savings_goal_contribution", contributions, restored(tx.savingsGoalContribution), { goalId: goal });
-    expectSurvives("due_item", dues, restored(tx.dueItem), { category });
+    expectSurvives("due_item", dues, restored(tx.dueItem), { category, linkedRestoreCategory: category, linkedTransactionId: transaction });
     expectSurvives("due_payment", payments, restored(tx.duePayment), { dueItemId: due, transactionId: transaction }, ["clientRequestId"]);
     expectSurvives("receipt", receipts, restored(tx.receiptAttachment), { dueItemId: due, transactionId: transaction }, ["storagePath"]);
     expectSurvives("receipt_scan", receiptScans, restored(tx.receiptScan), {}, ["storagePath"]);
@@ -193,7 +202,8 @@ describe("full backup round trip", () => {
   it("restores an older backup without the newer settings and keeps the current ones", async () => {
     mocks.db.user.findUniqueOrThrow.mockResolvedValue({ name: "Asha", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, learningProfile: null });
     mocks.db.dueItem.findMany.mockResolvedValue(dues.map((item) => ({ ...item, annualRatePercent: undefined, payments: [] })));
-    mocks.db.transaction.findMany.mockResolvedValue(transactions.map((item) => ({ ...item, clientRequestId: undefined })));
+    mocks.db.transaction.findMany.mockResolvedValue(transactions.map((item) => ({ ...item, clientRequestId: undefined, groupId: undefined })));
+    mocks.db.transactionGroup.findMany.mockResolvedValue([]);
 
     const { response } = await exportThenRestore();
 
@@ -201,6 +211,7 @@ describe("full backup round trip", () => {
     expect(mocks.tx.user.update).toHaveBeenCalledWith({ where: { id: "user-1" }, data: { name: "Asha", currency: "NPR", hideAmounts: false, autoLockMinutes: 0 } });
     expect(restored(mocks.tx.dueItem)[0].annualRatePercent).toBeNull();
     expect(restored(mocks.tx.transaction).map((row) => row.clientRequestId)).toEqual([null, null]);
+    expect(restored(mocks.tx.transaction).map((row) => row.groupId)).toEqual([null, null]);
   });
 
   it("explains a database failure without echoing it, and changes nothing", async () => {

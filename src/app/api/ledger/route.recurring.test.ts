@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => {
     accountReconciliation: { findMany: vi.fn() },
     savedPlace: { findMany: vi.fn() },
     accountTransfer: { findMany: vi.fn() },
+    transactionGroup: { findMany: vi.fn(async () => []), findFirst: vi.fn(async () => null) },
     dueItem: { findMany: vi.fn() },
     householdMember: { findFirst: vi.fn(async () => null) },
     $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
@@ -66,7 +67,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-07T06:00:00.000Z"));
   mocks.db.user.findUniqueOrThrow.mockResolvedValue({ id: "user-1", name: "Test User", email: "test@example.com", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, calendarSystem: "AD", safeToSpendBufferMinor: 0, emailReminders: false, browserReminders: false, learningProfile: null, householdMembership: null, pinHash: null });
-  for (const table of [mocks.db.transaction, mocks.db.budget, mocks.db.recurringEntry, mocks.db.savingsGoal, mocks.db.customCategory, mocks.db.customSubcategory, mocks.db.paymentAccount, mocks.db.accountReconciliation, mocks.db.savedPlace, mocks.db.accountTransfer, mocks.db.dueItem]) table.findMany.mockResolvedValue([]);
+  for (const table of [mocks.db.transaction, mocks.db.budget, mocks.db.recurringEntry, mocks.db.savingsGoal, mocks.db.customCategory, mocks.db.customSubcategory, mocks.db.paymentAccount, mocks.db.accountReconciliation, mocks.db.savedPlace, mocks.db.accountTransfer, mocks.db.dueItem, mocks.db.transactionGroup]) table.findMany.mockResolvedValue([]);
   mocks.db.$transaction.mockImplementation(async (callback) => callback(mocks.tx));
   mocks.tx.recurringEntry.updateMany.mockResolvedValue({ count: 1 });
   mocks.tx.transaction.create.mockResolvedValue({ id: "transaction-9" });

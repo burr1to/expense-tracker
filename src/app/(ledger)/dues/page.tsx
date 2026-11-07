@@ -26,5 +26,7 @@ export default function DuesRoute() {
     onSplitBill={() => openSplitBill()}
     focusedId={searchParams.get("due")}
     focusedAction={searchParams.get("action") === "repay" ? "repay" : null}
+    ownerId={ownerId}
+    startFromTransactionId={searchParams.get("link")}
   />;
 }

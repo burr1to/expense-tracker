@@ -1,7 +1,7 @@
 import { ArrowCounterClockwise, ChartPieSlice, CheckCircle, Calculator, CreditCard, HandCoins, MapTrifold, Plus, ShieldCheck, SlidersHorizontal, Target, Trash, WarningCircle } from "@phosphor-icons/react";
 import { Checkbox, NumberInput, Select, Slider, TextInput } from "@mantine/core";
 import { addMonths, format, parseISO } from "date-fns";
-import { useContext, useRef, useState } from "react";
+import { useContext, useRef, useState, type CSSProperties } from "react";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { LedgerDatePickerInput as DatePickerInput } from "../components/LedgerDatePickerInput";
@@ -58,34 +58,40 @@ const percentageValue = (value: string) => {
   const parsed = Number(value.replace(/,/g, ""));
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 };
-const toolItems: { id: CalculatorTool; label: string; description: string; icon: typeof Calculator }[] = [
-  { id: "split", label: "Split amount", description: "Allocate by percentage", icon: Calculator },
-  { id: "goal-pace", label: "Goal pace", description: "Find your monthly target", icon: Target },
-  { id: "budgets", label: "Smart budgets", description: "Use your spending history", icon: ChartPieSlice },
-  { id: "what-if", label: "What if", description: "Test a spending change", icon: SlidersHorizontal },
-  { id: "debt", label: "Debt payoff", description: "Estimate time and interest", icon: CreditCard },
-  { id: "trip", label: "Trip / event", description: "Plan a shared budget", icon: MapTrifold },
-  { id: "runway", label: "Emergency fund", description: "Measure your runway", icon: ShieldCheck },
-  { id: "bills", label: "Split a bill", description: "Divide a bill fairly", icon: HandCoins },
+const toolItems: { id: CalculatorTool; label: string; description: string; icon: typeof Calculator; bg: string; ink: string }[] = [
+  { id: "split", label: "Split an amount", description: "Give every rupee a job", icon: Calculator, bg: "#d6f0df", ink: "#1f7a45" },
+  { id: "goal-pace", label: "Goal pace", description: "How much a month?", icon: Target, bg: "#fbe0ec", ink: "#b0386a" },
+  { id: "budgets", label: "Smart budgets", description: "From your history", icon: ChartPieSlice, bg: "#dfe6fb", ink: "#3446a8" },
+  { id: "what-if", label: "What if", description: "Try a spending change", icon: SlidersHorizontal, bg: "#ece2f8", ink: "#5c2d91" },
+  { id: "debt", label: "Debt payoff", description: "Time and interest", icon: CreditCard, bg: "#fde0e0", ink: "#b23a3a" },
+  { id: "trip", label: "Trip or event", description: "A shared budget", icon: MapTrifold, bg: "#d8f1f3", ink: "#11707a" },
+  { id: "runway", label: "Emergency fund", description: "How long you'd last", icon: ShieldCheck, bg: "#fdf0c4", ink: "#8a5a00" },
+  { id: "bills", label: "Split a bill", description: "Who owes what", icon: HandCoins, bg: "#fde5d4", ink: "#b4531f" },
 ];
 
 export function CalculatorPage({ currency, period: month, transactions, customCategories, goals = [], onSaveGoal, onSaveBudgets }: CalculatorPageProps) {
   const [tool, setTool] = useState<CalculatorTool>("split");
-  return <div className="page calculator-page">
-    <header className="page-header calculator-main-header">
-      <div><span className="eyebrow">Decision tools for your money</span><h1>Calculator</h1><p>Turn an amount, a goal, or a bill into a clear next step.</p></div>
+  const current = toolItems.find((item) => item.id === tool) ?? toolItems[0];
+  return <div className="v2-page v2-calc">
+    <header className="v2-page-head">
+      <div><span className="v2-eyebrow">Hisab before you spend</span><h1>Calculator</h1></div>
     </header>
-    <nav className="calculator-tool-tabs" aria-label="Calculator tools">
-      {toolItems.map(({ id, label, description, icon: Icon }) => <button type="button" key={id} className={tool === id ? "active" : ""} onClick={() => setTool(id)} aria-pressed={tool === id}><Icon size={17} /><span><strong>{label}</strong><small>{description}</small></span></button>)}
+    <nav className="v2-calc-tools" aria-label="Calculator tools">
+      {toolItems.map(({ id, label, description, icon: Icon, bg, ink }) => <button type="button" key={id} className={tool === id ? "active" : undefined} onClick={() => setTool(id)} aria-pressed={tool === id}>
+        <span className="v2-tile" style={{ "--tile-bg": bg, "--tile-ink": ink, "--tile-size": "38px" } as CSSProperties} aria-hidden="true"><Icon size={20} weight="duotone" /></span>
+        <span><strong>{label}</strong><small>{description}</small></span>
+      </button>)}
     </nav>
-    {tool === "split" && <SplitCalculator currency={currency} onSaveGoal={onSaveGoal} />}
-    {tool === "goal-pace" && <GoalPaceCalculator currency={currency} onSaveGoal={onSaveGoal} />}
-    {tool === "budgets" && <SmartBudgetCalculator currency={currency} month={month} transactions={transactions} customCategories={customCategories} onSaveBudgets={onSaveBudgets} />}
-    {tool === "what-if" && <WhatIfCalculator currency={currency} transactions={transactions} customCategories={customCategories} goals={goals} />}
-    {tool === "debt" && <DebtCalculator currency={currency} />}
-    {tool === "trip" && <TripCalculator currency={currency} onSaveGoal={onSaveGoal} />}
-    {tool === "runway" && <EmergencyFundCalculator currency={currency} onSaveGoal={onSaveGoal} />}
-    {tool === "bills" && <BillSplitCalculator currency={currency} />}
+    <div className="v2-calc-body" style={{ "--calc-ink": current.ink, "--calc-bg": current.bg } as CSSProperties}>
+      {tool === "split" && <SplitCalculator currency={currency} onSaveGoal={onSaveGoal} />}
+      {tool === "goal-pace" && <GoalPaceCalculator currency={currency} onSaveGoal={onSaveGoal} />}
+      {tool === "budgets" && <SmartBudgetCalculator currency={currency} month={month} transactions={transactions} customCategories={customCategories} onSaveBudgets={onSaveBudgets} />}
+      {tool === "what-if" && <WhatIfCalculator currency={currency} transactions={transactions} customCategories={customCategories} goals={goals} />}
+      {tool === "debt" && <DebtCalculator currency={currency} />}
+      {tool === "trip" && <TripCalculator currency={currency} onSaveGoal={onSaveGoal} />}
+      {tool === "runway" && <EmergencyFundCalculator currency={currency} onSaveGoal={onSaveGoal} />}
+      {tool === "bills" && <BillSplitCalculator currency={currency} />}
+    </div>
   </div>;
 }
 
@@ -137,13 +143,13 @@ function SplitCalculator({ currency, onSaveGoal }: { currency: CurrencyCode; onS
     <article className="calculator-editor">
       <ToolHeading step="1. Start with an amount" title="How much are you planning?" description="Every row updates instantly as you change the total or percentage." />
       <NumberInput label={`Amount in ${currency}`} value={total} onChange={(value) => { setTotal(String(value)); setSuccess(null); }} placeholder="100,000" min={0} thousandSeparator="," decimalScale={2} className="calculator-total-input" />
-      <div className="calculator-section-heading calculator-split-heading"><div><span className="section-label">2. Set the split</span><h2>Give every rupee a job</h2></div><button type="button" className="secondary-button small" onClick={addRow}><Plus size={15} />Add row</button></div>
+      <div className="calculator-section-heading calculator-split-heading"><div><span className="section-label">2. Set the split</span><h2>Give every rupee a job</h2></div><button type="button" className="v2-button is-small" onClick={addRow}><Plus size={15} />Add row</button></div>
       <div className="calculator-row-list">{rows.map((row, index) => <div className="calculator-row" key={row.id}>
         <span className="calculator-row-number">{String(index + 1).padStart(2, "0")}</span>
         <TextInput aria-label={`Row ${index + 1} name`} value={row.name} onChange={(event) => updateRow(row.id, { name: event.currentTarget.value })} placeholder="e.g. Rent" />
         <NumberInput aria-label={`${row.name || `Row ${index + 1}`} percentage`} value={row.percentage} onChange={(value) => updateRow(row.id, { percentage: String(value) })} min={0} max={100} decimalScale={2} rightSection={<span className="calculator-percent-suffix">%</span>} />
         <div className="calculator-row-result"><strong className="calculator-row-amount">{formatMoney(amounts[index] ?? 0, currency)}</strong><small>{percentages[index] ?? 0}%</small></div>
-        <button type="button" className="icon-button danger" disabled={rows.length === 1} onClick={() => removeRow(row.id)} aria-label={`Remove ${row.name || `row ${index + 1}`}`}><Trash size={16} /></button>
+        <button type="button" className="v2-icon-btn is-quiet" disabled={rows.length === 1} onClick={() => removeRow(row.id)} aria-label={`Remove ${row.name || `row ${index + 1}`}`}><Trash size={16} /></button>
         <div className="calculator-row-track" aria-hidden="true"><span style={{ width: `${Math.min(100, percentages[index] ?? 0)}%`, backgroundColor: ROW_COLORS[index % ROW_COLORS.length] }} /></div>
       </div>)}</div>
       <div className={`calculator-allocation-note ${percentagesOver ? "is-over" : ""}`} role="status">{percentagesOver ? <WarningCircle size={18} /> : <Target size={18} />}<span>{percentagesOver ? `Your rows are ${percentageTotal - 100}% over the total. Reduce a percentage to continue.` : remainderMinor > 0 ? `${percentageTotal}% is assigned. ${formatMoney(remainderMinor, currency)} stays unassigned for now.` : "The split is balanced. Every part of this amount has a job."}</span></div>
@@ -152,8 +158,8 @@ function SplitCalculator({ currency, onSaveGoal }: { currency: CurrencyCode; onS
       <TextInput label="Single goal name" value={goalName} onChange={(event) => setGoalName(event.currentTarget.value)} placeholder="My allocation" disabled={Boolean(creationMode)} />
       <DatePickerInput label="Target date" description="Optional — applies to every goal created here" value={targetDate || null} onChange={(value) => setTargetDate(value ?? "")} disabled={Boolean(creationMode)} clearable valueFormat="MMM D, YYYY" firstDayOfWeek={0} />
       <div className="calculator-goal-total"><span>One goal target</span><strong className="calculator-money">{formatMoney(totalMinor, currency)}</strong></div>
-      <button type="button" className="primary-button" disabled={!canCreateSingleGoal} onClick={() => void createGoals("single")}>{creationMode === "single" ? <><ButtonSpinner />Creating goal…</> : <><Target size={17} />Create one goal</>}</button>
-      <button type="button" className="secondary-button" disabled={!canCreateRowGoals} onClick={() => void createGoals("rows")}>{creationMode === "rows" ? <><ButtonSpinner />Creating goals…</> : <><CheckCircle size={17} />Create {activeRows.length || "row"} goal{activeRows.length === 1 ? "" : "s"}</>}</button>
+      <button type="button" className="v2-button is-primary" disabled={!canCreateSingleGoal} onClick={() => void createGoals("single")}>{creationMode === "single" ? <><ButtonSpinner />Creating goal…</> : <><Target size={17} />Create one goal</>}</button>
+      <button type="button" className="v2-button" disabled={!canCreateRowGoals} onClick={() => void createGoals("rows")}>{creationMode === "rows" ? <><ButtonSpinner />Creating goals…</> : <><CheckCircle size={17} />Create {activeRows.length || "row"} goal{activeRows.length === 1 ? "" : "s"}</>}</button>
     </div>{unnamedRows.length > 0 && !percentagesOver && <p className="calculator-helper-warning">Name every row with a percentage before creating one goal per row.</p>}<ToolMessage error={error} success={success} /></aside>
   </section>;
 }
@@ -183,7 +189,7 @@ function GoalPaceCalculator({ currency, onSaveGoal }: { currency: CurrencyCode; 
       <NumberInput label={`Target in ${currency}`} value={target} onChange={(value) => setTarget(String(value))} placeholder="300,000" min={0} thousandSeparator="," decimalScale={2} disabled={saving} />
       <NumberInput label={`Already saved in ${currency}`} value={saved} onChange={(value) => setSaved(String(value))} placeholder="0" min={0} thousandSeparator="," decimalScale={2} disabled={saving} />
       <DatePickerInput label="Target date" value={targetDate || null} onChange={(value) => setTargetDate(value ?? "")} minDate={new Date()} clearable disabled={saving} valueFormat="MMM D, YYYY" firstDayOfWeek={0} />
-    </div><div className="calculator-tool-actions"><button type="button" className="primary-button" disabled={!ready} onClick={() => void saveGoal()}>{saving ? <><ButtonSpinner />Creating goal…</> : <><Target size={17} />Create this goal</>}</button></div><ToolMessage error={error} success={success} /></article>
+    </div><div className="calculator-tool-actions"><button type="button" className="v2-button is-primary" disabled={!ready} onClick={() => void saveGoal()}>{saving ? <><ButtonSpinner />Creating goal…</> : <><Target size={17} />Create this goal</>}</button></div><ToolMessage error={error} success={success} /></article>
     <aside className="calculator-result-panel"><span className="section-label">Your pace</span><h2>{pace.isComplete ? "Already complete" : pace.isPastDue ? "Target date has passed" : targetDate ? `${pace.monthsRemaining} month${pace.monthsRemaining === 1 ? "" : "s"} to go` : "Choose a target date"}</h2><div className="calculator-stat-grid"><div className="calculator-stat"><span>Still needed</span><strong className="calculator-money">{formatMoney(pace.remainingMinor, currency)}</strong></div><div className="calculator-stat"><span>Monthly pace</span><strong className="calculator-money">{targetDate && !pace.isComplete ? formatMoney(pace.monthlyMinor, currency) : "—"}</strong></div><div className="calculator-stat"><span>Weekly pace</span><strong className="calculator-money">{targetDate && !pace.isComplete ? formatMoney(pace.weeklyMinor, currency) : "—"}</strong></div></div><p className="calculator-note">This is a planning estimate. Contributions still need to be added from Plans → Goals.</p></aside>
   </section>;
 }
@@ -216,7 +222,7 @@ function SmartBudgetCalculator({ currency, month, transactions, customCategories
     finally { setSaving(false); }
   };
   return <section className="calculator-tool-layout">
-    <article className="calculator-tool-panel"><ToolHeading step="Smart budgets" title="Let your history suggest a limit" description="Averages come from complete months only, so a half-finished month never drags a suggestion down. Untick or adjust any row before saving." /><Select label="Look back over" value={lookback} onChange={(value) => { if (value) { setLookback(value); setEdits({}); change(); } }} data={[{ value: "3", label: "3 months" }, { value: "6", label: "6 months" }, { value: "12", label: "12 months" }]} allowDeselect={false} disabled={saving} /><div className="calculator-tool-actions"><button type="button" className="primary-button" disabled={!chosen.length || saving} onClick={() => void saveBudgets()}>{saving ? <><ButtonSpinner />Saving budgets…</> : <><ChartPieSlice size={17} />Save {chosen.length || ""} {chosen.length === 1 ? "budget" : "budgets"} for {calendarFor(parseMonthKey(month).system).monthName(parseMonthKey(month).month)}</>}</button></div><ToolMessage error={error} success={success} /></article>
+    <article className="calculator-tool-panel"><ToolHeading step="Smart budgets" title="Let your history suggest a limit" description="Averages come from complete months only, so a half-finished month never drags a suggestion down. Untick or adjust any row before saving." /><Select label="Look back over" value={lookback} onChange={(value) => { if (value) { setLookback(value); setEdits({}); change(); } }} data={[{ value: "3", label: "3 months" }, { value: "6", label: "6 months" }, { value: "12", label: "12 months" }]} allowDeselect={false} disabled={saving} /><div className="calculator-tool-actions"><button type="button" className="v2-button is-primary" disabled={!chosen.length || saving} onClick={() => void saveBudgets()}>{saving ? <><ButtonSpinner />Saving budgets…</> : <><ChartPieSlice size={17} />Save {chosen.length || ""} {chosen.length === 1 ? "budget" : "budgets"} for {calendarFor(parseMonthKey(month).system).monthName(parseMonthKey(month).month)}</>}</button></div><ToolMessage error={error} success={success} /></article>
     <aside className="calculator-result-panel"><span className="section-label">Suggested budgets</span><h2>{rows.length ? `Based on ${basisLabel}` : "Not enough history yet"}</h2>{rows.length > 0 && basis.months < Number(lookback) && <p className="calculator-note smart-budget-basis">Only {basis.months} complete {basis.months === 1 ? "month" : "months"} of history so far, so each average covers {basis.months === 1 ? "that month" : "those months"}.</p>}{rows.length ? <div className="smart-budget-list">{rows.map((row) => <div className={`smart-budget-row${row.included ? "" : " is-off"}`} key={row.category}>
       <Checkbox checked={row.included} onChange={(event) => toggle(row.category, event.currentTarget.checked)} disabled={saving} aria-label={`Include ${row.label}`} />
       <div><strong>{row.label}</strong><small><span className="calculator-money">{formatMoney(row.averageMinor, currency)}</span> a month on average</small></div>
@@ -250,7 +256,7 @@ function WhatIfCalculator({ currency, transactions, customCategories, goals }: {
           <Slider value={changePercent} onChange={(value) => setChanges((current) => ({ ...current, [item.category]: value }))} min={-100} max={100} step={5} thumbLabel={`${label} change percentage`} label={(value) => `${value > 0 ? "+" : ""}${value}%`} marks={[{ value: -100 }, { value: 0 }, { value: 100 }]} />
         </div>;
       })}</div> : <p className="calculator-empty what-if-empty">No expense history in this period yet. Add a few expenses and your top categories will appear here as sliders.</p>}
-      <div className="calculator-tool-actions"><button type="button" className="secondary-button" disabled={!touched} onClick={() => setChanges({})}><ArrowCounterClockwise size={16} />Reset sliders</button></div>
+      <div className="calculator-tool-actions"><button type="button" className="v2-button" disabled={!touched} onClick={() => setChanges({})}><ArrowCounterClockwise size={16} />Reset sliders</button></div>
     </article>
     <aside className="calculator-result-panel">
       <span className="section-label">If nothing else changes{basedOnLabel ? ` · based on ${basedOnLabel}` : ""}</span>
@@ -308,7 +314,7 @@ function TripCalculator({ currency, onSaveGoal }: { currency: CurrencyCode; onSa
     finally { setSaving(false); }
   };
   return <section className="calculator-tool-layout">
-    <article className="calculator-tool-panel"><ToolHeading step="Trip or event" title="Plan the whole experience" description="Add a buffer, see the per-person cost, and optionally turn the total into a goal." /><div className="calculator-form-grid"><TextInput label="Trip or event name" value={name} onChange={(event) => setName(event.currentTarget.value)} placeholder="Pokhara weekend" disabled={saving} /><NumberInput label={`Base budget in ${currency}`} value={budget} onChange={(value) => setBudget(String(value))} placeholder="60,000" min={0} thousandSeparator="," decimalScale={2} disabled={saving} /><NumberInput label="People" value={people} onChange={(value) => setPeople(String(value))} min={1} step={1} decimalScale={0} disabled={saving} /><NumberInput label="Days" value={days} onChange={(value) => setDays(String(value))} min={1} step={1} decimalScale={0} disabled={saving} /><NumberInput label="Buffer" value={buffer} onChange={(value) => setBuffer(String(value))} min={0} max={100} decimalScale={2} rightSection={<span className="calculator-percent-suffix">%</span>} disabled={saving} /><DatePickerInput label="Target date" description="Optional" value={targetDate || null} onChange={(value) => setTargetDate(value ?? "")} clearable disabled={saving} valueFormat="MMM D, YYYY" firstDayOfWeek={0} /></div><div className="calculator-tool-actions"><button type="button" className="primary-button" disabled={!ready} onClick={() => void saveGoal()}>{saving ? <><ButtonSpinner />Creating goal…</> : <><MapTrifold size={17} />Create trip goal</>}</button></div><ToolMessage error={error} success={success} /></article>
+    <article className="calculator-tool-panel"><ToolHeading step="Trip or event" title="Plan the whole experience" description="Add a buffer, see the per-person cost, and optionally turn the total into a goal." /><div className="calculator-form-grid"><TextInput label="Trip or event name" value={name} onChange={(event) => setName(event.currentTarget.value)} placeholder="Pokhara weekend" disabled={saving} /><NumberInput label={`Base budget in ${currency}`} value={budget} onChange={(value) => setBudget(String(value))} placeholder="60,000" min={0} thousandSeparator="," decimalScale={2} disabled={saving} /><NumberInput label="People" value={people} onChange={(value) => setPeople(String(value))} min={1} step={1} decimalScale={0} disabled={saving} /><NumberInput label="Days" value={days} onChange={(value) => setDays(String(value))} min={1} step={1} decimalScale={0} disabled={saving} /><NumberInput label="Buffer" value={buffer} onChange={(value) => setBuffer(String(value))} min={0} max={100} decimalScale={2} rightSection={<span className="calculator-percent-suffix">%</span>} disabled={saving} /><DatePickerInput label="Target date" description="Optional" value={targetDate || null} onChange={(value) => setTargetDate(value ?? "")} clearable disabled={saving} valueFormat="MMM D, YYYY" firstDayOfWeek={0} /></div><div className="calculator-tool-actions"><button type="button" className="v2-button is-primary" disabled={!ready} onClick={() => void saveGoal()}>{saving ? <><ButtonSpinner />Creating goal…</> : <><MapTrifold size={17} />Create trip goal</>}</button></div><ToolMessage error={error} success={success} /></article>
     <aside className="calculator-result-panel"><span className="section-label">Trip snapshot</span><h2 className="calculator-money">{formatMoney(split.totalMinor, currency)}</h2><div className="calculator-stat-grid"><div className="calculator-stat"><span>Buffer</span><strong className="calculator-money">{formatMoney(split.tipMinor, currency)}</strong></div><div className="calculator-stat"><span>Per person</span><strong className="calculator-money">{formatMoney(perPersonMinor, currency)}</strong></div><div className="calculator-stat"><span>Per person / day</span><strong className="calculator-money">{formatMoney(perPersonPerDayMinor, currency)}</strong></div></div><p className="calculator-note">For category-by-category planning, use Split amount and name rows like travel, stay, food, and activities.</p></aside>
   </section>;
 }
@@ -332,7 +338,7 @@ function EmergencyFundCalculator({ currency, onSaveGoal }: { currency: CurrencyC
     finally { setSaving(false); }
   };
   return <section className="calculator-tool-layout">
-    <article className="calculator-tool-panel"><ToolHeading step="Emergency fund" title="How long could you breathe?" description="Measure how many months your current savings covers and what it takes to reach your safety target." /><div className="calculator-form-grid"><TextInput label="Goal name" value={name} onChange={(event) => setName(event.currentTarget.value)} placeholder="Emergency fund" disabled={saving} /><NumberInput label={`Current emergency savings in ${currency}`} value={savings} onChange={(value) => setSavings(String(value))} placeholder="150,000" min={0} thousandSeparator="," decimalScale={2} disabled={saving} /><NumberInput label={`Essential monthly expenses in ${currency}`} value={essentials} onChange={(value) => setEssentials(String(value))} placeholder="50,000" min={0} thousandSeparator="," decimalScale={2} disabled={saving} /><NumberInput label="Target coverage" value={targetMonths} onChange={(value) => setTargetMonths(String(value))} min={1} step={1} decimalScale={0} rightSection={<span className="calculator-percent-suffix">months</span>} disabled={saving} /></div><div className="calculator-tool-actions"><button type="button" className="primary-button" disabled={!ready} onClick={() => void saveGoal()}>{saving ? <><ButtonSpinner />Creating goal…</> : <><ShieldCheck size={17} />Create emergency-fund goal</>}</button></div><ToolMessage error={error} success={success} /></article>
+    <article className="calculator-tool-panel"><ToolHeading step="Emergency fund" title="How long could you breathe?" description="Measure how many months your current savings covers and what it takes to reach your safety target." /><div className="calculator-form-grid"><TextInput label="Goal name" value={name} onChange={(event) => setName(event.currentTarget.value)} placeholder="Emergency fund" disabled={saving} /><NumberInput label={`Current emergency savings in ${currency}`} value={savings} onChange={(value) => setSavings(String(value))} placeholder="150,000" min={0} thousandSeparator="," decimalScale={2} disabled={saving} /><NumberInput label={`Essential monthly expenses in ${currency}`} value={essentials} onChange={(value) => setEssentials(String(value))} placeholder="50,000" min={0} thousandSeparator="," decimalScale={2} disabled={saving} /><NumberInput label="Target coverage" value={targetMonths} onChange={(value) => setTargetMonths(String(value))} min={1} step={1} decimalScale={0} rightSection={<span className="calculator-percent-suffix">months</span>} disabled={saving} /></div><div className="calculator-tool-actions"><button type="button" className="v2-button is-primary" disabled={!ready} onClick={() => void saveGoal()}>{saving ? <><ButtonSpinner />Creating goal…</> : <><ShieldCheck size={17} />Create emergency-fund goal</>}</button></div><ToolMessage error={error} success={success} /></article>
     <aside className="calculator-result-panel"><span className="section-label">Your runway</span><h2>{result.coveredMonths === null ? "Enter essential expenses" : `${result.coveredMonths.toFixed(1)} months covered`}</h2><div className="calculator-stat-grid"><div className="calculator-stat"><span>Target fund</span><strong className="calculator-money">{formatMoney(result.targetMinor, currency)}</strong></div><div className="calculator-stat"><span>Still needed</span><strong className="calculator-money">{formatMoney(result.shortfallMinor, currency)}</strong></div><div className="calculator-stat"><span>Monthly contribution</span><strong className="calculator-money">{formatMoney(result.monthlyContributionMinor, currency)}</strong></div></div><p className="calculator-note">The target date for the goal is set {targetMonths || "0"} months from today; you can change it later in Plans.</p></aside>
   </section>;
 }
@@ -349,7 +355,7 @@ function BillSplitCalculator({ currency }: { currency: CurrencyCode }) {
   // The sheet counts me separately, so it gets one empty name per other person.
   const logSplit = () => workspace?.openSplitBill({ amount: minorToMajorInput(split.totalMinor), people: Array.from({ length: Math.max(1, split.sharesMinor.length - 1) }, () => "") });
   return <section className="calculator-tool-layout">
-    <article className="calculator-tool-panel"><ToolHeading step="Shared bill" title="Split it fairly" description="Add a bill, tip, and people. The final rupee is assigned so the shares always add up." /><div className="calculator-form-grid"><NumberInput label={`Bill subtotal in ${currency}`} value={subtotal} onChange={(value) => setSubtotal(String(value))} placeholder="3,500" min={0} thousandSeparator="," decimalScale={2} /><NumberInput label="Tip or service charge" value={tip} onChange={(value) => setTip(String(value))} min={0} max={100} decimalScale={2} rightSection={<span className="calculator-percent-suffix">%</span>} /><NumberInput label="People" value={people} onChange={(value) => setPeople(String(value))} min={1} step={1} decimalScale={0} /></div>{workspace && <div className="calculator-tool-actions"><button type="button" className="primary-button" disabled={split.totalMinor <= 0} onClick={logSplit}><HandCoins size={17} />Log this split</button></div>}</article>
+    <article className="calculator-tool-panel"><ToolHeading step="Shared bill" title="Split it fairly" description="Add a bill, tip, and people. The final rupee is assigned so the shares always add up." /><div className="calculator-form-grid"><NumberInput label={`Bill subtotal in ${currency}`} value={subtotal} onChange={(value) => setSubtotal(String(value))} placeholder="3,500" min={0} thousandSeparator="," decimalScale={2} /><NumberInput label="Tip or service charge" value={tip} onChange={(value) => setTip(String(value))} min={0} max={100} decimalScale={2} rightSection={<span className="calculator-percent-suffix">%</span>} /><NumberInput label="People" value={people} onChange={(value) => setPeople(String(value))} min={1} step={1} decimalScale={0} /></div>{workspace && <div className="calculator-tool-actions"><button type="button" className="v2-button is-primary" disabled={split.totalMinor <= 0} onClick={logSplit}><HandCoins size={17} />Log this split</button></div>}</article>
     <aside className="calculator-result-panel"><span className="section-label">Bill snapshot</span><h2 className="calculator-money">{formatMoney(split.totalMinor, currency)}</h2><div className="calculator-stat-grid"><div className="calculator-stat"><span>Tip / service</span><strong className="calculator-money">{formatMoney(split.tipMinor, currency)}</strong></div><div className="calculator-stat"><span>Even share</span><strong className="calculator-money">{formatMoney(smallerShare, currency)}</strong></div><div className="calculator-stat"><span>People paying one rupee more</span><strong>{largerShareCount ? `${largerShareCount} · ${formatMoney(largerShare, currency)}` : "Everyone equal"}</strong></div></div><p className="calculator-note">When the total cannot divide perfectly, only the first few shares carry the one-rupee rounding difference.</p></aside>
   </section>;
 }

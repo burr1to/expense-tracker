@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { batchRowToDraft, batchSummary, isBlankRow, newBatchRow, rowIssues, suggestFromHistory, type BatchDefaults } from "./batch-entry";
+import { batchRowToDraft, batchSummary, frequentCategories, isBlankRow, newBatchRow, rowIssues, suggestFromHistory, type BatchDefaults } from "./batch-entry";
 import type { LedgerTransaction } from "../types";
 
 const defaults: BatchDefaults = { kind: "expense", occurredOn: "2026-10-30", paymentMode: "cash", paymentAccountId: "" };
@@ -31,6 +31,7 @@ describe("batch rows", () => {
   it("turns a row into a draft that keeps its id for retry dedupe", () => {
     const row = newBatchRow(defaults, { note: " Taxi ", amount: "1,300", category: "transport", paymentMode: "cash", paymentAccountId: "stale" });
     expect(batchRowToDraft(row)).toMatchObject({ note: "Taxi", amount: "1300", paymentAccountId: "", clientRequestId: row.id, shared: false });
+    expect(batchRowToDraft({ ...row, subcategory: " Taxi / ride " }).subcategory).toBe("Taxi / ride");
   });
 });
 
@@ -44,5 +45,16 @@ describe("suggestFromHistory", () => {
     expect(suggestFromHistory(" tea ", "expense", history, "u1")?.category).toBe("shopping");
     expect(suggestFromHistory("tea", "income", history, "u1")).toBeNull();
     expect(suggestFromHistory("t", "expense", history, "u1")).toBeNull();
+  });
+
+  it("carries the subcategory of the matching entry", () => {
+    expect(suggestFromHistory("tea", "expense", [entry({ subcategory: "Cafe" })], "u1")?.subcategory).toBe("Cafe");
+  });
+});
+
+describe("frequentCategories", () => {
+  it("orders this owner's categories for a kind by how often they were used", () => {
+    const history = [entry({ category: "food" }), entry({ category: "transport" }), entry({ category: "transport" }), entry({ category: "salary", kind: "income" }), entry({ category: "health", userId: "u2" })];
+    expect(frequentCategories("expense", history, "u1")).toEqual(["transport", "food"]);
   });
 });

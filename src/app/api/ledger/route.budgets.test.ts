@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
     accountReconciliation: { findMany: vi.fn() },
     savedPlace: { findMany: vi.fn() },
     accountTransfer: { findMany: vi.fn() },
+    transactionGroup: { findMany: vi.fn(async () => []), findFirst: vi.fn(async () => null) },
     dueItem: { findMany: vi.fn() },
     householdMember: { findFirst: vi.fn(async () => null) },
     $transaction: vi.fn(async (callback: (client: { budget: typeof budgetTx }) => unknown) => callback({ budget: budgetTx })),
@@ -40,7 +41,7 @@ const action = (name: string, payload: unknown, id?: string) => new Request("htt
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.db.user.findUniqueOrThrow.mockResolvedValue({ id: "user-1", name: "Test User", email: "test@example.com", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, calendarSystem: "AD", safeToSpendBufferMinor: 0, emailReminders: false, browserReminders: false, learningProfile: null, householdMembership: null, pinHash: null });
-  for (const table of [mocks.db.transaction, mocks.db.budget, mocks.db.recurringEntry, mocks.db.savingsGoal, mocks.db.customCategory, mocks.db.customSubcategory, mocks.db.paymentAccount, mocks.db.accountReconciliation, mocks.db.savedPlace, mocks.db.accountTransfer, mocks.db.dueItem]) table.findMany.mockResolvedValue([]);
+  for (const table of [mocks.db.transaction, mocks.db.budget, mocks.db.recurringEntry, mocks.db.savingsGoal, mocks.db.customCategory, mocks.db.customSubcategory, mocks.db.paymentAccount, mocks.db.accountReconciliation, mocks.db.savedPlace, mocks.db.accountTransfer, mocks.db.dueItem, mocks.db.transactionGroup]) table.findMany.mockResolvedValue([]);
   mocks.budgetTx.findMany.mockResolvedValue([]);
   mocks.budgetTx.upsert.mockImplementation(async ({ create }: { create: Record<string, unknown> }) => ({ id: `budget-${String(create.category)}`, ...create }));
   mocks.db.$transaction.mockImplementation(async (callback) => callback({ budget: mocks.budgetTx }));

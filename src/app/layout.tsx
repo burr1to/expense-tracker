@@ -3,11 +3,15 @@ import "@mantine/core/styles.css";
 import "@mantine/dates/styles.css";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "@fontsource-variable/ibm-plex-sans";
+import "@fontsource/mukta/devanagari-800.css";
 import { MantineProvider, createTheme } from "@mantine/core";
 import type { Metadata, Viewport } from "next";
 import { AppProviders } from "../components/AppProviders";
 import { APP_THEME_COLOR } from "./icons/brand-art";
 import "../styles.css";
+import "../v2.css";
+import "../v2-pages-a.css";
+import "../v2-pages-b.css";
 
 const theme = createTheme({
   primaryColor: "ledgerGreen",

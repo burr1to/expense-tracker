@@ -48,6 +48,7 @@ model User {
   householdMembership HouseholdMember?
   activityLogs      ActivityLog[]
   aiUsage           AiUsage[]
+  transactionGroups TransactionGroup[]
 }
 
 model Household {
@@ -166,6 +167,7 @@ model Transaction {
   savedPlaceId      String?
   receiptScanId     String?
   importJobId       String?
+  groupId           String?
   shared            Boolean            @default(false)
   clientRequestId   String?
   deletedAt         DateTime?
@@ -177,6 +179,8 @@ model Transaction {
   receipt           ReceiptAttachment?
   receiptScan       ReceiptScan?       @relation(fields: [receiptScanId], references: [id], onDelete: SetNull)
   importJob         ImportJob?        @relation(fields: [importJobId], references: [id], onDelete: SetNull)
+  group             TransactionGroup?  @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  linkedDues        DueItem[]          @relation("DueLinkedTransaction")
 
   @@unique([userId, clientRequestId])
   @@index([userId, occurredOn])
@@ -185,6 +189,24 @@ model Transaction {
   @@index([savedPlaceId])
   @@index([receiptScanId])
   @@index([importJobId])
+  @@index([groupId])
+}
+
+/// A named set of transactions, such as a trip or an event. Removing a group keeps its transactions.
+model TransactionGroup {
+  id           String        @id @default(cuid())
+  userId       String
+  name         String
+  icon         String        @default("trip")
+  startOn      DateTime?     @db.Date
+  endOn        DateTime?     @db.Date
+  note         String        @default("")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([userId, createdAt])
 }
 
 /// Append-only record of what a user did. Written by the server after an action succeeds; never edited.
@@ -426,15 +448,22 @@ model DueItem {
   status       String             @default("open")
   annualRatePercent Float?
   completedOn  DateTime?          @db.Date
+  /// A loan's opening that is an entry already in the ledger rather than one this due wrote. Several dues may share one entry.
+  linkedTransactionId String?
+  /// What the linked entry was before the link turned it into a loan movement; null when the link left it as it was.
+  linkedRestoreCategory    String?
+  linkedRestoreSubcategory String?
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
   user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkedTransaction Transaction?  @relation("DueLinkedTransaction", fields: [linkedTransactionId], references: [id], onDelete: SetNull)
   payments     DuePayment[]
   receipt      ReceiptAttachment?
 
   @@index([userId, dueOn])
   @@index([userId, remindOn])
   @@index([userId, snoozedUntil])
+  @@index([linkedTransactionId])
 }
 
 model DuePayment {
@@ -445,6 +474,10 @@ model DuePayment {
   occurredOn    DateTime @db.Date
   note          String   @default("")
   transactionId String?
+  /// The entry was already in the ledger: undoing this payment unlinks it instead of removing it.
+  linked        Boolean  @default(false)
+  linkedRestoreCategory    String?
+  linkedRestoreSubcategory String?
   clientRequestId String?
   createdAt     DateTime @default(now())
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)

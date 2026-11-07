@@ -1,21 +1,33 @@
-import { ArrowCounterClockwise, ArrowsLeftRight, Bank, CalendarBlank, Check, CheckCircle, Copy, LockKey, PencilSimple, Plus, Receipt, Scales, ShieldCheck, Trash, TrendDown, TrendUp, UploadSimple } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, Bank, CalendarBlank, CaretDown, CaretLeft, ArrowsLeftRight, Check, CheckCircle, Copy, LockKey, PencilSimple, Plus, Scales, ShieldCheck, Trash } from "@phosphor-icons/react";
 import { Modal, NumberInput, Select, Switch, TextInput } from "@mantine/core";
 import Link from "next/link";
-import { useContext, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useContext, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { EntryRow } from "../components/V2Entries";
+import { AccountTile, CategoryTile } from "../components/ToneIcon";
+import { countsAsIncomeOrSpending, getCategory } from "../lib/categories";
+import { dayGroupLabel, groupLedgerActivityByDay, takeWholeDays } from "../lib/day-groups";
+import { activityKey, plainAmount } from "../lib/entry-labels";
+import { accountMonthDetail, CASH_BUCKET, compareMonthSpend, spendBucket, type AccountSpend } from "../lib/month-compare";
+import { addMonthsToKey, currentMonthKey, monthLabel, type PeriodKey } from "../lib/period";
+import { appRoutes } from "../lib/routes";
+import { accountLook, categoryTone } from "../lib/tones";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { EmptyState } from "../components/EmptyState";
-import { TransactionRow } from "../components/TransactionRow";
-import { TransferRow } from "../components/TransferRow";
 import { useLedger } from "../context/LedgerContext";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { accountActivityThrough, activityHasMovement, expectedAccountBalanceThrough, reconciliationSpendingGap, transactionPostsTo, transferRemovalEffects, type AccountActivity } from "../lib/account-balances";
 import { formatMoney, majorToMinor } from "../lib/currency";
-import { formatLedgerDate, todayInput } from "../lib/dates";
-import { listLedgerActivity, transferAccountLabel } from "../lib/transaction-history";
-import { isCashAccount, NEPAL_MOBILE_BANKS, normalizeAccountTail, PAYMENT_ACCOUNT_TYPES, paymentAccountLabel, paymentAccountProviderError, providerForAccountType } from "../lib/payment-accounts";
+import { formatLedgerDate, formatLedgerDay, formatLedgerMonth, todayInput } from "../lib/dates";
+import { listLedgerActivity } from "../lib/transaction-history";
+import { isCashAccount, NEPAL_MOBILE_BANKS, normalizeAccountTail, PAYMENT_ACCOUNT_TYPES, paymentAccountLabel, paymentAccountTypeLabel, paymentAccountProviderError, providerForAccountType } from "../lib/payment-accounts";
 import type { CurrencyCode, LedgerTransaction, PaymentAccount, PaymentAccountType } from "../types";
 import { FormError } from "../components/FormError";
-import { BalanceLocked, BalancePinHint, HiddenBalance } from "../components/BalancePrivacy";
+import { BalanceLocked, HiddenBalance } from "../components/BalancePrivacy";
+
+const monthName = (key: PeriodKey) => monthLabel(key).split(" ")[0];
+/** The bank or wallet behind an account: its provider for banks and "other", else the wallet's name. */
+const providerText = (account: PaymentAccount) => account.type === "mobile_banking" || account.type === "other" ? account.provider : paymentAccountTypeLabel(account.type);
 
 interface AccountsPageProps {
   onAdd: () => void;
@@ -43,7 +55,12 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
   const workspace = useContext(LedgerWorkspaceContext);
   // The same session unlock as the dashboard and Reports: no PIN shows balances, a PIN hides them until unlocked.
   const balancesShown = workspace ? workspace.balancesVisible : !profile.hasPin;
-  const [selectedAccountId, setSelectedAccountId] = useState(paymentAccounts[0]?.id ?? "");
+  const searchParams = useSearchParams();
+  // /accounts?account=<id> opens that one account; without it the page is the overview.
+  const detailId = searchParams.get("account");
+  const detailAccount = detailId ? paymentAccounts.find((account) => account.id === detailId) ?? null : null;
+  const [selectedAccountId, setSelectedAccountId] = useState(() => detailId && paymentAccounts.some((account) => account.id === detailId) ? detailId : paymentAccounts[0]?.id ?? "");
+  const [detailCount, setDetailCount] = useState(30);
   const [accountType, setAccountType] = useState<PaymentAccountType>("mobile_banking");
   const [accountProvider, setAccountProvider] = useState("");
   const [accountLabel, setAccountLabel] = useState("");
@@ -65,6 +82,21 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
   const hasCashAccount = ownAccounts.some(isCashAccount);
   const accountTypeOptions = PAYMENT_ACCOUNT_TYPES.map((item) => item.value === "cash" && hasCashAccount ? { ...item, label: "Cash in hand (already added)", disabled: true } : item);
   const today = todayInput();
+  const period = workspace?.period ?? currentMonthKey(profile.calendarSystem);
+  const overview = useMemo(() => compareMonthSpend(transactions, paymentAccounts, period, today), [transactions, paymentAccounts, period, today]);
+  // Each account's largest expense in the month so far, for the "Biggest" line on its card.
+  const biggestByBucket = useMemo(() => {
+    const biggest = new Map<string, LedgerTransaction>();
+    if (!overview.elapsedDays) return biggest;
+    for (const transaction of transactions) {
+      if (transaction.kind !== "expense" || !countsAsIncomeOrSpending(transaction) || transaction.occurredOn < overview.start || transaction.occurredOn > overview.through) continue;
+      const bucket = spendBucket(transaction, paymentAccounts);
+      const current = biggest.get(bucket);
+      if (!current || transaction.amountMinor > current.amountMinor) biggest.set(bucket, transaction);
+    }
+    return biggest;
+  }, [overview, paymentAccounts, transactions]);
+  const detail = useMemo(() => detailAccount ? accountMonthDetail(transactions, paymentAccounts, detailAccount.id, period, today) : null, [detailAccount, paymentAccounts, period, today, transactions]);
   const [reconciliationMonth, setReconciliationMonth] = useState(today.slice(0, 7));
   const [reconciliationCheckedOn, setReconciliationCheckedOn] = useState(today);
   const [reconciliationActual, setReconciliationActual] = useState("");
@@ -82,6 +114,13 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
     }
   }, [paymentAccounts, selectedAccountId]);
 
+  useEffect(() => {
+    if (detailAccount && detailAccount.id !== selectedAccountId) {
+      setSelectedAccountId(detailAccount.id);
+      setDetailCount(30);
+      setReconciliationActual(""); setReconciliationNote(""); setReconciliationError(null);
+    }
+  }, [detailAccount, selectedAccountId]);
   const selectedAccount = paymentAccounts.find((account) => account.id === selectedAccountId) ?? null;
 
   const copyImportId = async (importId: string) => {
@@ -105,8 +144,7 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
     }) : [],
     [accountTransactions, customCategories, paymentAccounts, selectedAccountId, selectedIsCash, today, transactions, transfers],
   );
-  const accountIncome = accountTransactions.reduce((sum, transaction) => sum + (transaction.kind === "income" ? transaction.amountMinor : 0), 0);
-  const accountExpenses = accountTransactions.reduce((sum, transaction) => sum + (transaction.kind === "expense" ? transaction.amountMinor : 0), 0);
+  const detailDays = useMemo(() => takeWholeDays(groupLedgerActivityByDay(accountEntries), detailCount), [accountEntries, detailCount]);
   const selectedReconciliations = reconciliations.filter((item) => item.paymentAccountId === selectedAccountId);
   const existingReconciliation = selectedReconciliations.find((item) => item.monthKey === reconciliationMonth) ?? null;
   const latestReconciliation = selectedReconciliations[0] ?? null;
@@ -297,28 +335,7 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
     }
   };
 
-  return <div className="page accounts-page">
-    <header className="page-header"><div><span className="eyebrow">Your money sources</span><h1>Accounts</h1><p>Manage tracked balances, move money between accounts, and review each account’s transactions.</p></div></header>
-
-    <section className="import-reconcile-note" aria-label="Import and reconciliation guidance">
-      <div><strong>Import history first, reconcile later</strong><p>CSV import adds past transactions. Reconciliation is a separate, optional check against the balance currently shown by your bank or wallet. You do not need to do both during setup.</p></div>
-      <Link className="secondary-button small" href="/transactions#import-csv"><UploadSimple size={16} />Import past history</Link>
-    </section>
-
-    <section className="accounts-overview" aria-label="Tracked accounts">
-      <div className="section-heading"><div><span className="section-label">Balances</span><h2>Tracked accounts</h2></div><Bank size={23} weight="duotone" /></div>
-      {paymentAccounts.length > 0 && (balancesShown ? !profile.hasPin && <BalancePinHint /> : <BalanceLocked title="Account balances are hidden" />)}
-      <div className="account-summary-grid">
-        {paymentAccounts.map((account) => <div key={account.id} className={selectedAccountId === account.id ? "account-summary-card active" : "account-summary-card"}>
-          <button type="button" className="account-summary-select" onClick={() => setSelectedAccountId(account.id)} aria-pressed={selectedAccountId === account.id}>
-            <span>{paymentAccountLabel(account)}</span><strong>{balancesShown ? formatMoney(account.currentBalanceMinor, profile.currency) : <HiddenBalance />}</strong><small>{isCashAccount(account) ? "Counted" : "Checked"} {formatLedgerDate(account.balanceAsOf, profile.calendarSystem)}{account.accountTail ? ` · ends ${account.accountTail}` : ""}</small>
-          </button>
-          {account.userId === profile.id && ownAccounts.length > 1 && workspace && <button type="button" className="text-button account-move-money" onClick={() => workspace.openTransfer({ fromAccountId: account.id })}><ArrowsLeftRight size={14} />Move money</button>}
-        </div>)}
-        {!paymentAccounts.length && <EmptyState title="No tracked accounts yet" message="Add a bank, a digital wallet or the cash in your wallet to start tracking balances and account activity." />}
-      </div>
-    </section>
-
+  const manageSection = <>
     <div className="accounts-management-grid">
       <section className="settings-panel" id="add-account"><div className="settings-title"><span className="settings-icon"><Bank size={23} /></span><div><h2>Add and manage accounts</h2><p>Enter the real balance currently shown by your bank or wallet. Create this account before importing its past online transactions.</p></div></div>
         {profile.hasPin ? <form className="settings-form" onSubmit={addPaymentAccount} aria-busy={accountAction === "add"}>
@@ -341,13 +358,11 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
         })}{!paymentAccounts.length && <p>No tracked accounts yet.</p>}</div>
       </section>
 
-      <section className="settings-panel"><div className="settings-title"><span className="settings-icon"><ArrowsLeftRight size={23} /></span><div><h2>Account movement</h2><p>Transfer money without counting it as income or spending.</p></div></div>
-        {ownAccounts.length < 2 ? <p className="plan-empty-copy">Add at least two of your own tracked accounts to record a transfer. Cash in hand counts as one, so an ATM withdrawal can move money from your bank into it.</p> : workspace && <button type="button" className="primary-button account-move-money-main" onClick={() => workspace.openTransfer()}><ArrowsLeftRight size={17} />Move money</button>}
-        <FormError message={transferError} />
-        <div className="transfer-list">{transfers.slice(0, 8).map((transfer) => { const from = paymentAccounts.find((account) => account.id === transfer.fromAccountId); const to = paymentAccounts.find((account) => account.id === transfer.toAccountId); const mine = transfer.userId === profile.id; return <div key={transfer.id} className="transfer-row"><span><strong>{from ? paymentAccountLabel(from) : "Removed account"} → {to ? paymentAccountLabel(to) : "Removed account"}</strong><small>{formatLedgerDate(transfer.occurredOn, profile.calendarSystem)}{transfer.note ? ` · ${transfer.note}` : ""}</small></span><div><strong>{formatMoney(transfer.amountMinor, profile.currency)}</strong>{mine && workspace && <button type="button" className="icon-button" disabled={Boolean(transferAction)} onClick={() => workspace.openTransfer({ transferId: transfer.id })} aria-label="Edit transfer"><PencilSimple size={16} /></button>}<button type="button" className="icon-button danger" disabled={Boolean(transferAction)} hidden={!mine} onClick={() => void removeTransfer(transfer.id)} aria-label="Delete transfer">{transferAction === transfer.id ? <ButtonSpinner /> : <Trash size={16} />}</button></div></div>; })}{!transfers.length && <p>No transfers recorded yet.</p>}</div>
-      </section>
+
     </div>
 
+  </>;
+  const reconciliationSection = <>
     <section className="account-reconciliation-section" aria-labelledby="account-reconciliation-title">
       <div className="section-heading reconciliation-heading">
         <div><span className="section-label">Optional account check</span><h2 id="account-reconciliation-title">Reconcile an account</h2><p>This compares one account with the balance shown by your bank or wallet, then locks the result. The month names the check. The figures run from the last confirmed balance through the date you check.</p></div>
@@ -357,7 +372,7 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
       {paymentAccounts.length > 0 && !balancesShown ? <BalanceLocked title="Reconciliation is hidden" detail="A reconciliation shows each account's expected and actual balance. Unlock balances with your ledger PIN to check one." /> : paymentAccounts.length > 0 ? <div className="reconciliation-layout">
         <article className="reconciliation-workspace">
           <div className="reconciliation-controls">
-            <Select label="Account" value={selectedAccountId} onChange={(value) => { setSelectedAccountId(value ?? ""); setReconciliationActual(""); setReconciliationNote(""); setReconciliationError(null); }} data={paymentAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))} allowDeselect={false} />
+            {!detailAccount && <Select label="Account" value={selectedAccountId} onChange={(value) => { setSelectedAccountId(value ?? ""); setReconciliationActual(""); setReconciliationNote(""); setReconciliationError(null); }} data={paymentAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))} allowDeselect={false} />}
             <TextInput label="Month" type="month" value={reconciliationMonth} max={today.slice(0, 7)} onChange={(event) => {
               const nextMonth = event.currentTarget.value;
               setReconciliationMonth(nextMonth);
@@ -438,11 +453,8 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
       </div> : <EmptyState title="Add an account before reconciling" message="Reconciliation compares one tracked bank or wallet at a time." />}
     </section>
 
-    <section className="account-transactions-panel">
-      <div className="account-transactions-heading"><div><span className="section-label">Account-wise transactions</span><h2>{selectedAccount ? paymentAccountLabel(selectedAccount) : "Choose an account"}</h2><p>{selectedIsCash ? "Your cash entries, plus money moved into or out of your cash. Income and expense totals stay all-time totals." : "Transactions paid through the selected account, plus transfers into or out of it. Income and expense totals stay all-time transaction totals."}</p></div>{paymentAccounts.length > 0 && <Select aria-label="Choose account" value={selectedAccountId} onChange={(value) => setSelectedAccountId(value ?? "")} data={paymentAccounts.map((account) => ({ value: account.id, label: paymentAccountLabel(account) }))} allowDeselect={false} />}</div>
-      {selectedAccount && <div className="account-transaction-kpis"><div><TrendUp size={18} /><span>All-time income<strong>{formatMoney(accountIncome, profile.currency)}</strong></span></div><div><TrendDown size={18} /><span>All-time expenses<strong>{formatMoney(accountExpenses, profile.currency)}</strong></span></div><div><Receipt size={18} /><span>Transactions<strong>{accountTransactions.length}</strong></span></div></div>}
-      <div className="account-transaction-list">{accountEntries.map((entry) => entry.type === "transaction" ? <TransactionRow key={`transaction-${entry.transaction.id}`} transaction={entry.transaction} currency={profile.currency} customCategories={customCategories} onEdit={onEdit} onDelete={onDelete} /> : <TransferRow key={`transfer-${entry.transfer.id}`} transfer={entry.transfer} fromLabel={transferAccountLabel(paymentAccounts, entry.transfer.fromAccountId)} toLabel={transferAccountLabel(paymentAccounts, entry.transfer.toAccountId)} currency={profile.currency} direction={entry.transfer.toAccountId === selectedAccountId ? "in" : "out"} onDelete={() => void removeTransfer(entry.transfer.id)} deletePending={transferAction === entry.transfer.id} />)}{selectedAccount && !accountEntries.length && <EmptyState title="No activity for this account" message={selectedIsCash ? "Cash entries and money moved into or out of your cash will appear here." : "Online transactions and transfers for this account will appear here."} action={<button className="primary-button" onClick={onAdd}>Add transaction</button>} />}{!selectedAccount && <EmptyState title="Choose an account first" message="Add a tracked account to see its transactions here." />}</div>
-    </section>
+  </>;
+  const resetModal = <>
     <Modal opened={Boolean(resetAccount)} onClose={closeReset} centered closeOnClickOutside={!resetting} closeOnEscape={!resetting} withCloseButton={!resetting} overlayProps={{ backgroundOpacity: .55, blur: 5 }} title="Reset reconciliation history?">
       <p className="delete-account-warning">This removes every approved reconciliation for <strong>{resetAccount ? paymentAccountLabel(resetAccount) : "this account"}</strong> and restores its earliest opening balance snapshot. Transactions and transfers are preserved. This cannot be undone.</p>
       <form className="delete-account-form" onSubmit={resetAuditHistory} aria-busy={resetting}>
@@ -451,6 +463,165 @@ export function AccountsPage({ onAdd, onEdit, onDelete }: AccountsPageProps) {
         <div className="dialog-actions"><button type="button" className="secondary-button" onClick={closeReset} disabled={resetting}>Cancel</button><button type="submit" className="delete-account-button" disabled={resetting || resetConfirmation !== "RESET"}>{resetting ? <><ButtonSpinner />Resetting…</> : <><ArrowCounterClockwise size={17} />Reset audit history</>}</button></div>
       </form>
     </Modal>
+  </>;
+
+  const balanceText = (account: PaymentAccount) => balancesShown ? formatMoney(account.currentBalanceMinor, profile.currency) : null;
+  const checkedText = (account: PaymentAccount) => `${isCashAccount(account) ? "Counted" : "Checked"} ${formatLedgerDate(account.balanceAsOf, profile.calendarSystem)}`;
+  const unlockButton = <button type="button" className="v2-link" onClick={() => workspace?.requestBalanceUnlock()}>Unlock to see</button>;
+  const percentText = (current: number, previous: number) => previous > 0 ? `${current >= previous ? "▲" : "▼"} ${Math.round(Math.abs(current - previous) / previous * 100)}%` : current > 0 ? "New" : "—";
+  const deltaClass = (current: number, previous: number) => current === previous ? "is-flat" : current > previous ? "is-up" : "is-down";
+
+  if (detailAccount && detail) {
+    const { tone } = accountLook(detailAccount);
+    const { row, weeks, categories: spendByCategory, biggest, comparison: monthly } = detail;
+    const weekPeak = Math.max(1, ...weeks.map((week) => Math.max(week.currentMinor, week.previousMinor)));
+    const categoryTotal = spendByCategory.reduce((total, item) => total + item.currentMinor, 0) || 1;
+    const hasAudit = reconciliations.some((item) => item.paymentAccountId === detailAccount.id);
+    const own = detailAccount.userId === profile.id;
+    const diff = row.currentMinor - row.previousMinor;
+    return <div className="v2-page v2-account-detail">
+      <Link href={appRoutes.accounts} className="v2-back"><CaretLeft size={16} weight="bold" />All accounts</Link>
+      <header className="v2-page-head">
+        <div className="v2-account-title"><AccountTile account={detailAccount} size={52} /><div><span className="v2-eyebrow">{providerText(detailAccount)}{detailAccount.accountTail ? ` · ends ${detailAccount.accountTail}` : ""}</span><h1>{detailAccount.label || paymentAccountLabel(detailAccount)}</h1></div></div>
+        <div className="v2-head-actions">
+          {own && ownAccounts.length > 1 && workspace && <button type="button" className="v2-button is-compact" onClick={() => workspace.openTransfer({ fromAccountId: detailAccount.id })} aria-label="Move money from this account"><ArrowsLeftRight size={18} /><span>Move money</span></button>}
+          {own && !hasAudit && <button type="button" className="v2-button is-primary" onClick={() => { beginBalanceEdit(detailAccount); window.setTimeout(() => document.getElementById("v2-balance-card")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0); }}>{isCashAccount(detailAccount) ? "Count cash" : "Update balance"}</button>}
+        </div>
+      </header>
+
+      <div className="v2-detail-grid">
+        <div className="v2-detail-main">
+          <section className="v2-hero" style={{ background: tone.ink }} aria-labelledby="v2-account-spent">
+            <span id="v2-account-spent" className="v2-hero-label">Spent from {detailAccount.label || paymentAccountLabel(detailAccount)} · {monthName(period)} 1–{Math.max(monthly.elapsedDays, 1)}</span>
+            <strong className="v2-hero-amount amount">{formatMoney(row.currentMinor, profile.currency)}</strong>
+            <span className="v2-hero-pill">{diff === 0 ? `Same as ${monthName(addMonthsToKey(period, -1))}` : `${diff > 0 ? "▲" : "▼"} ${formatMoney(Math.abs(diff), profile.currency)} ${diff > 0 ? "more" : "less"} than ${monthName(addMonthsToKey(period, -1))} 1–${Math.max(monthly.elapsedDays, 1)}`}</span>
+            <div className="v2-weeks" role="img" aria-label={`Spending by week: ${weeks.map((week) => `days ${week.firstDay}–${week.lastDay}, ${plainAmount(week.currentMinor)} this month against ${plainAmount(week.previousMinor)} last month`).join("; ")}`}>
+              {weeks.map((week) => <div key={week.firstDay} className={week.started ? "v2-week" : "v2-week is-later"}>
+                <div className="v2-week-bars">
+                  <span className="is-previous" style={{ height: `${(week.previousMinor / weekPeak) * 100}%` }} />
+                  {week.started && <span className="is-current" style={{ height: `${(week.currentMinor / weekPeak) * 100}%` }} />}
+                </div>
+                <span className="v2-week-label">{monthName(period).slice(0, 3)} {week.firstDay}–{week.lastDay}</span>
+                <span className="v2-week-amount amount">{week.started ? plainAmount(week.currentMinor) : "Later"}</span>
+              </div>)}
+            </div>
+            <div className="v2-chart-legend"><span className="v2-chart-keys"><span><i className="is-current" />{monthName(period)}</span><span><i className="is-previous-bar" />{monthName(addMonthsToKey(period, -1))}</span></span></div>
+          </section>
+
+          <section className="v2-card" aria-labelledby="v2-where">
+            <header className="v2-card-head"><h2 id="v2-where">Where it went</h2></header>
+            {spendByCategory.length === 0 ? <p className="v2-empty">Nothing spent from this account in {monthName(period)} yet.</p> : <ul className="v2-rows">
+              {spendByCategory.map((item) => {
+                const share = Math.round(item.currentMinor / categoryTotal * 100);
+                const look = categoryTone(item.category, customCategories);
+                return <li key={item.category} className="v2-row">
+                  <CategoryTile category={item.category} custom={customCategories} />
+                  <span className="v2-row-main"><strong>{getCategory(item.category, customCategories).label}</strong><span className="v2-progress"><span style={{ width: `${share}%`, background: look.ink }} /></span></span>
+                  <span className="v2-row-end"><strong className="amount">{plainAmount(item.currentMinor)}</strong><small className="v2-muted">{share}%</small></span>
+                </li>;
+              })}
+            </ul>}
+            {biggest && <p className="v2-footnote">Biggest: {biggest.note || getCategory(biggest.category, customCategories).label}, {plainAmount(biggest.amountMinor)} on {formatLedgerDate(biggest.occurredOn, profile.calendarSystem)}</p>}
+          </section>
+        </div>
+
+        <div className="v2-detail-side">
+          <section className="v2-card v2-balance-card" id="v2-balance-card" aria-labelledby="v2-balance-title">
+            <header className="v2-card-head"><h2 id="v2-balance-title">{isCashAccount(detailAccount) ? "Cash in hand" : "Balance"}</h2>{hasAudit && <span className="v2-badge"><ShieldCheck size={14} />Reconciled</span>}</header>
+            <strong className="v2-balance amount">{balanceText(detailAccount) ?? <HiddenBalance />}</strong>
+            <p className="v2-muted">{balancesShown ? `${checkedText(detailAccount)}, then kept up to date from your entries.` : unlockButton}</p>
+            {editingBalanceId === detailAccount.id && !hasAudit && <form className="v2-inline-form" onSubmit={saveBalance}>
+              <NumberInput label={isCashAccount(detailAccount) ? "Cash you have now" : "Balance shown by your bank or wallet"} value={editingBalance} onChange={(value) => setEditingBalance(String(value))} decimalScale={2} thousandSeparator="," required disabled={Boolean(accountAction)} />
+              <TextInput label={isCashAccount(detailAccount) ? "Counted on" : "Balance as of"} type="date" value={editingBalanceAsOf} onChange={(event) => setEditingBalanceAsOf(event.currentTarget.value)} required disabled={Boolean(accountAction)} />
+              <div className="v2-inline-actions"><button type="button" className="v2-button" onClick={() => setEditingBalanceId(null)} disabled={Boolean(accountAction)}>Cancel</button><button className="v2-button is-primary" disabled={Boolean(accountAction)}>{accountAction === detailAccount.id ? <><ButtonSpinner />Saving…</> : "Save"}</button></div>
+            </form>}
+            <FormError message={accountError} />
+          </section>
+        </div>
+      </div>
+
+      <section className="v2-tx-list" aria-label="Activity on this account">
+        <header className="v2-section-head"><h2>Activity</h2><Link href={`${appRoutes.transactions}?account=${encodeURIComponent(detailAccount.id)}`}>Open in Transactions</Link></header>
+        {detailDays.map((day) => <section key={day.dayKey} className="v2-card v2-tx-day" aria-label={formatLedgerDay(day.dayKey, profile.calendarSystem)}>
+          <header className="v2-day-head"><span>{dayGroupLabel(day.dayKey, today)} · {formatLedgerDay(day.dayKey, profile.calendarSystem, "date")}</span></header>
+          <ul className="v2-rows">{day.items.map((item) => <EntryRow key={activityKey(item)} item={item} accounts={paymentAccounts} customCategories={customCategories} selected={false} deletePending={item.type === "transfer" && transferAction === item.transfer.id} onOpen={(entry) => entry.type === "transfer" ? workspace?.openTransfer({ transferId: entry.transfer.id }) : (entry.transaction.userId === profile.id && onEdit(entry.transaction))} onEdit={onEdit} onDuplicate={(entry) => workspace?.openDuplicate(entry)} onDelete={onDelete} onDeleteTransfer={(transfer) => void removeTransfer(transfer.id)} />)}</ul>
+        </section>)}
+        {!accountEntries.length && <div className="v2-card v2-tx-empty"><EmptyState title="No activity yet" message={selectedIsCash ? "Cash entries and money moved into or out of your cash show here." : "Entries paid through this account, and transfers in or out of it, show here."} action={<button className="v2-button is-primary" onClick={onAdd}><Plus size={17} />Add entries</button>} /></div>}
+        {detailDays.reduce((total, day) => total + day.items.length, 0) < accountEntries.length && <nav className="v2-load-more"><span>Showing {detailDays.reduce((total, day) => total + day.items.length, 0)} of {accountEntries.length}</span><button className="v2-button" onClick={() => setDetailCount((count) => count + 30)}>Load 30 more</button></nav>}
+      </section>
+
+      {!isCashAccount(detailAccount) && own && <details className="v2-card v2-collapse">
+        <summary><Scales size={20} weight="duotone" /><span><strong>Check against your bank</strong><small>Optional: compare with the balance your bank or wallet shows, then lock the result.</small></span><CaretDown size={16} weight="bold" /></summary>
+        <div className="v2-collapse-body">{reconciliationSection}</div>
+      </details>}
+      {resetModal}
+    </div>;
+  }
+
+  const comparisonAll = overview;
+  const totalSpent = comparisonAll.currentMinor;
+  const shareRows = comparisonAll.accounts.filter((item) => item.currentMinor > 0);
+  const allDiff = comparisonAll.currentMinor - comparisonAll.previousMinor;
+  const looseBuckets = comparisonAll.accounts.filter((item) => !item.account && (item.currentMinor || item.previousMinor));
+  const cardFor = (item: AccountSpend) => {
+    const account = item.account;
+    const { tone } = accountLook(account, item.key);
+    const peak = Math.max(1, item.currentMinor, item.previousMinor);
+    const top = biggestByBucket.get(item.key);
+    const name = account ? (account.label || paymentAccountLabel(account)) : item.key === CASH_BUCKET ? "Cash" : "No account set";
+    const body = <>
+      <div className="v2-acct-top"><AccountTile account={account} bucket={item.key} size={44} /><span className="v2-acct-name"><strong>{name}</strong><small>{account ? providerText(account) : item.key === CASH_BUCKET ? "Cash entries · no Cash account yet" : "Entries without an account"}</small></span>{account?.shared && <span className="v2-ours">Shared</span>}</div>
+      <div className="v2-acct-spend"><span><small>Spent</small><strong className="amount">{formatMoney(item.currentMinor, profile.currency)}</strong></span><span className={`v2-delta is-pill ${deltaClass(item.currentMinor, item.previousMinor)}`}>{percentText(item.currentMinor, item.previousMinor)}</span></div>
+      <div className="v2-acct-bars"><span style={{ width: `${item.currentMinor / peak * 100}%`, background: tone.ink }} /><span style={{ width: `${item.previousMinor / peak * 100}%`, background: tone.pale }} /></div>
+      <small className="v2-muted">Last month, same days: {formatMoney(item.previousMinor, profile.currency)}</small>
+      {top && <p className="v2-acct-note">Biggest: {top.note || getCategory(top.category, customCategories).label}, {plainAmount(top.amountMinor)} on {formatLedgerDate(top.occurredOn, profile.calendarSystem)}</p>}
+      {account && <div className="v2-acct-foot"><span>{isCashAccount(account) ? "In hand" : "Balance"}</span><strong className="amount">{balanceText(account) ?? <HiddenBalance />}</strong><small>{checkedText(account)}</small></div>}
+    </>;
+    return account
+      ? <Link key={item.key} href={`${appRoutes.accounts}?account=${encodeURIComponent(account.id)}`} className="v2-card v2-acct-card" style={{ "--acct-ink": tone.ink } as CSSProperties}>{body}</Link>
+      : <Link key={item.key} href={appRoutes.transactions} className="v2-card v2-acct-card is-loose" style={{ "--acct-ink": tone.ink } as CSSProperties}>{body}</Link>;
+  };
+
+  return <div className="v2-page v2-accounts">
+    <header className="v2-page-head">
+      <div><span className="v2-eyebrow">{formatLedgerMonth(period, profile.calendarSystem)}</span><h1>Accounts</h1></div>
+      <div className="v2-head-actions">
+        {ownAccounts.length > 1 && workspace && <button type="button" className="v2-button is-compact" onClick={() => workspace.openTransfer()} aria-label="Move money between accounts"><ArrowsLeftRight size={18} /><span>Move money</span></button>}
+        <a className="v2-button is-primary is-compact" href="#add-account" aria-label="Add an account"><Plus size={18} weight="bold" /><span>Add account</span></a>
+      </div>
+    </header>
+
+    <section className="v2-hero" aria-labelledby="v2-all-spent">
+      <span id="v2-all-spent" className="v2-hero-label">Spent from all accounts · {monthName(period)} 1–{Math.max(comparisonAll.elapsedDays, 1)}</span>
+      <strong className="v2-hero-amount amount">{formatMoney(totalSpent, profile.currency)}</strong>
+      <span className="v2-hero-pill">{allDiff === 0 ? "Same as last month" : `${allDiff > 0 ? "▲" : "▼"} ${formatMoney(Math.abs(allDiff), profile.currency)}${comparisonAll.previousMinor ? ` · ${Math.round(Math.abs(allDiff) / comparisonAll.previousMinor * 100)}%` : ""} ${allDiff > 0 ? "more" : "less"} than ${monthName(addMonthsToKey(period, -1))} 1–${Math.max(comparisonAll.elapsedDays, 1)}`}</span>
+      {shareRows.length > 0 && <>
+        <div className="v2-share-bar" role="img" aria-label={`Share of spending: ${shareRows.map((item) => `${item.account ? (item.account.label || paymentAccountLabel(item.account)) : "Cash"} ${Math.round(item.currentMinor / totalSpent * 100)}%`).join(", ")}`}>
+          {shareRows.map((item) => <span key={item.key} style={{ flexGrow: item.currentMinor, background: accountLook(item.account, item.key).tone.bg }} />)}
+        </div>
+        <ul className="v2-share-legend">{shareRows.map((item) => <li key={item.key}><i style={{ background: accountLook(item.account, item.key).tone.bg }} />{item.account ? (item.account.label || paymentAccountLabel(item.account)) : item.key === CASH_BUCKET ? "Cash" : "No account"} <strong>{Math.round(item.currentMinor / totalSpent * 100)}%</strong></li>)}</ul>
+      </>}
+    </section>
+
+    {paymentAccounts.length > 0 && !balancesShown && <div className="v2-lock-note"><LockKey size={18} weight="duotone" /><span>Balances are hidden.</span>{unlockButton}</div>}
+
+    <div className="v2-acct-grid">
+      {comparisonAll.accounts.filter((item) => item.account).map(cardFor)}
+      {looseBuckets.map(cardFor)}
+      {!paymentAccounts.length && <div className="v2-card"><EmptyState title="No accounts yet" message="Add your bank, a wallet like eSewa or Khalti, and the cash in your pocket to see what each one spends." /></div>}
+    </div>
+
+    <section className="v2-card" aria-labelledby="v2-transfers">
+      <header className="v2-card-head"><h2 id="v2-transfers">Money moved between accounts</h2>{ownAccounts.length > 1 && workspace && <button type="button" className="v2-link" onClick={() => workspace.openTransfer()}>Move money</button>}</header>
+      {transfers.length === 0 ? <p className="v2-empty">No transfers yet. An ATM withdrawal is a transfer from your bank to Cash.</p> : <ul className="v2-rows">{transfers.slice(0, 6).map((transfer) => <EntryRow key={transfer.id} item={{ type: "transfer", transfer }} accounts={paymentAccounts} customCategories={customCategories} selected={false} deletePending={transferAction === transfer.id} onOpen={() => transfer.userId === profile.id && workspace?.openTransfer({ transferId: transfer.id })} onEdit={onEdit} onDuplicate={() => undefined} onDelete={onDelete} onDeleteTransfer={(item) => void removeTransfer(item.id)} />)}</ul>}
+      <FormError message={transferError} />
+    </section>
+
+    <section className="v2-manage" aria-label="Manage accounts">
+      <header className="v2-section-head"><h2>Manage accounts</h2></header>
+      {manageSection}
+    </section>
+    {resetModal}
   </div>;
 }
 

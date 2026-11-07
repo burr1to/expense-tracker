@@ -3,7 +3,7 @@ import {
   Coffee, Confetti, CurrencyDollar, DeviceMobile, Drop, FileText, FilmSlate, Flame, ForkKnife,
   GameController, GasPump, Gift, GraduationCap, Hammer, HandCoins, HouseLine, Lightning, MapPin, MusicNote,
   PaintBrushHousehold, PencilLine, Pill, Receipt, ShieldCheck, ShoppingCart, Sparkle, Storefront,
-  Stethoscope, Taxi, TestTube, Ticket, Tooth, TShirt, Wallet, Wrench, type Icon,
+  Stethoscope, Taxi, TestTube, Ticket, Tooth, TShirt, Wallet, Wrench, type Icon, type IconWeight,
 } from "@phosphor-icons/react";
 import type { CategoryIconName } from "../types";
 import { LedgerIcon } from "./LedgerIcon";
@@ -24,8 +24,8 @@ const icons: Record<string, Icon> = {
   Lent: HandCoins, Borrowed: HandCoins, Repayment: HandCoins, "Split bill": Receipt,
 };
 
-export function SubcategoryIcon({ subcategory, icon, size = 19 }: { subcategory: string; icon?: CategoryIconName; size?: number }) {
-  if (icon) return <LedgerIcon icon={icon} size={size} />;
+export function SubcategoryIcon({ subcategory, icon, size = 19, weight = "regular" }: { subcategory: string; icon?: CategoryIconName; size?: number; weight?: IconWeight }) {
+  if (icon) return <LedgerIcon icon={icon} size={size} weight={weight} />;
   const IconComponent = icons[subcategory] ?? Storefront;
-  return <IconComponent size={size} weight="regular" aria-hidden="true" />;
+  return <IconComponent size={size} weight={weight} aria-hidden="true" />;
 }

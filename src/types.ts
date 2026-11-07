@@ -90,6 +90,8 @@ export interface LedgerTransaction {
   locationSource: LocationSource | null;
   savedPlaceId: string | null;
   receiptScanId?: string | null;
+  /** The trip or event this entry belongs to, if any. */
+  groupId?: string | null;
   createdAt: string;
   receipt?: ReceiptMeta | null;
 }
@@ -105,6 +107,8 @@ export interface TransactionDraft {
   paymentMode: PaymentMode;
   paymentAccountId: string;
   shared?: boolean;
+  /** "" for no group. Left out (imports, receipt splits) keeps an entry ungrouped. */
+  groupId?: string;
   location?: TransactionLocationDraft | null;
   receipt?: ReceiptUpload;
   removeReceipt?: boolean;
@@ -122,6 +126,28 @@ export interface TransactionLocationDraft {
   accuracy: number | null;
   source: LocationSource;
   savedPlaceId: string | null;
+}
+
+export type TransactionGroupIconName = "trip" | "mountain" | "beach" | "party" | "festival" | "wedding" | "home" | "work" | "gift" | "health" | "education" | "folder";
+
+/** A named set of transactions, such as a trip or an event. Its dates are optional and only guide picking entries. */
+export interface TransactionGroup {
+  id: string;
+  userId: string;
+  name: string;
+  icon: TransactionGroupIconName;
+  startOn: string | null;
+  endOn: string | null;
+  note: string;
+  createdAt: string;
+}
+
+export interface TransactionGroupDraft {
+  name: string;
+  icon: TransactionGroupIconName;
+  startOn: string;
+  endOn: string;
+  note: string;
 }
 
 export type SavedPlaceIconName = "pin" | "home" | "work" | "food" | "shopping" | "health" | "favorite";
@@ -302,6 +328,9 @@ export interface DuePayment {
   occurredOn: string;
   note: string;
   transactionId: string | null;
+  /** The entry was already in the ledger; undoing the payment only unlinks it. */
+  linked?: boolean;
+  linkedRestoreCategory?: string | null;
   createdAt: string;
 }
 
@@ -321,6 +350,10 @@ export interface DueItem {
   status: DueStatus;
   annualRatePercent: number | null;
   completedOn: string | null;
+  /** Lent/Borrowed: an entry already in the ledger that is this loan's money changing hands. */
+  linkedTransactionId?: string | null;
+  /** Set when the link turned that entry into a loan movement; the category it goes back to when unlinked. */
+  linkedRestoreCategory?: string | null;
   createdAt: string;
   payments: DuePayment[];
   receipt?: ReceiptMeta | null;
@@ -340,6 +373,8 @@ export interface DueDraft {
   receipt?: ReceiptUpload;
   /** Lent/Borrowed only: where the money left from or arrived in — "cash", a payment account id, or "none" to record no movement. Omitted leaves any linked movement as it is. */
   movement?: string;
+  /** Lent/Borrowed with movement "link": the existing entry that is this loan's money changing hands. */
+  linkTransactionId?: string;
 }
 
 export interface ReceiptMeta {

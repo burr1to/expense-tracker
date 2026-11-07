@@ -1,7 +1,7 @@
 import { attachCurrentBalances } from "./account-balances";
 import { getPrisma } from "./prisma";
 import { removeStoredReceipts } from "./receipt-storage";
-import type { AccountReconciliation, AccountTransfer, HouseholdSummary, LearningSuggestion, LedgerTransaction, PaymentAccount, RecurrenceUnit } from "../types";
+import type { AccountReconciliation, AccountTransfer, HouseholdSummary, LearningSuggestion, LedgerTransaction, PaymentAccount, RecurrenceUnit, TransactionGroup } from "../types";
 
 export const asDate = (value: string) => new Date(`${value}T00:00:00.000Z`);
 export const dateOnly = (value: Date | null) => value ? value.toISOString().slice(0, 10) : null;
@@ -58,7 +58,7 @@ export async function loadLedger(id: string) {
   const transferWhere = peerIds.length
     ? { OR: [{ userId: id }, { fromAccount: { shared: true, userId: { in: peerIds } } }, { toAccount: { shared: true, userId: { in: peerIds } } }] }
     : { userId: id };
-  const [transactions, budgets, recurring, goals, categories, subcategories, paymentAccounts, reconciliations, savedPlaces, transfers, dueItems] = await Promise.all([
+  const [transactions, budgets, recurring, goals, categories, subcategories, paymentAccounts, reconciliations, savedPlaces, transfers, dueItems, groups] = await Promise.all([
     db.transaction.findMany({ where: transactionWhere, orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }], include: { receipt: { select: receiptSelect }, receiptScan: { select: receiptSelect } } }),
     db.budget.findMany({ where: sharedRowWhere, orderBy: { monthKey: "desc" } }),
     db.recurringEntry.findMany({ where: { userId: id }, orderBy: { nextDueOn: "asc" } }),
@@ -70,8 +70,9 @@ export async function loadLedger(id: string) {
     db.savedPlace.findMany({ where: { userId: id }, orderBy: { lastUsedAt: "desc" } }),
     db.accountTransfer.findMany({ where: transferWhere, orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }] }),
     db.dueItem.findMany({ where: { userId: id }, orderBy: [{ status: "asc" }, { dueOn: "asc" }], include: { payments: { orderBy: { occurredOn: "desc" } }, receipt: { select: receiptSelect } } }),
+    db.transactionGroup.findMany({ where: { userId: id }, orderBy: { createdAt: "desc" } }),
   ]);
-  return { user, household: toHouseholdSummary(activeMembership, invitedMembership), transactions, budgets, recurring, goals, categories, subcategories, paymentAccounts, reconciliations, savedPlaces, transfers, dueItems };
+  return { user, household: toHouseholdSummary(activeMembership, invitedMembership), transactions, budgets, recurring, goals, categories, subcategories, paymentAccounts, reconciliations, savedPlaces, transfers, dueItems, groups };
 }
 
 export function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
@@ -79,7 +80,8 @@ export function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
     const { deletedAt, receiptScan, importJobId, ...transaction } = item;
     void deletedAt;
     void importJobId;
-    return { ...transaction, receipt: transaction.receipt ?? receiptScan, kind: item.kind as LedgerTransaction["kind"], paymentMode: item.paymentMode as LedgerTransaction["paymentMode"], locationSource: item.locationSource as LedgerTransaction["locationSource"], occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString(), paymentAccount: null };
+    // Groups are personal: a partner's shared entry never carries their grouping.
+    return { ...transaction, groupId: item.userId === data.user.id ? item.groupId : null, receipt: transaction.receipt ?? receiptScan, kind: item.kind as LedgerTransaction["kind"], paymentMode: item.paymentMode as LedgerTransaction["paymentMode"], locationSource: item.locationSource as LedgerTransaction["locationSource"], occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString(), paymentAccount: null };
   });
   const transfers: AccountTransfer[] = data.transfers.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn)!, createdAt: item.createdAt.toISOString() }));
   const paymentAccounts: PaymentAccount[] = attachCurrentBalances(data.paymentAccounts.map((item) => ({
@@ -133,6 +135,7 @@ export function serialize(data: Awaited<ReturnType<typeof loadLedger>>) {
     })),
     savedPlaces: data.savedPlaces.map((item) => ({ ...item, createdAt: item.createdAt.toISOString(), lastUsedAt: item.lastUsedAt.toISOString() })),
     transfers,
+    transactionGroups: data.groups.map((item): TransactionGroup => ({ id: item.id, userId: item.userId, name: item.name, icon: item.icon as TransactionGroup["icon"], startOn: dateOnly(item.startOn), endOn: dateOnly(item.endOn), note: item.note, createdAt: item.createdAt.toISOString() })),
     dueItems: data.dueItems.map((item) => ({ ...item, occurredOn: dateOnly(item.occurredOn), dueOn: dateOnly(item.dueOn), remindOn: dateOnly(item.remindOn), snoozedUntil: dateOnly(item.snoozedUntil), completedOn: dateOnly(item.completedOn), createdAt: item.createdAt.toISOString(), payments: item.payments.map((payment) => ({ ...payment, occurredOn: dateOnly(payment.occurredOn), createdAt: payment.createdAt.toISOString() })) })),
   };
 }

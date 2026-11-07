@@ -11,6 +11,7 @@ export default function AddMultipleRoute() {
     calendarSystem={ledger.profile.calendarSystem}
     transactions={ledger.transactions}
     customCategories={ledger.customCategories}
+    customSubcategories={ledger.customSubcategories}
     paymentAccounts={ledger.paymentAccounts}
     ownerId={ledger.profile.id}
     onImport={async (drafts) => {

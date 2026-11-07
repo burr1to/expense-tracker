@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => {
     accountReconciliation: { findMany: vi.fn(), count: vi.fn(async () => 0) },
     savedPlace: { findMany: vi.fn() },
     accountTransfer: { findMany: vi.fn(), findFirst: vi.fn(), count:vi.fn(async () => 0), create: vi.fn(), updateMany: vi.fn(async () => ({ count: 1 })) },
+    transactionGroup: { findMany: vi.fn(async () => []), findFirst: vi.fn(async () => null) },
     dueItem: { findMany: vi.fn() },
     householdMember: { findFirst: vi.fn(async () => null) },
     $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
@@ -63,7 +64,7 @@ const transfer = { fromAccountId: "nabil", toAccountId: "esewa", amountMinor: 10
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.db.user.findUniqueOrThrow.mockResolvedValue({ id: "user-1", name: "Test User", email: "test@example.com", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, calendarSystem: "AD", safeToSpendBufferMinor: 0, emailReminders: false, browserReminders: false, learningProfile: null, householdMembership: null, pinHash: "hash" });
-  for (const table of [mocks.db.transaction, mocks.db.budget, mocks.db.recurringEntry, mocks.db.savingsGoal, mocks.db.customCategory, mocks.db.customSubcategory, mocks.db.paymentAccount, mocks.db.accountReconciliation, mocks.db.savedPlace, mocks.db.accountTransfer, mocks.db.dueItem]) table.findMany.mockResolvedValue([]);
+  for (const table of [mocks.db.transaction, mocks.db.budget, mocks.db.recurringEntry, mocks.db.savingsGoal, mocks.db.customCategory, mocks.db.customSubcategory, mocks.db.paymentAccount, mocks.db.accountReconciliation, mocks.db.savedPlace, mocks.db.accountTransfer, mocks.db.dueItem, mocks.db.transactionGroup]) table.findMany.mockResolvedValue([]);
   mocks.db.paymentAccount.findMany.mockImplementation(async (query?: { where?: { id?: { in: string[] } } }) => query?.where?.id ? query.where.id.in.filter((id) => mocks.accounts[id]).map((id) => ({ id })) : []);
   mocks.db.accountReconciliation.count.mockResolvedValue(0);
   mocks.db.accountTransfer.count.mockResolvedValue(0);

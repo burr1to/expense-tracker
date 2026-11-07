@@ -23,6 +23,8 @@ import { markOnboardingStep } from "../lib/onboarding";
 import { appRoutes, viewFromPathname } from "../lib/routes";
 import type { AppView, LedgerTransaction, SavedPlace, TransactionDraft, TransactionKind, TransactionLocationDraft } from "../types";
 import { AuthPage } from "../views/AuthPage";
+import { AddEntriesSheet } from "./AddEntriesSheet";
+import { navigateFromOverlay } from "../lib/use-back-to-close";
 import { AppShell } from "./AppShell";
 import { BrandIcon } from "./BrandIcon";
 import { ButtonSpinner } from "./ButtonSpinner";
@@ -71,6 +73,7 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   // Switching calendars keeps roughly the same stretch of time (and today's month stays today's).
   if (parseMonthKey(period).system !== calendarSystem) setPeriod(convertMonthKey(period, calendarSystem));
   const [formOpen, setFormOpen] = useState(false);
+  const [addSheetOpen, setAddSheetOpen] = useState(false);
   const [editing, setEditing] = useState<LedgerTransaction | null>(null);
   const [reusing, setReusing] = useState<LedgerTransaction | null>(null);
   const [newTransactionDate, setNewTransactionDate] = useState<string | undefined>();
@@ -254,14 +257,8 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     if (action) params.set("action", action);
     router.push(`${appRoutes.dues}${params.size ? `?${params.toString()}` : ""}`);
   };
-  const openAdd = () => {
-    setEditing(null);
-    setReusing(null);
-    // The global + always means "now": the sheet dates it today when it opens. Per-day buttons use openAddForDate.
-    setNewTransactionDate(undefined);
-    setNewTransactionLocation(null);
-    setFormOpen(true);
-  };
+  // The global + opens the batch sheet: entries are usually logged several at a time, later. Per-day buttons use openAddForDate.
+  const openAdd = () => setAddSheetOpen(true);
   const openAddAtPlace = (place: SavedPlace) => {
     setEditing(null);
     setReusing(null);
@@ -427,12 +424,31 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         shareWithHousehold={ledger.profile.household?.status === "active"}
         calendarSystem={ledger.profile.calendarSystem}
         ownerId={ledger.profile.id}
+        transactionGroups={ledger.transactionGroups}
         onClose={() => { setFormOpen(false); setNewTransactionKind(undefined); }}
         onSave={saveTransaction}
         onPasteSms={() => workspace.openSms()}
         onScanReceipt={(occurredOn) => workspace.openReceiptScan(occurredOn ?? newTransactionDate)}
         onTransfer={(prefill) => workspace.openTransfer(prefill)}
         onSplitBill={(prefill) => workspace.openSplitBill(prefill)}
+      />
+      <AddEntriesSheet
+        open={addSheetOpen}
+        currency={ledger.profile.currency}
+        calendarSystem={ledger.profile.calendarSystem}
+        transactions={ledger.transactions}
+        customCategories={ledger.customCategories}
+        customSubcategories={ledger.customSubcategories}
+        paymentAccounts={ledger.paymentAccounts}
+        ownerId={ledger.profile.id}
+        onClose={() => setAddSheetOpen(false)}
+        onSave={(draft) => saveTransaction(draft)}
+        onPasteSms={() => { setAddSheetOpen(false); workspace.openSms(); }}
+        onScanReceipt={(occurredOn) => { setAddSheetOpen(false); workspace.openReceiptScan(occurredOn); }}
+        onImportStatement={() => { navigateFromOverlay(() => router.push(`${appRoutes.transactions}?import=1`)); }}
+        onTransfer={() => { setAddSheetOpen(false); workspace.openTransfer(); }}
+        onSplitBill={() => { setAddSheetOpen(false); workspace.openSplitBill(); }}
+        onFullForm={(occurredOn) => { setAddSheetOpen(false); openAddForDate(occurredOn); }}
       />
       <SmsCapture
         open={smsOpen}

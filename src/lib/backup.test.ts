@@ -56,6 +56,15 @@ describe("full backup CSV", () => {
     expect(() => parseBackupCsv(csv)).toThrow("references a missing receiptScanId");
   });
 
+  it("rejects transactions linked to a missing group", () => {
+    const csv = serializeBackupCsv([
+      ...baseRecords,
+      { entity: "transaction", backupId: "transaction-1", payload: { kind: "expense", category: "food", amountMinor: 75000, occurredOn: "2026-07-25", note: "", subcategory: null, area: null, paymentMode: "cash", paymentAccountId: null, locationLabel: null, locationAddress: null, locationLatitude: null, locationLongitude: null, locationAccuracy: null, locationSource: null, savedPlaceId: null, receiptScanId: null, groupId: "missing-group", createdAt: exportedAt, updatedAt: exportedAt } },
+    ]);
+
+    expect(() => parseBackupCsv(csv)).toThrow("references a missing groupId");
+  });
+
   it("rejects reconciliation records linked to a missing account", () => {
     const csv = serializeBackupCsv([
       ...baseRecords,

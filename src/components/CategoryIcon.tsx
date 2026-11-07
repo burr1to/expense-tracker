@@ -1,3 +1,4 @@
+import type { IconWeight } from "@phosphor-icons/react";
 import type { CategoryIconName, TransactionCategory } from "../types";
 import { LedgerIcon } from "./LedgerIcon";
 
@@ -7,6 +8,6 @@ const icons: Record<string, CategoryIconName> = {
   entertainment: "entertainment", education: "education", travel: "travel", loan: "loan", other: "tag",
 };
 
-export function CategoryIcon({ category, icon, size = 20 }: { category: TransactionCategory; icon?: CategoryIconName; size?: number }) {
-  return <LedgerIcon icon={icon ?? icons[category] ?? "tag"} size={size} />;
+export function CategoryIcon({ category, icon, size = 20, weight }: { category: TransactionCategory; icon?: CategoryIconName; size?: number; weight?: IconWeight }) {
+  return <LedgerIcon icon={icon ?? icons[category] ?? "tag"} size={size} weight={weight} />;
 }

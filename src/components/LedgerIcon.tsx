@@ -1,6 +1,6 @@
 import {
   AirplaneTilt, BookOpenText, Briefcase, Bus, ForkKnife, Gift, GraduationCap, HandCoins, Heartbeat,
-  HouseLine, Lightning, Money, ShoppingBagOpen, Sparkle, Tag, type Icon,
+  HouseLine, Lightning, Money, ShoppingBagOpen, Sparkle, Tag, type Icon, type IconWeight,
 } from "@phosphor-icons/react";
 import type { CategoryIconName } from "../types";
 
@@ -21,7 +21,7 @@ const icons: Record<CategoryIconName, Icon> = {
   loan: HandCoins,
 };
 
-export function LedgerIcon({ icon, size = 20 }: { icon: CategoryIconName; size?: number }) {
+export function LedgerIcon({ icon, size = 20, weight = "regular" }: { icon: CategoryIconName; size?: number; weight?: IconWeight }) {
   const IconComponent = icons[icon] ?? BookOpenText;
-  return <IconComponent size={size} weight="regular" aria-hidden="true" />;
+  return <IconComponent size={size} weight={weight} aria-hidden="true" />;
 }

@@ -1,11 +1,15 @@
 import { Menu } from "@mantine/core";
-import { CalendarBlank, CopySimple, DotsThree, MapPinLine, Paperclip, PencilSimple, Tag, Trash, Wallet } from "@phosphor-icons/react";
-import { useContext, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
+import { CalendarBlank, CopySimple, DotsThree, Folders, HandCoins, MapPinLine, Paperclip, PencilSimple, Tag, Trash, Wallet } from "@phosphor-icons/react";
+import Link from "next/link";
+import { useContext, useMemo, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { getCategory } from "../lib/categories";
 import { formatMoney } from "../lib/currency";
 import { formatLedgerDate } from "../lib/dates";
+import { canStartLoanFrom, dueLinkLabel, dueLinksFor, loanKindFor } from "../lib/due-links";
+import { appRoutes } from "../lib/routes";
 import { paymentAccountLabel } from "../lib/payment-accounts";
+import { groupHref } from "../lib/transaction-groups";
 import type { CurrencyCode, CustomCategory, LedgerTransaction } from "../types";
 import { CategoryIcon } from "./CategoryIcon";
 import { ButtonSpinner } from "./ButtonSpinner";
@@ -35,6 +39,11 @@ export function TransactionRow({ transaction, currency, onDuplicate, onEdit, onD
   const ownerId = workspace?.ledger.profile.id;
   const mine = !ownerId || transaction.userId === ownerId;
   const title = transaction.note || category.label;
+  const group = transaction.groupId ? workspace?.ledger.transactionGroups.find((item) => item.id === transaction.groupId) : undefined;
+  // The dues this entry is part of ("Lent to Mina"), and whether it can still start one.
+  const dueItems = workspace?.ledger.dueItems;
+  const dueLinks = useMemo(() => dueItems ? dueLinksFor(transaction, dueItems) : [], [transaction, dueItems]);
+  const startsLoan = mine && Boolean(dueItems) && canStartLoanFrom(transaction, dueLinks);
   const edit = mine && !deletePending ? onEdit ?? (tapToEdit ? workspace?.openEdit : undefined) : undefined;
   const openFromRow = (event: MouseEvent<HTMLElement>) => {
     const target = event.target as Element;
@@ -57,6 +66,8 @@ export function TransactionRow({ transaction, currency, onDuplicate, onEdit, onD
         <strong className="transaction-title" role={edit ? "button" : undefined} tabIndex={edit ? 0 : undefined} aria-label={edit ? `Edit ${title}` : undefined} onKeyDown={edit ? openFromKeyboard : undefined}>{title}{transaction.shared ? <span className="ours-chip">Ours</span> : null}</strong>
         <div className="transaction-meta">
           <span><Tag size={13} />{category.label}{transaction.subcategory ? ` · ${transaction.subcategory}` : ""}</span>
+          {group && <Link className="row-group" href={groupHref(group.id)} aria-label={`Group: ${group.name}`}><Folders size={13} />{group.name}</Link>}
+          {dueLinks[0] && <Link className="row-group row-due" href={`${appRoutes.dues}?due=${dueLinks[0].due.id}`} aria-label={`Due: ${dueLinkLabel(dueLinks[0])}`}><HandCoins size={13} />{dueLinkLabel(dueLinks[0])}{dueLinks.length > 1 ? ` +${dueLinks.length - 1}` : ""}</Link>}
           {transaction.area && <span><MapPinLine size={13} />{transaction.area}</span>}
           <span><Wallet size={13} />{payment}</span>
           <span><CalendarBlank size={13} />{formatLedgerDate(transaction.occurredOn, workspace?.ledger.profile.calendarSystem ?? "AD")}</span>
@@ -75,6 +86,7 @@ export function TransactionRow({ transaction, currency, onDuplicate, onEdit, onD
             <Menu.Dropdown>
               {onEdit && <Menu.Item leftSection={<PencilSimple size={16} />} onClick={() => onEdit(transaction)}>Edit</Menu.Item>}
               {onDuplicate && <Menu.Item leftSection={<CopySimple size={16} />} onClick={() => onDuplicate(transaction)}>Use again</Menu.Item>}
+              {startsLoan && <Menu.Item component={Link} href={`${appRoutes.dues}?link=${transaction.id}`} leftSection={<HandCoins size={16} />}>{loanKindFor(transaction) === "lent" ? "Mark as money lent" : "Mark as money borrowed"}</Menu.Item>}
               {onDelete && <Menu.Item color="red" leftSection={<Trash size={16} />} onClick={() => onDelete(transaction)}>Delete</Menu.Item>}
             </Menu.Dropdown>
           </Menu>

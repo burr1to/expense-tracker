@@ -1,6 +1,6 @@
 import { ArrowClockwise, CaretDown, ClockCounterClockwise } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ActivityIcon, activityAmountText, activityTone } from "../components/ActivityIcon";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { ACTIVITY_AREA_LABELS, ACTIVITY_AREAS, ACTIVITY_RETENTION_DAYS, type ActivityArea, type ActivityChange, type ActivityEntry, type ActivityPage } from "../lib/activity-log";
@@ -29,9 +29,9 @@ function dayHeading(dayKey: string, system: CalendarSystem) {
 }
 
 function ChangeValue({ value, currency, system }: { value: ActivityChange["from"]; currency: CurrencyCode; system: CalendarSystem }) {
-  if (value === null) return <span className="log-empty">None</span>;
+  if (value === null) return <span className="v2-muted">None</span>;
   if (typeof value === "string") return <span>{value}</span>;
-  if ("money" in value) return <span className="log-money">{formatMoney(value.money, currency)}</span>;
+  if ("money" in value) return <span className="amount">{formatMoney(value.money, currency)}</span>;
   return <span>{formatLedgerDate(value.date, system)}</span>;
 }
 
@@ -52,35 +52,35 @@ function LogRow({ entry, system }: { entry: ActivityEntry; system: CalendarSyste
   const expandable = entry.changes.length > 0 || details.length > 0;
   const panelId = `log-details-${entry.id}`;
   return (
-    <li className={`log-row is-${activityTone(entry)}`}>
-      <span className="log-icon" aria-hidden="true"><ActivityIcon entry={entry} size={18} /></span>
-      <div className="log-main">
-        <div className="log-line">
-          <span className="log-copy">
+    <li className={`v2-log-row is-${activityTone(entry)}`}>
+      <span className="v2-tile v2-log-tile" aria-hidden="true"><ActivityIcon entry={entry} size={20} /></span>
+      <div className="v2-log-main">
+        <div className="v2-log-line">
+          <span className="v2-row-main">
             <strong>{entry.title}</strong>
-            {entry.subject && <span>{entry.subject}</span>}
+            {entry.subject && <small>{entry.subject}</small>}
           </span>
-          <span className="log-side">
-            {amount && <span className={`log-amount${entry.meta?.kind === "income" && amount.startsWith("+") ? " is-in" : ""}`}>{amount}</span>}
-            <time dateTime={entry.createdAt}>{format(parseISO(entry.createdAt), "h:mm a")}</time>
+          <span className="v2-row-end">
+            {amount && <strong className={`amount${entry.meta?.kind === "income" && amount.startsWith("+") ? " v2-money is-in" : ""}`}>{amount}</strong>}
+            <time className="v2-muted" dateTime={entry.createdAt}>{format(parseISO(entry.createdAt), "h:mm a")}</time>
           </span>
         </div>
         {expandable && (
-          <button type="button" className="log-toggle" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen((value) => !value)}>
+          <button type="button" className="v2-log-toggle" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen((value) => !value)}>
             {entry.changes.length ? `${entry.changes.length} change${entry.changes.length === 1 ? "" : "s"}` : "Details"}
             <CaretDown size={13} weight="bold" />
           </button>
         )}
         {expandable && (
-          <div id={panelId} className="log-details" data-open={open} hidden={!open}>
+          <div id={panelId} className="v2-log-details" hidden={!open}>
             {entry.changes.length > 0 && (
-              <dl className="log-changes">
+              <dl className="v2-log-changes">
                 {entry.changes.map((change) => (
                   <div key={change.field}>
                     <dt>{change.field}</dt>
                     <dd>
                       <ChangeValue value={change.from} currency={entry.currency} system={system} />
-                      <span className="log-arrow" aria-label="changed to">→</span>
+                      <span className="v2-log-arrow" aria-label="changed to">→</span>
                       <ChangeValue value={change.to} currency={entry.currency} system={system} />
                     </dd>
                   </div>
@@ -88,7 +88,7 @@ function LogRow({ entry, system }: { entry: ActivityEntry; system: CalendarSyste
               </dl>
             )}
             {details.length > 0 && (
-              <dl className="log-meta">
+              <dl className="v2-log-changes">
                 {details.map(({ key, label }) => <div key={key}><dt>{label}</dt><dd>{entry.meta?.[key] === true ? "Yes" : String(entry.meta?.[key])}</dd></div>)}
               </dl>
             )}
@@ -161,54 +161,51 @@ export function LogsPage({ calendarSystem, activityRevision }: { calendarSystem:
   }, [entries]);
 
   return (
-    <div className="page logs-page">
-      <header className="page-header">
-        <div>
-          <span className="eyebrow">What happened, and when</span>
-          <h1>Logs</h1>
-          <p>Every change made in your ledger over the last {ACTIVITY_RETENTION_DAYS} days. Entries are written by the server as each change is saved, and can’t be edited.</p>
-        </div>
+    <div className="v2-page v2-logs">
+      <header className="v2-page-head">
+        <div><span className="v2-eyebrow">What happened, and when</span><h1>Logs</h1></div>
       </header>
+      <p className="v2-page-lede">Every change in your ledger from the last {ACTIVITY_RETENTION_DAYS} days. The server writes each line as the change is saved, so nobody can edit it. Not even you.</p>
 
-      <div className="log-filters" role="group" aria-label="Filter logs">
+      <div className="v2-chip-row" role="group" aria-label="Filter logs">
         {(["all", ...ACTIVITY_AREAS] as const).map((option) => (
-          <button key={option} type="button" className="log-filter" aria-pressed={area === option} onClick={() => setArea(option)}>
+          <button key={option} type="button" className={`v2-chip${area === option ? " active" : ""}`} aria-pressed={area === option} onClick={() => setArea(option)}>
             {option === "all" ? "Everything" : ACTIVITY_AREA_LABELS[option]}
           </button>
         ))}
       </div>
 
       {error && (
-        <div className="log-error" role="alert">
+        <div className="v2-b-alert" role="alert">
           <span>{error}</span>
-          <button type="button" className="secondary-button small" onClick={() => void loadFirstPage(true)}><ArrowClockwise size={16} />Try again</button>
+          <button type="button" className="v2-button is-small" onClick={() => void loadFirstPage(true)}><ArrowClockwise size={16} />Try again</button>
         </div>
       )}
 
       {loading && !entries.length ? (
-        <div className="log-loading" role="status"><ButtonSpinner />Loading logs…</div>
+        <div className="v2-card v2-b-loading" role="status"><ButtonSpinner />Loading logs…</div>
       ) : !entries.length && !error ? (
-        <div className="empty-state log-empty-state">
-          <ClockCounterClockwise size={30} />
+        <div className="v2-card v2-b-empty">
+          <span className="v2-tile" style={{ "--tile-bg": "#ebeae4", "--tile-ink": "#5a5e55", "--tile-size": "52px" } as CSSProperties} aria-hidden="true"><ClockCounterClockwise size={26} weight="duotone" /></span>
           <strong>{area === "all" ? "Nothing logged yet" : `No ${ACTIVITY_AREA_LABELS[area].toLowerCase()} activity`}</strong>
           <p>{area === "all" ? "When you add, change or delete something, it shows up here." : `Nothing in ${ACTIVITY_AREA_LABELS[area].toLowerCase()} in the last ${ACTIVITY_RETENTION_DAYS} days.`}</p>
         </div>
       ) : (
-        <div className="log-days" aria-busy={loading} data-loading={loading}>
+        <div className="v2-log-days" aria-busy={loading} data-loading={loading}>
           {days.map((day) => (
-            <section className="log-day" key={day.key} aria-labelledby={`log-day-${day.key}`}>
-              <h2 id={`log-day-${day.key}`}>{dayHeading(day.key, calendarSystem)}</h2>
-              <ol className="log-list">
+            <section className="v2-card v2-log-day" key={day.key} aria-labelledby={`log-day-${day.key}`}>
+              <h2 className="v2-day-head" id={`log-day-${day.key}`}>{dayHeading(day.key, calendarSystem)}<span>{day.entries.length}</span></h2>
+              <ol className="v2-rows">
                 {day.entries.map((entry) => <LogRow key={entry.id} entry={entry} system={calendarSystem} />)}
               </ol>
             </section>
           ))}
           {nextCursor && (
-            <button type="button" className="secondary-button log-more" disabled={loadingMore} onClick={() => void loadMore()}>
+            <button type="button" className="v2-button v2-log-more" disabled={loadingMore} onClick={() => void loadMore()}>
               {loadingMore && <ButtonSpinner />}{loadingMore ? "Loading…" : "Show older entries"}
             </button>
           )}
-          {!nextCursor && entries.length > 0 && <p className="log-end">That’s everything from the last {ACTIVITY_RETENTION_DAYS} days.</p>}
+          {!nextCursor && entries.length > 0 && <p className="v2-footnote v2-log-end">That’s everything from the last {ACTIVITY_RETENTION_DAYS} days.</p>}
         </div>
       )}
     </div>

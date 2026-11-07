@@ -48,6 +48,7 @@ const mocks = vi.hoisted(() => {
     accountReconciliation: { findFirst: vi.fn(), findMany: vi.fn() },
     savedPlace: { findMany: vi.fn() },
     accountTransfer: { findMany: vi.fn() },
+    transactionGroup: { findMany: vi.fn(async () => []), findFirst: vi.fn(async () => null) },
     dueItem: { findMany: vi.fn() },
     householdMember: { findFirst: vi.fn(async () => null) },
     receiptScan: { count: vi.fn() },

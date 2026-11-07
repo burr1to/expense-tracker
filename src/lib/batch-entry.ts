@@ -9,6 +9,8 @@ export interface BatchRow {
   note: string;
   amount: string;
   category: TransactionCategory | "";
+  /** Optional detail under the category, such as Lunch under Food & Dining. */
+  subcategory: string;
   occurredOn: string;
   paymentMode: PaymentMode;
   paymentAccountId: string;
@@ -30,6 +32,7 @@ export function newBatchRow(defaults: BatchDefaults, overrides: Partial<BatchRow
     note: "",
     amount: "",
     category: "",
+    subcategory: "",
     occurredOn: defaults.occurredOn,
     paymentMode: defaults.paymentMode,
     paymentAccountId: defaults.paymentAccountId,
@@ -81,7 +84,17 @@ export function suggestFromHistory(note: string, kind: TransactionKind, transact
     if (ownerId && entry.userId !== ownerId) continue;
     if (!best || `${entry.occurredOn}${entry.createdAt}` > `${best.occurredOn}${best.createdAt}`) best = entry;
   }
-  return best ? { category: best.category, paymentMode: best.paymentMode, paymentAccountId: best.paymentAccountId ?? "" } : null;
+  return best ? { category: best.category, subcategory: best.subcategory ?? "", paymentMode: best.paymentMode, paymentAccountId: best.paymentAccountId ?? "" } : null;
+}
+
+/** The categories this person uses most for a kind, so the quick strip starts with their usual ones. */
+export function frequentCategories(kind: TransactionKind, transactions: readonly LedgerTransaction[], ownerId?: string) {
+  const counts = new Map<string, number>();
+  for (const entry of transactions) {
+    if (entry.kind !== kind || (ownerId && entry.userId !== ownerId)) continue;
+    counts.set(entry.category, (counts.get(entry.category) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([category]) => category);
 }
 
 /** A row with nothing typed is the empty line at the end of the list, not an entry. */
@@ -96,7 +109,7 @@ export function batchRowToDraft(row: BatchRow): TransactionDraft {
     amount: row.amount.replace(/,/g, "").trim(),
     occurredOn: row.occurredOn,
     note: row.note.trim(),
-    subcategory: "",
+    subcategory: row.subcategory.trim(),
     area: "",
     paymentMode: row.paymentMode,
     paymentAccountId: row.paymentMode === "online" ? row.paymentAccountId : "",

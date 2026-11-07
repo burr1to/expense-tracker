@@ -14,7 +14,9 @@ import { paymentAccountLabel } from "../lib/payment-accounts";
 import { getTransactionSuggestions, transactionSuggestionTitle, type TransactionSuggestion } from "../lib/transaction-suggestions";
 import { matchLearningSuggestion } from "../lib/learning";
 import { parseVoiceTransaction, transactionWarnings } from "../lib/transaction-intelligence";
-import type { CalendarSystem, CurrencyCode, CustomCategory, CustomSubcategory, LearningState, LedgerTransaction, PaymentAccount, PaymentMode, ReceiptUpload, SavedPlace, TransactionDraft, TransactionKind, TransactionLocationDraft } from "../types";
+import { createVoiceCapture } from "../lib/voice-capture";
+import { groupsCovering } from "../lib/transaction-groups";
+import type { CalendarSystem, CurrencyCode, CustomCategory, CustomSubcategory, LearningState, LedgerTransaction, PaymentAccount, PaymentMode, ReceiptUpload, SavedPlace, TransactionDraft, TransactionGroup, TransactionKind, TransactionLocationDraft } from "../types";
 import { CategoryIcon } from "./CategoryIcon";
 import { ButtonSpinner } from "./ButtonSpinner";
 import { LedgerDatePickerInput as DatePickerInput } from "./LedgerDatePickerInput";
@@ -35,6 +37,7 @@ const schema = z.object({
   paymentMode: z.enum(["cash", "cheque", "online"]),
   paymentAccountId: z.string(),
   shared: z.boolean().optional(),
+  groupId: z.string().optional(),
 }).superRefine((value, context) => {
   if (value.paymentMode === "online" && !value.paymentAccountId) context.addIssue({ code: "custom", path: ["paymentAccountId"], message: "Choose an online payment account" });
 });
@@ -58,6 +61,8 @@ interface TransactionFormProps {
   calendarSystem?: CalendarSystem;
   /** The signed-in user; smart defaults learn only from their own entries. */
   ownerId?: string;
+  /** The user's trips and events; the Group field shows only when there is at least one. */
+  transactionGroups?: TransactionGroup[];
   onClose: () => void;
   onSave: (draft: TransactionDraft, id?: string) => Promise<void>;
   /** Capture shortcuts on a new entry: the sheet closes itself, then hands over. */
@@ -67,17 +72,6 @@ interface TransactionFormProps {
   onTransfer?: (prefill: { amount?: string; occurredOn?: string; note?: string }) => void;
   onSplitBill?: (prefill: { amount?: string; note?: string }) => void;
 }
-
-interface SpeechRecognitionResultLike { 0?: { transcript?: string }; isFinal?: boolean }
-interface SpeechRecognitionEventLike { results: ArrayLike<SpeechRecognitionResultLike> }
-interface SpeechRecognitionLike {
-  lang: string; continuous: boolean; interimResults: boolean;
-  start: () => void; stop: () => void; abort: () => void;
-  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
-  onerror: ((event: { error?: string }) => void) | null;
-  onend: (() => void) | null;
-}
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
 function locationFromTransaction(transaction?: LedgerTransaction | null): TransactionLocationDraft | null {
   return transaction?.locationLatitude != null && transaction.locationLongitude != null ? {
@@ -91,7 +85,7 @@ function locationFromTransaction(transaction?: LedgerTransaction | null): Transa
   } : null;
 }
 
-export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, initialLocation, initialKind = "expense", transactions, customCategories, customSubcategories, paymentAccounts, savedPlaces, learning, shareWithHousehold = false, calendarSystem = "AD", ownerId, onClose, onSave, onPasteSms, onScanReceipt, onTransfer, onSplitBill }: TransactionFormProps) {
+export function TransactionForm({ open, currency, transaction, template, initialOccurredOn, initialLocation, initialKind = "expense", transactions, customCategories, customSubcategories, paymentAccounts, savedPlaces, learning, shareWithHousehold = false, calendarSystem = "AD", ownerId, transactionGroups = [], onClose, onSave, onPasteSms, onScanReceipt, onTransfer, onSplitBill }: TransactionFormProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ReceiptUpload | undefined>();
   const [removeReceipt, setRemoveReceipt] = useState(false);
@@ -100,10 +94,14 @@ export function TransactionForm({ open, currency, transaction, template, initial
   const [suggestionQuery, setSuggestionQuery] = useState("");
   const [appliedSuggestionId, setAppliedSuggestionId] = useState<string | null>(template?.id ?? null);
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
-  const [voiceSupported, setVoiceSupported] = useState(false);
   const [voiceListening, setVoiceListening] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<string | null>(null);
-  const speechRef = useRef<SpeechRecognitionLike | null>(null);
+  const voiceTranscriptRef = useRef<(transcript: string) => void>(() => {});
+  const voiceCapture = useMemo(() => createVoiceCapture({
+    onTranscript: (transcript) => voiceTranscriptRef.current(transcript),
+    onStatus: setVoiceStatus,
+    onListening: setVoiceListening,
+  }), []);
   const [personalizationMatch, setPersonalizationMatch] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [clientRequestId, setClientRequestId] = useState("");
@@ -111,6 +109,9 @@ export function TransactionForm({ open, currency, transaction, template, initial
   const amountRef = useRef<HTMLInputElement | null>(null);
   const dateFieldRef = useRef<HTMLDivElement>(null);
   const paymentTouched = useRef(false);
+  // Until the person picks a group, a new entry follows its date into the one trip or event that covers it.
+  const groupTouched = useRef(false);
+  const suggestedGroup = (day: string) => { const covering = groupsCovering(day, transactionGroups); return covering.length === 1 ? covering[0].id : ""; };
   const source = transaction ?? template;
   const freshEntry = !transaction && !template && !initialLocation;
   const recentLocations = useMemo(() => {
@@ -129,7 +130,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
     const choices = allCategoriesFor(forKind, customCategories);
     return pickTransactionDefaults({ transactions, kind: forKind, paymentAccounts, today: todayInput(), fallbackCategory: forKind === "expense" ? "food" : choices[0].id, categoryIds: choices.map((item) => item.id), ownerId });
   };
-  const { register, control, handleSubmit, watch, reset, setValue, getValues, formState: { errors, isSubmitting } } = useForm<TransactionDraft>({ resolver: zodResolver(schema), defaultValues: { kind: "expense", category: "food", amount: "", occurredOn: todayInput(), note: "", subcategory: "", area: "", paymentMode: "cash", paymentAccountId: "", shared: false } });
+  const { register, control, handleSubmit, watch, reset, setValue, getValues, formState: { errors, isSubmitting } } = useForm<TransactionDraft>({ resolver: zodResolver(schema), defaultValues: { kind: "expense", category: "food", amount: "", occurredOn: todayInput(), note: "", subcategory: "", area: "", paymentMode: "cash", paymentAccountId: "", shared: false, groupId: "" } });
   const kind = watch("kind");
   const category = watch("category");
   const paymentMode = watch("paymentMode");
@@ -139,16 +140,17 @@ export function TransactionForm({ open, currency, transaction, template, initial
   const area = watch("area");
   const paymentAccountId = watch("paymentAccountId");
   const shared = watch("shared");
+  const groupId = watch("groupId");
   const today = todayInput();
   const dateChip = entryDateLabel(occurredOn, today, calendarSystem);
-  const hasDetails = Boolean(area || location || receipt || receiptUploading || shared);
+  const hasDetails = Boolean(area || location || receipt || receiptUploading || shared || groupId);
   const showDetails = Boolean(transaction) || detailsOpen || hasDetails;
   const suggestions = useMemo(() => getTransactionSuggestions(transactions, kind, suggestionQuery), [kind, suggestionQuery, transactions]);
   const subcategory = subcategoriesFor(category);
   const subcategoryOptions = subcategoryOptionsFor(category, customSubcategories);
   const categoryColor = allCategoriesFor(kind, customCategories).find((item) => item.id === category)?.color ?? "#557f69";
   const smartWarnings = useMemo(() => transactionWarnings({ kind, category, amountMinor: Math.round(Number(amount?.replace(/,/g, "")) * 100) || 0, occurredOn, note, area, paymentMode, paymentAccountId }, transactions, transaction?.id), [amount, area, category, kind, note, occurredOn, paymentAccountId, paymentMode, transaction?.id, transactions]);
-  const discardAndClose = () => { if (receiptUploading) return; if (receipt) void discardReceipt(receipt); onClose(); };
+  const discardAndClose = () => { if (receiptUploading) return; voiceCapture.cancel(); if (receipt) void discardReceipt(receipt); onClose(); };
   const handOff = (next: () => void) => { if (receiptUploading) return; discardAndClose(); next(); };
   const typedAmount = () => Number(getValues("amount")?.replace(/,/g, "")) > 0 ? getValues("amount").replace(/,/g, "") : undefined;
 
@@ -172,7 +174,9 @@ export function TransactionForm({ open, currency, transaction, template, initial
       paymentMode: source?.paymentMode ?? picked?.paymentMode ?? "cash",
       paymentAccountId: source?.paymentAccountId ?? picked?.paymentAccountId ?? "",
       shared: source?.shared ?? false,
+      groupId: transaction ? transaction.groupId ?? "" : suggestedGroup(initialOccurredOn ?? todayInput()),
     });
+    groupTouched.current = false;
     const nextLocation = locationFromTransaction(source) ?? initialLocation ?? null;
     setLocation(nextLocation);
     setDetailsOpen(Boolean(nextLocation || source?.area || source?.shared));
@@ -188,12 +192,19 @@ export function TransactionForm({ open, currency, transaction, template, initial
     setAppliedSuggestionId(template?.id ?? null);
     setPersonalizationMatch(null);
     setVoiceStatus(null);
-    const recognition = window as typeof window & { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor };
-    setVoiceSupported(Boolean(recognition.SpeechRecognition ?? recognition.webkitSpeechRecognition));
   }, [open, transaction, template, initialOccurredOn, initialLocation, initialKind]);
-  useEffect(() => () => { speechRef.current?.abort(); }, []);
+  useEffect(() => {
+    // TransactionForm stays mounted while the overlay closes and opens again.
+    return () => voiceCapture.cancel();
+  }, [open, transaction, template, initialOccurredOn, initialLocation, initialKind, voiceCapture]);
   // Once a suggestion, voice or the user fills a detail, keep the section open: clearing that field must not hide it mid-edit.
   useEffect(() => { if (hasDetails) setDetailsOpen(true); }, [hasDetails]);
+  useEffect(() => {
+    if (!open || transaction || groupTouched.current || !occurredOn) return;
+    const covering = groupsCovering(occurredOn, transactionGroups);
+    const next = covering.length === 1 ? covering[0].id : "";
+    if (next !== getValues("groupId")) setValue("groupId", next);
+  }, [getValues, occurredOn, open, setValue, transaction, transactionGroups]);
 
   const chooseKind = (nextKind: TransactionKind) => {
     setValue("kind", nextKind, { shouldValidate: true });
@@ -239,37 +250,26 @@ export function TransactionForm({ open, currency, transaction, template, initial
 
   const useVoiceTranscript = (transcript: string) => {
     const parsed = parseVoiceTransaction(transcript, [...CATEGORIES, ...customCategories], paymentAccounts);
+    const categories = allCategoriesFor(parsed.kind, customCategories);
+    const nextCategory = parsed.category ?? (categories.some((item) => item.id === getValues("category")) ? getValues("category") : categories[0].id);
+    if (nextCategory !== getValues("category")) setValue("subcategory", "");
     setValue("kind", parsed.kind, { shouldValidate: true });
-    if (parsed.category) setValue("category", parsed.category, { shouldValidate: true });
+    setValue("category", nextCategory, { shouldValidate: true });
     if (parsed.amount) setValue("amount", parsed.amount, { shouldValidate: true });
     if (parsed.occurredOn) setValue("occurredOn", parsed.occurredOn, { shouldValidate: true });
-    if (parsed.paymentMode) { setValue("paymentMode", parsed.paymentMode, { shouldValidate: true }); paymentTouched.current = true; }
+    if (parsed.paymentMode) {
+      setValue("paymentMode", parsed.paymentMode, { shouldValidate: true });
+      if (parsed.paymentMode !== "online") setValue("paymentAccountId", "", { shouldValidate: true });
+      paymentTouched.current = true;
+    }
     if (parsed.paymentAccountId) setValue("paymentAccountId", parsed.paymentAccountId, { shouldValidate: true });
     if (parsed.area) { setValue("area", parsed.area, { shouldValidate: true }); applyPersonalization(parsed.area, parsed.kind); }
     setValue("note", parsed.transcript, { shouldValidate: true });
     setVoiceStatus("Voice captured. Review every field before saving.");
   };
 
-  const toggleVoice = () => {
-    if (voiceListening) { speechRef.current?.stop(); return; }
-    const speechWindow = window as typeof window & { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor };
-    const Constructor = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
-    if (!Constructor) { setVoiceStatus("Voice capture is not supported in this browser."); return; }
-    const recognition = new Constructor();
-    recognition.lang = "en-NP";
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.onresult = (event) => {
-      const transcript = Array.from(event.results).map((result) => result[0]?.transcript ?? "").join(" ").trim();
-      if (transcript) useVoiceTranscript(transcript);
-    };
-    recognition.onerror = (event) => setVoiceStatus(event.error === "not-allowed" ? "Microphone permission was denied." : "Voice capture could not understand that. Try again.");
-    recognition.onend = () => { setVoiceListening(false); speechRef.current = null; };
-    speechRef.current = recognition;
-    setVoiceStatus("Listening… Say the amount, category, place, payment method, and date. Your browser may process speech using its own speech service.");
-    setVoiceListening(true);
-    recognition.start();
-  };
+  useEffect(() => { voiceTranscriptRef.current = useVoiceTranscript; });
+  const toggleVoice = () => voiceCapture.toggle(window);
 
   const startAnother = (saved: TransactionDraft) => {
     reset({ ...saved, amount: "", note: "", subcategory: "", area: "" });
@@ -288,6 +288,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
 
   const persist = async (draft: TransactionDraft) => {
     if (receiptUploading) return false;
+    voiceCapture.cancel();
     try {
       setSubmitError(null);
       // The same id rides along on every retry of this draft, so a save whose response was lost is not stored twice.
@@ -328,7 +329,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
             </div>
           </div>
           <div className="sheet-header-tools">
-            {voiceSupported && !transaction && <button type="button" className={voiceListening ? "icon-button sheet-voice-button listening" : "icon-button sheet-voice-button"} aria-pressed={voiceListening} aria-label={voiceListening ? "Stop listening" : "Add with voice"} title={voiceListening ? "Stop listening" : "Add with voice"} onClick={toggleVoice}>{voiceListening ? <StopCircle size={21} weight="fill" /> : <Microphone size={21} />}</button>}
+            {!transaction && <button type="button" className={voiceListening ? "icon-button sheet-voice-button listening" : "icon-button sheet-voice-button"} aria-pressed={voiceListening} aria-label={voiceListening ? "Stop listening" : "Add with voice"} title={voiceListening ? "Stop listening" : "Add with voice"} disabled={busy} onClick={toggleVoice}>{voiceListening ? <StopCircle size={21} weight="fill" /> : <Microphone size={21} />}</button>}
             <button className="icon-button" onClick={discardAndClose} aria-label="Close" disabled={receiptUploading}><X size={22} /></button>
           </div>
         </header>
@@ -374,7 +375,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
             <div className="category-grid">
               {pickerCategoriesFor(kind, customCategories).map((item) => (
                 <button key={item.id} type="button" className={category === item.id ? "category-choice selected" : "category-choice"} onClick={() => { setValue("category", item.id, { shouldValidate: true }); setValue("subcategory", ""); }}>
-                  <span style={{ "--category-color": item.color } as CSSProperties}><CategoryIcon category={item.id} icon={item.icon} /></span>
+                  <span style={{ "--category-color": item.color } as CSSProperties}><CategoryIcon category={item.id} icon={item.icon} weight="bold" /></span>
                   {item.label}
                   {category === item.id && <Check size={15} weight="bold" />}
                 </button>
@@ -382,7 +383,7 @@ export function TransactionForm({ open, currency, transaction, template, initial
             </div>
           </fieldset>
 
-          {subcategoryOptions.length ? <fieldset className="subcategory-fieldset"><legend>{subcategory.label} <span>Optional</span></legend><Controller control={control} name="subcategory" render={({ field }) => <div className="subcategory-grid">{subcategoryOptions.map((option) => <button key={option.name} type="button" className={field.value === option.name ? "subcategory-choice selected" : "subcategory-choice"} aria-pressed={field.value === option.name} onClick={() => field.onChange(field.value === option.name ? "" : option.name)}><span style={{ "--category-color": categoryColor } as CSSProperties}><SubcategoryIcon subcategory={option.name} icon={option.icon} /></span>{option.name}{field.value === option.name && <Check size={14} weight="bold" />}</button>)}</div>} /></fieldset> : <TextInput label={subcategory.label} description="Optional" placeholder="Add more detail" {...register("subcategory")} />}
+          {subcategoryOptions.length ? <fieldset className="subcategory-fieldset"><legend>{subcategory.label} <span>Optional</span></legend><Controller control={control} name="subcategory" render={({ field }) => <div className="subcategory-grid">{subcategoryOptions.map((option) => <button key={option.name} type="button" className={field.value === option.name ? "subcategory-choice selected" : "subcategory-choice"} aria-pressed={field.value === option.name} onClick={() => field.onChange(field.value === option.name ? "" : option.name)}><span style={{ "--category-color": categoryColor } as CSSProperties}><SubcategoryIcon subcategory={option.name} icon={option.icon} weight="bold" /></span>{option.name}{field.value === option.name && <Check size={14} weight="bold" />}</button>)}</div>} /></fieldset> : <TextInput label={subcategory.label} description="Optional" placeholder="Add more detail" {...register("subcategory")} />}
 
           <fieldset className="payment-fieldset">
             <legend>Mode of payment <span>Required</span></legend>
@@ -400,8 +401,9 @@ export function TransactionForm({ open, currency, transaction, template, initial
           </div>
           {smartWarnings.length > 0 && <div className="transaction-warning-stack" role="status" aria-label="Smart transaction checks">{smartWarnings.map((warning) => <div className={warning.tone} key={warning.type}><WarningCircle size={18} weight="fill" /><span><strong>{warning.title}</strong><small>{warning.detail}</small></span></div>)}</div>}
 
-          {!transaction && !hasDetails && <button type="button" className={detailsOpen ? "more-details-toggle open" : "more-details-toggle"} aria-expanded={detailsOpen} aria-controls="transaction-more-details" onClick={() => setDetailsOpen((current) => !current)}><span><strong>{detailsOpen ? "Fewer details" : "More details"}</strong><small>Place or map pin, receipt{shareWithHousehold ? ", share as Ours" : ""}</small></span><CaretDown size={16} weight="bold" /></button>}
+          {!transaction && !hasDetails && <button type="button" className={detailsOpen ? "more-details-toggle open" : "more-details-toggle"} aria-expanded={detailsOpen} aria-controls="transaction-more-details" onClick={() => setDetailsOpen((current) => !current)}><span><strong>{detailsOpen ? "Fewer details" : "More details"}</strong><small>{transactionGroups.length ? "Group, place" : "Place"} or map pin, receipt{shareWithHousehold ? ", share as Ours" : ""}</small></span><CaretDown size={16} weight="bold" /></button>}
           <div id="transaction-more-details" className="transaction-more-details" hidden={!showDetails}>
+            {transactionGroups.length > 0 && <Controller control={control} name="groupId" render={({ field }) => <Select label="Group" description={field.value && !groupTouched.current && !transaction ? "Picked because its dates cover this day · change or clear it" : "Optional · a trip or event this belongs to"} placeholder="No group" data={transactionGroups.map((group) => ({ value: group.id, label: group.name }))} value={field.value || null} onChange={(value) => { groupTouched.current = true; field.onChange(value ?? ""); }} clearable searchable comboboxProps={{ withinPortal: true }} />} />}
             <div className="transaction-location-field">
               <Controller control={control} name="area" render={({ field }) => <TextInput label={subcategory.areaLabel ?? "Where did this happen?"} description="Optional · Kathmandu only for exact pins" placeholder={subcategory.areaPlaceholder ?? "Type an area or choose an exact location"} value={field.value} onChange={(event) => { field.onChange(event); applyPersonalization(event.currentTarget.value); if (location && event.currentTarget.value !== location.label) setLocation(null); }} />} />
               {personalizationMatch && <div className="personalization-applied" role="status"><Sparkle size={16} /><span><strong>Personalization applied</strong><small>Category details were filled from your learned pattern for {personalizationMatch}. Review them before saving.</small></span></div>}

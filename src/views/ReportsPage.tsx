@@ -1,17 +1,17 @@
-import { Bank, CaretLeft, CaretRight, DownloadSimple, FlagBanner, Sparkle, TrendDown, TrendUp } from "@phosphor-icons/react";
+import { Bank, CaretLeft, CaretRight, ChartPie, Confetti, DownloadSimple, FlagBanner, Plus, Receipt, Sparkle, TrendDown, TrendUp } from "@phosphor-icons/react";
 import { format, parseISO } from "date-fns";
-import { useContext, useMemo, useState } from "react";
+import { useContext, useMemo, useState, type CSSProperties } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { EmptyState } from "../components/EmptyState";
 import { BalanceLocked, BalancePinHint } from "../components/BalancePrivacy";
+import { AccountTile, CategoryTile } from "../components/ToneIcon";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
-import { MonthPicker } from "../components/MonthPicker";
 import { formatMoney } from "../lib/currency";
 import { countsAsIncomeOrSpending } from "../lib/categories";
-import { isInMonth, monthKey, todayInput } from "../lib/dates";
-import type { PeriodKey } from "../lib/period";
+import { formatLedgerDate, formatLedgerMonth, isInMonth, monthKey, todayInput } from "../lib/dates";
+import { plainAmount } from "../lib/entry-labels";
+import { addMonthsToKey, type PeriodKey } from "../lib/period";
 import { monthlySeries, summarizeLedger } from "../lib/ledger";
-import { financialMilestones } from "../lib/milestones";
+import { financialMilestones, type FinancialMilestone } from "../lib/milestones";
 import type { CalendarSystem, CurrencyCode, CustomCategory, DueItem, LedgerTransaction, PaymentAccount } from "../types";
 import { totalCurrentBalance } from "../lib/account-balances";
 import { paymentAccountLabel } from "../lib/payment-accounts";
@@ -19,7 +19,13 @@ import { isCompletedReportMonth, reportFileKey } from "../lib/monthly-report";
 import { addFiscalYears, fiscalYearBounds, fiscalYearLabel, fiscalYearOf } from "../lib/fiscal-year";
 import { compareFestivalSpending, expensesBetween, FESTIVALS, festivalMonthLabel, type FestivalComparison } from "../lib/festivals";
 import { adToBs } from "../lib/nepali-date";
-const reportCategoryColors = ["#0072b2", "#e69f00", "#009e73", "#d55e00", "#cc79a7", "#56b4e9", "#f0e442", "#6f6f6f", "#332288", "#117733", "#cc6677", "#88ccee"] as const;
+import { accountLook, categoryTone } from "../lib/tones";
+const toneStyle = (bg: string, ink: string, size = 42) => ({ "--tile-bg": bg, "--tile-ink": ink, "--tile-size": `${size}px` } as CSSProperties);
+const MILESTONE_TONES: Record<FinancialMilestone["tone"], { bg: string; ink: string }> = {
+  blue: { bg: "#dfe6fb", ink: "#3446a8" },
+  green: { bg: "#d6f0df", ink: "#1f7a45" },
+  gold: { bg: "#fdf0c4", ink: "#8a5a00" },
+};
 
 interface ReportsPageProps {
   calendarSystem: CalendarSystem;
@@ -39,7 +45,8 @@ export function ReportsPage({ period: month, currency, transactions, customCateg
   const current = useMemo(() => transactions.filter((item) => isInMonth(item.occurredOn, month)), [month, transactions]);
   const summary = useMemo(() => summarizeLedger(current, customCategories), [current, customCategories]);
   const expenseCount = useMemo(() => current.reduce((count, item) => count + (item.kind === "expense" && countsAsIncomeOrSpending(item) ? 1 : 0), 0), [current]);
-  const categoryData = summary.categories.map((item, index) => ({ ...item, color: reportCategoryColors[index % reportCategoryColors.length] }));
+  // Each slice wears its category's own colour, the same one its icon tile uses everywhere else.
+  const categoryData = summary.categories.map((item) => ({ ...item, color: categoryTone(item.category, customCategories).ink }));
   const history = useMemo(() => monthlySeries(transactions, calendarSystem), [calendarSystem, transactions]);
   const milestones = useMemo(() => financialMilestones(transactions, dueItems), [dueItems, transactions]);
   const activeCategory = activeCategoryIndex === null ? undefined : categoryData[activeCategoryIndex];
@@ -50,33 +57,102 @@ export function ReportsPage({ period: month, currency, transactions, customCateg
   const hasPin = workspace?.ledger.profile.hasPin ?? false;
   const reportMonthKey = monthKey(month);
   const canDownloadPdf = allowPdfDownload && isCompletedReportMonth(reportMonthKey);
+  const monthName = formatLedgerMonth(month, calendarSystem);
+  const step = (delta: number) => { try { onPeriodChange(addMonthsToKey(month, delta)); } catch { /* outside the supported range */ } };
+  const saved = summary.income - summary.expenses;
 
   return (
-    <div className="page reports-page">
-      <header className="page-header"><div><span className="eyebrow">The bigger picture</span><h1>Reports</h1><p>See where your money moved and how the months compare.</p></div><div className="report-header-actions"><MonthPicker calendarSystem={calendarSystem} period={month} onChange={onPeriodChange} />{canDownloadPdf && <a className="secondary-button" href={`/api/reports/monthly?month=${encodeURIComponent(reportMonthKey)}`} download={`SaveYoRupee-${reportFileKey(reportMonthKey)}-monthly-report.pdf`}><DownloadSimple size={17} />Download PDF</a>}</div></header>
-      <section className="report-kpis">
-        <div><span>Savings rate</span><strong className={summary.savedPercentage < 0 ? "negative" : ""}>{summary.savedPercentage}%</strong><small>{summary.savedPercentage >= 0 ? <><TrendUp size={15} /> of income retained</> : <><TrendDown size={15} /> spending above income</>}</small></div>
-        <div><span>Tracked balance</span>{balancesShown || !paymentAccounts.length ? <strong>{formatMoney(trackedBalance, currency)}</strong> : <BalanceLocked compact title="Hidden" />}<small>{paymentAccounts.length} {paymentAccounts.length === 1 ? "account" : "accounts"} checked manually</small></div>
-        <div><span>Largest category</span><strong>{summary.categories[0]?.label ?? "—"}</strong><small>{summary.categories[0] ? formatMoney(summary.categories[0].value, currency) : "No expenses"}</small></div>
-        <div><span>Average expense</span><strong>{formatMoney(summary.expenses / Math.max(1, expenseCount), currency)}</strong><small>per expense entry</small></div>
+    <div className="v2-page v2-reports">
+      <header className="v2-page-head">
+        <div><span className="v2-eyebrow is-beside-stepper">The bigger picture</span><h1>Reports</h1></div>
+        <div className="v2-head-actions">
+          <span className="v2-chip is-stepper"><button type="button" onClick={() => step(-1)} aria-label="Previous month"><CaretLeft size={15} weight="bold" /></button><strong>{monthName}</strong><button type="button" onClick={() => step(1)} aria-label="Next month"><CaretRight size={15} weight="bold" /></button></span>
+        </div>
+      </header>
+
+      <section className="v2-hero v2-report-hero" aria-label={`${monthName} summary`}>
+        <div className="v2-report-hero-top">
+          <span className="v2-hero-label">{saved >= 0 ? "Kept" : "Spent more than came in"} · {monthName}</span>
+          {canDownloadPdf && <a className="v2-button is-small is-on-green-ghost" href={`/api/reports/monthly?month=${encodeURIComponent(reportMonthKey)}`} download={`SaveYoRupee-${reportFileKey(reportMonthKey)}-monthly-report.pdf`}><DownloadSimple size={15} weight="bold" />PDF</a>}
+        </div>
+        <strong className="v2-hero-amount amount">{saved < 0 ? "−" : ""}{formatMoney(Math.abs(saved), currency)}</strong>
+        <span className="v2-hero-pill">{summary.income > 0 ? (summary.savedPercentage >= 0 ? <><TrendUp size={15} weight="bold" />{summary.savedPercentage}% of income kept</> : <><TrendDown size={15} weight="bold" />{Math.abs(summary.savedPercentage)}% more out than in</>) : "No income logged this month"}</span>
+        <div className="v2-budget-hero-facts">
+          <span><small>Came in</small><strong className="amount">{formatMoney(summary.income, currency)}</strong></span>
+          <span><small>Went out</small><strong className="amount">{formatMoney(summary.expenses, currency)}</strong></span>
+        </div>
       </section>
-      <NepaliYearSection transactions={transactions} currency={currency} allowPdfDownload={allowPdfDownload} />
-      <section className="reports-grid">
-        <article className="report-panel category-report">
-          <div className="section-heading"><div><span className="section-label">Category mix</span><h2>Where it went</h2></div><strong>{formatMoney(summary.expenses, currency)}</strong></div>
+
+      <div className="v2-report-kpis">
+        <div className="v2-card v2-report-kpi">
+          <span className="v2-tile" style={toneStyle("#dde9f7", "#1d5a96", 36)} aria-hidden="true"><Bank size={19} weight="duotone" /></span>
+          <small>Tracked balance</small>
+          {balancesShown || !paymentAccounts.length ? <strong className="amount">{formatMoney(trackedBalance, currency)}</strong> : <BalanceLocked compact title="Hidden" />}
+          <span className="v2-muted">{paymentAccounts.length} {paymentAccounts.length === 1 ? "account" : "accounts"}</span>
+        </div>
+        <div className="v2-card v2-report-kpi">
+          {summary.categories[0] ? <CategoryTile category={summary.categories[0].category} custom={customCategories} size={36} /> : <span className="v2-tile" style={toneStyle("#ebeae4", "#5a5e55", 36)} aria-hidden="true"><ChartPie size={19} weight="duotone" /></span>}
+          <small>Biggest category</small>
+          <strong>{summary.categories[0]?.label ?? "None yet"}</strong>
+          <span className="v2-muted">{summary.categories[0] ? formatMoney(summary.categories[0].value, currency) : "No expenses"}</span>
+        </div>
+        <div className="v2-card v2-report-kpi">
+          <span className="v2-tile" style={toneStyle("#fde5d4", "#b4531f", 36)} aria-hidden="true"><Receipt size={19} weight="duotone" /></span>
+          <small>Average expense</small>
+          <strong className="amount">{formatMoney(summary.expenses / Math.max(1, expenseCount), currency)}</strong>
+          <span className="v2-muted">over {expenseCount} {expenseCount === 1 ? "entry" : "entries"}</span>
+        </div>
+      </div>
+
+      <div className="v2-report-grid">
+        <section className="v2-card v2-report-mix" aria-labelledby="report-mix-heading">
+          <header className="v2-card-head"><h2 id="report-mix-heading">Where it went</h2><strong className="amount">{formatMoney(summary.expenses, currency)}</strong></header>
           {summary.categories.length ? <>
-            <div className="donut-wrap"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={categoryData} dataKey="value" nameKey="label" innerRadius="65%" outerRadius="90%" paddingAngle={2} stroke="none" rootTabIndex={-1} isAnimationActive={false} onMouseEnter={(_, index) => setActiveCategoryIndex(index)} onMouseLeave={() => setActiveCategoryIndex(null)}>{categoryData.map((item) => <Cell key={item.category} fill={item.color} />)}</Pie></PieChart></ResponsiveContainer><div><span>{activeCategory?.label ?? "Expenses"}</span><strong>{formatMoney(activeCategory?.value ?? summary.expenses, currency, true)}</strong></div></div>
-            <div className="legend-list">{categoryData.map((item) => <div key={item.category}><span className="legend-dot" style={{ backgroundColor: item.color }} /><span>{item.label}</span><strong>{item.percentage}%</strong></div>)}</div>
-          </> : <EmptyState action={<button className="text-button" onClick={onAdd}>Log an expense</button>} />}
-        </article>
-        <article className="report-panel history-report">
-          <div className="section-heading"><div><span className="section-label">Six-month view</span><h2>Income vs expenses</h2></div></div>
-          {history.length ? <div className="history-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={history} barGap={4}><CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#cbd3c9" /><XAxis dataKey="month" axisLine={false} tickLine={false} /><YAxis tickFormatter={(value) => formatMoney(Number(value), currency, true)} axisLine={false} tickLine={false} width={46} /><Tooltip cursor={false} formatter={(value) => formatMoney(Number(value), currency)} /><Bar dataKey="income" name="Income" fill="#557f69" radius={[2, 2, 0, 0]} isAnimationActive={false} /><Bar dataKey="expenses" name="Expenses" fill="#8f4c49" radius={[2, 2, 0, 0]} isAnimationActive={false} /></BarChart></ResponsiveContainer></div> : <EmptyState />}
-          <div className="chart-legend"><span><i className="income-dot" />Income</span><span><i className="expense-dot" />Expenses</span></div>
-        </article>
-      </section>
-      <section className="report-panel account-report-panel"><div className="section-heading"><div><span className="section-label">Account picture</span><h2>Where your tracked money sits</h2></div><Bank size={22} weight="duotone" /></div>{paymentAccounts.length > 0 && !balancesShown ? <BalanceLocked title="Account balances are hidden" /> : paymentAccounts.length ? <div className="report-account-list">{paymentAccounts.map((account) => { const percentage = trackedBalance > 0 ? Math.round((account.currentBalanceMinor / trackedBalance) * 100) : 0; return <div key={account.id}><div><span>{paymentAccountLabel(account)}</span><strong>{formatMoney(account.currentBalanceMinor, currency)}</strong></div><div className="bar-track"><span style={{ width: `${Math.max(0, Math.min(100, percentage))}%` }} /></div><small>{percentage}% of tracked balance · checked {account.balanceAsOf}</small></div>; })}{!hasPin && <BalancePinHint />}</div> : <EmptyState title="No account balances yet" message="Add your bank or wallet balances on the Accounts page to see the full picture." />}</section>
-      <section className="milestone-panel"><div className="section-heading"><div><span className="section-label">Financial timeline</span><h2>The moments your ledger remembers</h2></div><Sparkle size={22} weight="duotone" /></div>{milestones.length ? <div className="milestone-list">{milestones.map((item) => <article key={item.id} className={item.tone}><span><FlagBanner size={17} weight="duotone" /></span><div><small>{format(parseISO(item.date), "MMM d, yyyy")}</small><strong>{item.title}</strong><p>{item.detail}</p></div></article>)}</div> : <EmptyState />}</section>
+            <div className="v2-donut">
+              <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={categoryData} dataKey="value" nameKey="label" innerRadius="68%" outerRadius="92%" paddingAngle={2} stroke="none" rootTabIndex={-1} isAnimationActive={false} onMouseEnter={(_, index) => setActiveCategoryIndex(index)} onMouseLeave={() => setActiveCategoryIndex(null)}>{categoryData.map((item) => <Cell key={item.category} fill={item.color} />)}</Pie></PieChart></ResponsiveContainer>
+              <div className="v2-donut-label"><span>{activeCategory?.label ?? "Spent"}</span><strong className="amount">{formatMoney(activeCategory?.value ?? summary.expenses, currency, true)}</strong></div>
+            </div>
+            <ul className="v2-rows">{categoryData.map((item, index) => <li key={item.category} className={`v2-report-cat${activeCategoryIndex === index ? " is-active" : ""}`} onMouseEnter={() => setActiveCategoryIndex(index)} onMouseLeave={() => setActiveCategoryIndex(null)}>
+              <CategoryTile category={item.category} custom={customCategories} size={38} />
+              <span className="v2-row-main"><strong>{item.label}</strong><span className="v2-progress"><span style={{ width: `${Math.max(2, item.percentage)}%`, background: item.color }} /></span></span>
+              <span className="v2-row-end"><strong className="amount">{plainAmount(item.value)}</strong><small className="v2-muted">{item.percentage}%</small></span>
+            </li>)}</ul>
+          </> : <div className="v2-report-empty"><p className="v2-empty">Nothing spent in {monthName} yet.</p><button type="button" className="v2-button is-primary" onClick={onAdd}><Plus size={16} weight="bold" />Add entries</button></div>}
+        </section>
+
+        <section className="v2-card v2-report-history" aria-labelledby="report-history-heading">
+          <header className="v2-card-head"><h2 id="report-history-heading">Last six months</h2><span className="v2-chart-keys is-dark"><span><i className="is-in" />In</span><span><i className="is-out" />Out</span></span></header>
+          {history.length ? <div className="v2-history-chart"><ResponsiveContainer width="100%" height="100%"><BarChart data={history} barGap={3} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}><CartesianGrid vertical={false} stroke="#eeefe7" /><XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: "#5d6b63", fontSize: 12 }} /><YAxis tickFormatter={(value) => formatMoney(Number(value), currency, true).replace(`${currency}`, "").trim()} axisLine={false} tickLine={false} width={42} tick={{ fill: "#5d6b63", fontSize: 11 }} /><Tooltip cursor={{ fill: "#f4f5ef" }} formatter={(value) => formatMoney(Number(value), currency)} contentStyle={{ borderRadius: 12, border: "1px solid #e3e5da" }} /><Bar dataKey="income" name="In" fill="#2f8f5b" radius={[6, 6, 2, 2]} isAnimationActive={false} /><Bar dataKey="expenses" name="Out" fill="#e07a5f" radius={[6, 6, 2, 2]} isAnimationActive={false} /></BarChart></ResponsiveContainer></div> : <p className="v2-empty">Log a few entries to see months side by side.</p>}
+        </section>
+      </div>
+
+      <NepaliYearSection transactions={transactions} currency={currency} allowPdfDownload={allowPdfDownload} />
+
+      <div className="v2-report-grid">
+        <section className="v2-card" aria-labelledby="report-accounts-heading">
+          <header className="v2-card-head"><h2 id="report-accounts-heading">Where your money sits</h2></header>
+          {paymentAccounts.length > 0 && !balancesShown ? <BalanceLocked title="Account balances are hidden" /> : paymentAccounts.length ? <>
+            <ul className="v2-rows">{paymentAccounts.map((account) => {
+              const percentage = trackedBalance > 0 ? Math.round((account.currentBalanceMinor / trackedBalance) * 100) : 0;
+              const { tone } = accountLook(account);
+              return <li key={account.id} className="v2-row">
+                <AccountTile account={account} size={38} />
+                <span className="v2-row-main"><strong>{paymentAccountLabel(account)}</strong><span className="v2-progress"><span style={{ width: `${Math.max(0, Math.min(100, percentage))}%`, background: tone.ink }} /></span><small>{percentage}% · checked {formatLedgerDate(account.balanceAsOf, calendarSystem)}</small></span>
+                <span className="v2-row-end"><strong className="amount">{plainAmount(account.currentBalanceMinor)}</strong></span>
+              </li>;
+            })}</ul>
+            {!hasPin && <BalancePinHint />}
+          </> : <p className="v2-empty">Add your bank or wallet balances on Accounts to see the full picture.</p>}
+        </section>
+
+        <section className="v2-card" aria-labelledby="report-moments-heading">
+          <header className="v2-card-head"><h2 id="report-moments-heading">Moments to remember</h2><Sparkle size={18} weight="duotone" /></header>
+          {milestones.length ? <ol className="v2-timeline">{milestones.map((item) => <li key={item.id}>
+            <span className="v2-tile" style={toneStyle(MILESTONE_TONES[item.tone].bg, MILESTONE_TONES[item.tone].ink, 34)} aria-hidden="true"><FlagBanner size={17} weight="duotone" /></span>
+            <div><small>{formatLedgerDate(item.date, calendarSystem)}</small><strong>{item.title}</strong><p>{item.detail}</p></div>
+          </li>)}</ol> : <p className="v2-empty">Your first entries will start the story.</p>}
+        </section>
+      </div>
     </div>
   );
 }
@@ -89,11 +165,10 @@ export function ReportsPage({ period: month, currency, transactions, customCateg
 function NepaliYearSection({ transactions, currency, allowPdfDownload }: { transactions: LedgerTransaction[]; currency: CurrencyCode; allowPdfDownload: boolean }) {
   const today = todayInput();
   const [fiscalKey, setFiscalKey] = useState(() => { try { return fiscalYearOf(today); } catch { return null; } });
-  if (!fiscalKey) return null;
-
-  const step = (delta: number) => { try { setFiscalKey(addFiscalYears(fiscalKey, delta)); } catch { /* at the edge of the supported range */ } };
   const bsYear = (() => { try { return adToBs(today).year; } catch { return null; } })();
+  // Hooks run on every render; the section simply renders nothing outside the supported years.
   const picture = useMemo(() => {
+    if (!fiscalKey) return null;
     const bounds = fiscalYearBounds(fiscalKey);
     let income = 0;
     let expenses = 0;
@@ -115,23 +190,30 @@ function NepaliYearSection({ transactions, currency, allowPdfDownload }: { trans
       festivals: bsYear === null ? [] : FESTIVALS.flatMap((festival) => { try { return [compareFestivalSpending(festival, bsYear, spentBetween, today)]; } catch { return []; } }),
     };
   }, [bsYear, fiscalKey, today, transactions]);
+  if (!fiscalKey || !picture) return null;
+
+  const step = (delta: number) => { try { setFiscalKey(addFiscalYears(fiscalKey, delta)); } catch { /* at the edge of the supported range */ } };
   const { bounds, income, expenses, entries, festivals } = picture;
   const net = income - expenses;
 
-  return <section className="nepali-year-section" aria-label="Nepali fiscal year and festivals">
-    <div className="section-heading"><div><span className="section-label">Nepali year</span><h2>Fiscal year and festivals</h2></div>
-      <div className="fiscal-year-picker"><button className="icon-button" onClick={() => step(-1)} aria-label="Previous fiscal year"><CaretLeft size={17} /></button><strong>{fiscalYearLabel(fiscalKey)}</strong><button className="icon-button" onClick={() => step(1)} aria-label="Next fiscal year"><CaretRight size={17} /></button>{allowPdfDownload && isCompletedReportMonth(fiscalKey) && <a className="secondary-button small" href={`/api/reports/monthly?month=${encodeURIComponent(fiscalKey)}`} download={`SaveYoRupee-${reportFileKey(fiscalKey)}-summary.pdf`}><DownloadSimple size={16} />Download FY summary</a>}</div>
+  return <section className="v2-card v2-fiscal" aria-labelledby="fiscal-heading">
+    <header className="v2-card-head v2-fiscal-head">
+      <div><h2 id="fiscal-heading">Nepali year</h2><small className="v2-muted">Shrawan 1 to the end of Ashadh · {format(parseISO(bounds.start), "MMM d, yyyy")} – {format(parseISO(bounds.endExclusive), "MMM d, yyyy")}</small></div>
+      <div className="v2-head-actions">
+        <span className="v2-chip is-stepper"><button type="button" onClick={() => step(-1)} aria-label="Previous fiscal year"><CaretLeft size={15} weight="bold" /></button><strong>{fiscalYearLabel(fiscalKey)}</strong><button type="button" onClick={() => step(1)} aria-label="Next fiscal year"><CaretRight size={15} weight="bold" /></button></span>
+        {allowPdfDownload && isCompletedReportMonth(fiscalKey) && <a className="v2-button is-small" href={`/api/reports/monthly?month=${encodeURIComponent(fiscalKey)}`} download={`SaveYoRupee-${reportFileKey(fiscalKey)}-summary.pdf`}><DownloadSimple size={15} weight="bold" />Summary PDF</a>}
+      </div>
+    </header>
+    <div className="v2-fiscal-kpis">
+      <span><small>In</small><strong className="amount v2-money is-in">{plainAmount(income)}</strong></span>
+      <span><small>Out</small><strong className="amount">{plainAmount(expenses)}</strong></span>
+      <span><small>Net</small><strong className={`amount${net < 0 ? " is-over" : ""}`}>{net < 0 ? "−" : ""}{plainAmount(Math.abs(net))}</strong></span>
+      <span><small>Entries</small><strong>{entries}</strong></span>
     </div>
-    <p className="fiscal-year-range">Shrawan 1 to the end of Ashadh · {format(parseISO(bounds.start), "MMM d, yyyy")} – {format(parseISO(bounds.endExclusive), "MMM d, yyyy")}</p>
-    <div className="fiscal-year-kpis">
-      <div><span>Income</span><strong className="income">{formatMoney(income, currency)}</strong></div>
-      <div><span>Expenses</span><strong className="expense">{formatMoney(expenses, currency)}</strong></div>
-      <div><span>Net</span><strong className={net < 0 ? "negative" : ""}>{formatMoney(net, currency)}</strong></div>
-      <div><span>Entries</span><strong>{entries}</strong></div>
-    </div>
-    {festivals.length > 0 && <div className="festival-grid">
-      {festivals.map((comparison) => <FestivalCard key={comparison.periodKey} comparison={comparison} currency={currency} today={today} />)}
-    </div>}
+    {festivals.length > 0 && <>
+      <h3 className="v2-fiscal-sub"><Confetti size={17} weight="duotone" />Festival seasons</h3>
+      <div className="v2-festival-grid">{festivals.map((comparison) => <FestivalCard key={comparison.periodKey} comparison={comparison} currency={currency} today={today} />)}</div>
+    </>}
   </section>;
 }
 
@@ -140,16 +222,16 @@ function FestivalCard({ comparison, currency, today }: { comparison: FestivalCom
   const { festival, status, previousBsYear, previousSpentMinor, previousComparableMinor, changePercentage } = comparison;
   const dayCount = Math.round((Date.parse(`${comparison.bounds.start}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
   const startsIn = dayCount === 1 ? "Starts tomorrow" : `Starts in ${dayCount} days`;
-  const change = changePercentage === null ? null : <small className={`festival-change ${changePercentage > 0 ? "up" : "down"}`}>{changePercentage > 0 ? "+" : ""}{changePercentage}% vs {status === "running" ? `the same point in ${previousBsYear}` : previousBsYear} (<span className="festival-amount">{formatMoney(previousComparableMinor ?? 0, currency)}</span>)</small>;
-  return <article className={`festival-card is-${status}`}>
+  const change = changePercentage === null ? null : <small className={`v2-delta ${changePercentage > 0 ? "is-up" : "is-down"}`}>{changePercentage > 0 ? "+" : ""}{changePercentage}% vs {status === "running" ? `the same point in ${previousBsYear}` : previousBsYear} (<span className="amount">{formatMoney(previousComparableMinor ?? 0, currency)}</span>)</small>;
+  return <article className={`v2-festival-card is-${status}`}>
     <header><strong>{festival.name} {comparison.bsYear}</strong><small>{festivalMonthLabel(festival)}</small></header>
     {status === "upcoming" ? <>
-      <b className="festival-status">{startsIn}</b>
-      <small className="festival-change muted">Coming up · {previousSpentMinor ? <>last year <span className="festival-amount">{formatMoney(previousSpentMinor, currency)}</span></> : `nothing logged for ${previousBsYear}`}</small>
+      <b>{startsIn}</b>
+      <small className="v2-muted">{previousSpentMinor ? <>Last year <span className="amount">{formatMoney(previousSpentMinor, currency)}</span></> : `Nothing logged for ${previousBsYear}`}</small>
     </> : <>
-      <b className="festival-amount">{formatMoney(comparison.spentMinor, currency)}</b>
-      {status === "running" && <small className="festival-progress">Day {comparison.daysElapsed} of {comparison.seasonDays} · so far</small>}
-      {change ?? <small className="festival-change muted">{previousSpentMinor === null ? "Nothing earlier to compare against." : status === "running" && previousSpentMinor > 0 ? <>Nothing by this point in {previousBsYear} · <span className="festival-amount">{formatMoney(previousSpentMinor, currency)}</span> over its whole season</> : `No ${previousBsYear} spending to compare against yet.`}</small>}
+      <b className="amount">{formatMoney(comparison.spentMinor, currency)}</b>
+      {status === "running" && <small className="v2-festival-day">Day {comparison.daysElapsed} of {comparison.seasonDays} · so far</small>}
+      {change ?? <small className="v2-muted">{previousSpentMinor === null ? "Nothing earlier to compare against." : status === "running" && previousSpentMinor > 0 ? <>Nothing by this point in {previousBsYear} · <span className="amount">{formatMoney(previousSpentMinor, currency)}</span> over its whole season</> : `No ${previousBsYear} spending to compare against yet.`}</small>}
     </>}
   </article>;
 }

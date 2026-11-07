@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
     accountReconciliation: { findMany: vi.fn() },
     savedPlace: { findMany: vi.fn() },
     accountTransfer: { findMany: vi.fn() },
+    transactionGroup: { findMany: vi.fn(async () => []), findFirst: vi.fn(async () => null) },
     dueItem: { findMany: vi.fn() },
     receiptAttachment: { findFirst: vi.fn(async () => null), deleteMany: vi.fn(), upsert: vi.fn() },
     householdMember: { findFirst: vi.fn(async () => null) },
@@ -45,7 +46,7 @@ const user = { id: "user-1", name: "Asha", email: "asha@example.com", currency: 
 beforeEach(() => {
   vi.clearAllMocks();
   db.user.findUniqueOrThrow.mockResolvedValue(user);
-  for (const table of [db.transaction, db.budget, db.recurringEntry, db.savingsGoal, db.customCategory, db.customSubcategory, db.paymentAccount, db.accountReconciliation, db.savedPlace, db.accountTransfer, db.dueItem]) table.findMany.mockResolvedValue([]);
+  for (const table of [db.transaction, db.budget, db.recurringEntry, db.savingsGoal, db.customCategory, db.customSubcategory, db.paymentAccount, db.accountReconciliation, db.savedPlace, db.accountTransfer, db.dueItem, db.transactionGroup]) table.findMany.mockResolvedValue([]);
   db.transaction.findFirst.mockResolvedValue(null);
   db.transaction.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: "tx-new", ...data }));
   db.$transaction.mockImplementation(async (callback: (client: typeof db) => unknown) => callback(db));

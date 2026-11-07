@@ -6,6 +6,7 @@ import { CATEGORY_ICON_NAMES } from "./category-icons";
 import { dueOpeningRequestId } from "./dues";
 import { RECEIPT_MAX_BYTES, RECEIPT_TYPES } from "./receipts";
 import { STORAGE_PERIOD_KEY, todayInAppZone } from "./period";
+import { TRANSACTION_GROUP_ICON_NAMES } from "./transaction-groups";
 
 export const BACKUP_VERSION = "1";
 export const BACKUP_HEADER = ["backup_version", "entity", "backup_id", "payload_json"] as const;
@@ -72,6 +73,15 @@ export const backupEntitySchemas = {
     createdAt: dateTime,
     updatedAt: dateTime,
   }),
+  transaction_group: z.object({
+    name: z.string().trim().min(1).max(60),
+    icon: z.enum(TRANSACTION_GROUP_ICON_NAMES),
+    startOn: nullableDate,
+    endOn: nullableDate,
+    note: z.string().max(240),
+    createdAt: dateTime,
+    updatedAt: dateTime,
+  }),
   transaction: z.object({
     kind: z.enum(["income", "expense"]),
     category: z.string().min(1).max(200),
@@ -91,6 +101,8 @@ export const backupEntitySchemas = {
     locationSource: z.enum(["pin", "search", "current_location", "saved"]).nullable(),
     savedPlaceId: optionalRelation,
     receiptScanId: optionalRelation,
+    // Added later: optional so older backups still restore, ungrouped.
+    groupId: optionalRelation.optional(),
     // Links a loan's opening movement to its due ("due-open:<due id>") and keeps split-bill rows idempotent.
     clientRequestId: z.string().min(1).max(200).nullable().optional(),
     createdAt: dateTime,
@@ -180,6 +192,10 @@ export const backupEntitySchemas = {
     status: z.enum(["open", "completed"]),
     annualRatePercent: z.number().min(0).max(200).nullable().optional(),
     completedOn: nullableDate,
+    // Added later: optional so older backups still restore, unlinked. The entry a loan's opening points at, and the category it gives back when unlinked.
+    linkedTransactionId: optionalRelation.optional(),
+    linkedRestoreCategory: z.string().min(1).max(200).nullable().optional(),
+    linkedRestoreSubcategory: z.string().max(80).nullable().optional(),
     createdAt: dateTime,
     updatedAt: dateTime,
   }),
@@ -189,6 +205,10 @@ export const backupEntitySchemas = {
     occurredOn: date,
     note: z.string().max(240),
     transactionId: optionalRelation,
+    // Added later: the entry was already in the ledger, so undoing this payment only unlinks it.
+    linked: z.boolean().optional(),
+    linkedRestoreCategory: z.string().min(1).max(200).nullable().optional(),
+    linkedRestoreSubcategory: z.string().max(80).nullable().optional(),
     createdAt: dateTime,
   }),
   receipt: z.object({
@@ -336,6 +356,7 @@ export function parseBackupCsv(input: string): ParsedBackup {
   const goalIds = relationIds(records, "savings_goal");
   const dueIds = relationIds(records, "due_item");
   const receiptScanIds = relationIds(records, "receipt_scan");
+  const groupIds = relationIds(records, "transaction_group");
   for (const record of records) {
     const payload = record.payload as Record<string, unknown>;
     const requireRelation = (field: string, ids: Set<string>) => {
@@ -349,6 +370,7 @@ export function parseBackupCsv(input: string): ParsedBackup {
       requireRelation("paymentAccountId", accountIds);
       requireRelation("savedPlaceId", placeIds);
       requireRelation("receiptScanId", receiptScanIds);
+      requireRelation("groupId", groupIds);
     } else if (record.entity === "account_transfer") {
       requireRelation("fromAccountId", accountIds);
       requireRelation("toAccountId", accountIds);
@@ -357,6 +379,7 @@ export function parseBackupCsv(input: string): ParsedBackup {
     } else if (record.entity === "recurring_entry") {
       requireRelation("paymentAccountId", accountIds);
     } else if (record.entity === "savings_goal_contribution") requireRelation("goalId", goalIds);
+    else if (record.entity === "due_item") requireRelation("linkedTransactionId", transactionIds);
     else if (record.entity === "due_payment") {
       requireRelation("dueItemId", dueIds);
       requireRelation("transactionId", transactionIds);

@@ -138,11 +138,12 @@ function spokenNumber(words: string[]) {
   let total = 0;
   let current = 0;
   let used = false;
-  for (const word of words) {
+  for (const [index, word] of words.entries()) {
     if (word in smallNumbers) { current += smallNumbers[word]; used = true; }
     else if (word === "hundred") { current = Math.max(1, current) * 100; used = true; }
     else if (word === "thousand") { total += Math.max(1, current) * 1000; current = 0; used = true; }
     else if (word === "lakh") { total += Math.max(1, current) * 100_000; current = 0; used = true; }
+    else if (word === "and" && used && words[index + 1] in smallNumbers) continue;
     else break;
   }
   return used ? total + current : null;
@@ -152,7 +153,8 @@ export function parseVoiceTransaction(transcript: string, categories: readonly C
   const normalized = normalize(transcript);
   const words = normalized.split(" ");
   const numeric = transcript.match(/(?:rs\.?|npr|rupees?)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i)?.[1]?.replaceAll(",", "");
-  const wordAmount = spokenNumber(words.slice(0, Math.min(words.length, 8))) ?? spokenNumber(words.slice(1, Math.min(words.length, 9)));
+  const amountStart = words.findIndex((word) => word in smallNumbers || ["hundred", "thousand", "lakh"].includes(word));
+  const wordAmount = amountStart < 0 ? null : spokenNumber(words.slice(amountStart));
   const amount = numeric && Number(numeric) > 0 ? numeric : wordAmount && wordAmount > 0 ? String(wordAmount) : undefined;
   const kind: TransactionKind = /\b(income|received|earned|salary|deposit)\b/.test(normalized) ? "income" : "expense";
   const availableCategories = categories.filter((category) => category.kind === kind || category.kind === "both");

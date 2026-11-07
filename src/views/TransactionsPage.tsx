@@ -1,30 +1,34 @@
-import { Camera, CaretDown, ChatText, CheckCircle, DownloadSimple, FileText, FunnelSimple, ListPlus, MagnifyingGlass, Plus, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
-import { NumberInput, Popover, Select, TextInput } from "@mantine/core";
-import { DatePicker } from "@mantine/dates";
-import { format, parseISO } from "date-fns";
+import { CalendarBlank, Camera, CaretDown, CaretLeft, CaretRight, ChatText, CheckCircle, CheckSquare, CursorClick, DotsThree, DownloadSimple, FileText, Folders, FunnelSimple, ListPlus, MagnifyingGlass, Plus, Tag, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
+import { Menu, NumberInput, Popover, Select, TextInput } from "@mantine/core";
+import { useMediaQuery } from "@mantine/hooks";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { EmptyState } from "../components/EmptyState";
 import { SlidingTabs } from "../components/SlidingTabs";
 import { AnimatedOverlay } from "../components/AnimatedOverlay";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { LedgerDatePickerInput as DatePickerInput } from "../components/LedgerDatePickerInput";
-import { MonthPicker } from "../components/MonthPicker";
-import { TransactionRow } from "../components/TransactionRow";
-import { TransferRow } from "../components/TransferRow";
+import { EntryDetail, EntryRow } from "../components/V2Entries";
+import { AccountTile, CategoryTile } from "../components/ToneIcon";
 import { CategoryIconPicker } from "../components/CategoryIconPicker";
 import { isFullBackupCsv } from "../lib/backup";
-import { allCategoriesFor, CATEGORIES, getCategory, pickerCategoriesFor } from "../lib/categories";
+import { allCategoriesFor, CATEGORIES, countsAsIncomeOrSpending, getCategory, pickerCategoriesFor } from "../lib/categories";
+import { formatMoney } from "../lib/currency";
+import { activityKey, plainAmount } from "../lib/entry-labels";
+import { CASH_BUCKET, spendBucket } from "../lib/month-compare";
+import { accountLook } from "../lib/tones";
 import { parseTransactionCsv, TRANSACTION_CSV_TEMPLATE, type CsvCategoryDraft, type CsvSubcategoryDraft } from "../lib/csv";
-import { formatLedgerDay, isInMonth, localDate, periodRange, todayInput } from "../lib/dates";
-import { monthKeyOf, type PeriodKey } from "../lib/period";
+import { formatLedgerDay, formatLedgerMonth, isInMonth, periodRange, todayInput } from "../lib/dates";
+import { dayGroupLabel, groupLedgerActivityByDay, takeWholeDays } from "../lib/day-groups";
+import { addMonthsToKey, lastDayOf, periodBounds, type PeriodKey } from "../lib/period";
 import { useToday } from "../lib/use-today";
 import { onlinePaymentAccounts, paymentAccountLabel } from "../lib/payment-accounts";
-import { listLedgerActivity, transferAccountLabel, type TransactionHistoryScope } from "../lib/transaction-history";
+import { listLedgerActivity, type LedgerActivityItem } from "../lib/transaction-history";
 import { analyzeStatementFile } from "../lib/statement-import";
 import { countImportDuplicates } from "../lib/transaction-intelligence";
+import { GROUPS_HREF } from "../lib/transaction-groups";
 import type { AccountTransfer, CalendarSystem, CurrencyCode, CustomCategory, CustomSubcategory, ImportJob, LearningState, LedgerTransaction, PaymentAccount, PaymentMode, ReceiptUpload, TransactionDraft, TransactionKind } from "../types";
 
 type LedgerKindFilter = TransactionKind | "transfer" | "all";
@@ -55,25 +59,17 @@ export function TransactionsPage({ period: month, currency, transactions, transf
   const [newImportSubcategories, setNewImportSubcategories] = useState<CsvSubcategoryDraft[]>([]);
   const templateHref = `data:text/csv;charset=utf-8,${encodeURIComponent(`\uFEFF${TRANSACTION_CSV_TEMPLATE}`)}`;
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [scope, setScope] = useState<TransactionHistoryScope>("history");
   const today = useToday();
-  // Today inside the running month, else the month's first day (Ashwin 1 for a BS month).
-  const dayFor = (period: PeriodKey) => localDate(isInMonth(today, period) ? today : periodRange(period).start);
-  const [selectedDay, setSelectedDay] = useState<Date>(() => dayFor(month));
+  // The list shows one month (the workspace month) or everything; a search from elsewhere opens on everything.
+  const [range, setRange] = useState<"month" | "all">("month");
+  const [accountChip, setAccountChip] = useState("all");
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // Set when the Add sheet's Statement tile sent you here: a file picker needs your own tap, so the page offers one.
+  const [importAsked, setImportAsked] = useState(false);
   const [visibleCount, setVisibleCount] = useState(50);
-  const selectedDayKey = format(selectedDay, "yyyy-MM-dd");
-  // When the date changes under an open tab, a day view sitting on "today" follows it to the new day (and month).
-  const followedToday = useRef(today);
-  useEffect(() => {
-    const previous = followedToday.current;
-    if (previous === today) return;
-    followedToday.current = today;
-    if (selectedDayKey !== previous) return;
-    setSelectedDay(parseISO(today));
-    if (!isInMonth(today, month)) onPeriodChange(monthKeyOf(today, calendarSystem));
-  }, [calendarSystem, month, onPeriodChange, selectedDayKey, today]);
+  const wide = useMediaQuery("(min-width: 1200px)") ?? false;
   // Read at tap time, so a tab left open overnight still adds to the real today.
-  const activeOccurredOn = () => scope === "day" ? selectedDayKey : todayInput();
+  const activeOccurredOn = () => range === "month" && !isInMonth(todayInput(), month) ? periodRange(month).start : todayInput();
   // A statement's rows are online payments, so Cash in hand is not a statement account; imports land only in your own accounts.
   const ownerId = workspace?.ledger.profile.id;
   const importAccounts = useMemo(() => onlinePaymentAccounts(paymentAccounts).filter((account) => !ownerId || account.userId === ownerId), [ownerId, paymentAccounts]);
@@ -83,16 +79,43 @@ export function TransactionsPage({ period: month, currency, transactions, transf
     const nextQuery = searchParams.get("q");
     if (nextQuery) {
       setQuery(nextQuery);
-      setScope("history");
+      setRange("all");
     }
+    if (searchParams.get("import")) setImportAsked(true);
+    const account = searchParams.get("account");
+    if (account) setAccountChip(account);
   }, [searchParams]);
-  const sorted = useMemo(() => listLedgerActivity(transactions, transfers, paymentAccounts, customCategories, {
-    scope, selectedDayKey, kind, category, from, to,
+  const monthStart = periodRange(month).start;
+  const monthEnd = lastDayOf(periodBounds(month));
+  const effectiveFrom = range === "month" ? (from && from > monthStart ? from : monthStart) : from;
+  const effectiveTo = range === "month" ? (to && to < monthEnd ? to : monthEnd) : to;
+  const listed = useMemo(() => listLedgerActivity(transactions, transfers, paymentAccounts, customCategories, {
+    scope: "history", selectedDayKey: "", kind, category, from: effectiveFrom, to: effectiveTo,
     minMinor: min ? Number(min) * 100 : null, maxMinor: max ? Number(max) * 100 : null,
     paymentMode, query,
-  }), [transactions, transfers, paymentAccounts, customCategories, scope, selectedDayKey, kind, category, from, to, min, max, paymentMode, query]);
-  useEffect(() => { setVisibleCount(50); }, [scope, selectedDayKey, kind, category, from, to, min, max, paymentMode, query]);
-  const visibleTransactions = sorted.slice(0, visibleCount);
+  }), [transactions, transfers, paymentAccounts, customCategories, kind, category, effectiveFrom, effectiveTo, min, max, paymentMode, query]);
+  // Account chips: a cash entry with no account belongs to Cash, like on Home; a transfer belongs to both ends.
+  const accountChips = useMemo(() => {
+    const keys = new Set(paymentAccounts.map((account) => account.id));
+    if (transactions.some((transaction) => spendBucket(transaction, paymentAccounts) === CASH_BUCKET)) keys.add(CASH_BUCKET);
+    return [...keys];
+  }, [paymentAccounts, transactions]);
+  const sorted = useMemo(() => accountChip === "all" ? listed : listed.filter((item) => item.type === "transaction"
+    ? spendBucket(item.transaction, paymentAccounts) === accountChip
+    : item.transfer.fromAccountId === accountChip || item.transfer.toAccountId === accountChip), [accountChip, listed, paymentAccounts]);
+  const totals = useMemo(() => {
+    let outMinor = 0, inMinor = 0;
+    for (const item of sorted) {
+      if (item.type !== "transaction" || !countsAsIncomeOrSpending(item.transaction)) continue;
+      if (item.transaction.kind === "income") inMinor += item.transaction.amountMinor; else outMinor += item.transaction.amountMinor;
+    }
+    return { outMinor, inMinor };
+  }, [sorted]);
+  useEffect(() => { setVisibleCount(50); }, [range, month, accountChip, kind, category, from, to, min, max, paymentMode, query]);
+  // Pages by whole days, so "Load more" never splits a day.
+  const visibleDays = useMemo(() => takeWholeDays(groupLedgerActivityByDay(sorted), visibleCount), [sorted, visibleCount]);
+  const visibleCountShown = visibleDays.reduce((total, day) => total + day.items.length, 0);
+  const selectedItem = wide && selectedKey ? sorted.find((item) => activityKey(item) === selectedKey) ?? null : null;
   const possibleImportDuplicates = useMemo(() => countImportDuplicates(preview ?? [], transactions), [preview, transactions]);
   const importPreviewIsValid = Boolean(preview?.length && preview.every((row) => Number(row.amount.replace(/,/g, "")) > 0 && /^\d{4}-\d{2}-\d{2}$/.test(row.occurredOn)));
   useEffect(() => {
@@ -141,20 +164,43 @@ export function TransactionsPage({ period: month, currency, transactions, transf
   const updatePreviewRow = (index: number, changes: Partial<TransactionDraft>) => setPreview((current) => current?.map((row, rowIndex) => rowIndex === index ? { ...row, ...changes } : row) ?? null);
   const remove = async (transaction: LedgerTransaction) => { if (deletingId) return; setDeletingId(transaction.id); try { await onDelete(transaction); } finally { setDeletingId(null); } };
   const removeTransfer = async (id: string) => { if (deletingId || !window.confirm("Delete this transfer? Account balances will be recalculated.")) return; setDeletingId(`transfer:${id}`); try { await onDeleteTransfer(id); } finally { setDeletingId(null); } };
-  const clearFilters = () => { setCategory("all"); setFrom(""); setTo(""); setMin(""); setMax(""); setPaymentMode("all"); };
-  const hasActiveFilters = category !== "all" || Boolean(from || to || min || max) || paymentMode !== "all";
-  const changeMonth = (nextMonth: PeriodKey) => {
-    onPeriodChange(nextMonth);
-    if (!isInMonth(selectedDayKey, nextMonth)) setSelectedDay(dayFor(nextMonth));
+  const askDeleteTransfer = (transfer: AccountTransfer) => void removeTransfer(transfer.id);
+  const openItem = (item: LedgerActivityItem) => {
+    if (wide) { setSelectedKey(activityKey(item)); return; }
+    if (item.type === "transfer") workspace?.openTransfer({ transferId: item.transfer.id });
+    else if (!ownerId || item.transaction.userId === ownerId) onEdit(item.transaction);
   };
-  const selectDay = (value: string | null) => {
-    if (!value) return;
-    setSelectedDay(parseISO(value));
-    if (!isInMonth(value, month)) onPeriodChange(monthKeyOf(value, calendarSystem));
+  const clearFilters = () => { setKind("all"); setFrom(""); setTo(""); setMin(""); setMax(""); setPaymentMode("all"); };
+  const extraFilterCount = (kind !== "all" ? 1 : 0) + (from ? 1 : 0) + (to ? 1 : 0) + (min ? 1 : 0) + (max ? 1 : 0) + (paymentMode !== "all" ? 1 : 0);
+  const stepMonth = (delta: number) => { try { onPeriodChange(addMonthsToKey(month, delta)); setRange("month"); } catch { /* outside the supported range */ } };
+  const categoryLabel = category === "all" ? "Any category" : getCategory(category, customCategories).label;
+  const chipLabel = (key: string) => {
+    if (key === CASH_BUCKET) return "Cash";
+    const account = paymentAccounts.find((item) => item.id === key);
+    return account ? (account.label || paymentAccountLabel(account)) : "Account";
   };
 
-  return <div className="page list-page">
-    <header className="page-header"><div><span className="eyebrow">Your ledger</span><h1>Transactions</h1><p>Income, expenses, and transfers between your accounts, in one timeline.</p></div><div className="transaction-actions"><div className="header-actions"><input ref={fileRef} className="visually-hidden" type="file" accept=".csv,.txt,.pdf,text/csv,text/plain,application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ""; if (file) void readFile(file); }} /><button className="secondary-button receipt-scan-trigger" onClick={() => workspace?.openReceiptScan(activeOccurredOn())}><Camera size={18} />Scan receipt <span>AI</span></button><button className="secondary-button sms-capture-trigger" onClick={() => workspace?.openSms()}><ChatText size={18} />Paste bank SMS</button><button id="csv-import-trigger" className="secondary-button csv-import-trigger" disabled={analyzingImport} onClick={() => fileRef.current?.click()}>{analyzingImport ? <ButtonSpinner /> : <UploadSimple size={18} />}{analyzingImport ? "Reading statement…" : "Import statement"}</button><Link className="secondary-button" href="/transactions/multiple"><ListPlus size={18} />Add multiple</Link><button className="primary-button" onClick={() => onAdd(activeOccurredOn())}><Plus size={18} />Add transaction</button></div><div className="csv-template-help"><span>CSV, PDF, image, or text · always review before import</span><a href={templateHref} download="transaction-import-template.csv"><DownloadSimple size={14} />Download CSV template</a></div></div></header>
+  return <div className={`v2-page v2-transactions${selectedItem ? " has-detail" : ""}`}>
+    <input ref={fileRef} className="visually-hidden" type="file" accept=".csv,.txt,.pdf,text/csv,text/plain,application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ""; if (file) void readFile(file); }} />
+    <header className="v2-page-head">
+      <div><span className="v2-eyebrow">{range === "month" ? formatLedgerMonth(month, calendarSystem) : "All history"}</span><h1>Transactions</h1></div>
+      <div className="v2-head-actions">
+        <Link className="v2-button is-compact" href="/transactions/edit" aria-label="Select entries to edit together"><CheckSquare size={18} /><span>Select</span></Link>
+        <Menu position="bottom-end" shadow="md" width={260} withinPortal>
+          <Menu.Target><button type="button" id="csv-import-trigger" className="v2-icon-btn" aria-label="More ways to add" disabled={analyzingImport}>{analyzingImport ? <ButtonSpinner /> : <DotsThree size={22} weight="bold" />}</button></Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Item leftSection={<Plus size={17} />} onClick={() => onAdd(activeOccurredOn())}>Add one entry</Menu.Item>
+            <Menu.Item leftSection={<ListPlus size={17} />} component={Link} href="/transactions/multiple">Add several at once</Menu.Item>
+            <Menu.Item leftSection={<ChatText size={17} />} onClick={() => workspace?.openSms()}>Paste bank SMS</Menu.Item>
+            <Menu.Item leftSection={<Camera size={17} />} onClick={() => workspace?.openReceiptScan(activeOccurredOn())}>Scan a receipt</Menu.Item>
+            <Menu.Item leftSection={<UploadSimple size={17} />} onClick={() => fileRef.current?.click()}>Import a statement or CSV</Menu.Item>
+            <Menu.Item leftSection={<DownloadSimple size={17} />} component="a" href={templateHref} download="transaction-import-template.csv">Download CSV template</Menu.Item>
+            <Menu.Divider />
+            <Menu.Item leftSection={<Folders size={17} />} component={Link} href={GROUPS_HREF}>Groups</Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
+      </div>
+    </header>
     {importJobs.length > 0 && <section className="import-progress-stack" aria-label="CSV import progress" aria-live="polite">{importJobs.map((job) => {
       const percent = job.totalRows ? Math.round(job.processedRows / job.totalRows * 100) : 0;
       const completed = job.status === "completed";
@@ -165,23 +211,87 @@ export function TransactionsPage({ period: month, currency, transactions, transf
         {failed && <p className="import-progress-error">{job.error ?? "The import failed and was rolled back."}</p>}
       </article>;
     })}</section>}
-    <section className="transaction-scope">
-      <div className={scope === "history" ? "transaction-scope-title is-history" : "transaction-scope-title"}>{scope === "day"
-        ? <><span className="section-label">Viewing month</span><MonthPicker calendarSystem={calendarSystem} period={month} onChange={changeMonth} /><Popover position="bottom-start" shadow="md" withArrow><Popover.Target><button className="current-date" aria-label={`Choose day. Selected ${formatLedgerDay(selectedDay, calendarSystem)}`}>{formatLedgerDay(selectedDay, calendarSystem)} <CaretDown size={13} weight="bold" /></button></Popover.Target><Popover.Dropdown className="day-picker-popover"><DatePicker value={selectedDayKey} onChange={selectDay} firstDayOfWeek={0} /></Popover.Dropdown></Popover></>
-        : <><span className="section-label">Viewing</span><strong className="month-label">All history</strong><span className="current-date as-text">Every transaction you have recorded</span></>}</div>
-      <div className="transaction-scope-controls"><SlidingTabs<TransactionHistoryScope> className="transaction-history-scope" label="Transaction scope" value={scope} onChange={setScope} options={[{ id: "history", label: "All history" }, { id: "day", label: "By day" }]} /><SlidingTabs<LedgerKindFilter> className="transaction-kind-tabs" label="Transaction type" value={kind} onChange={setKind} options={[{ id: "all", label: "All" }, { id: "expense", label: "Expense" }, { id: "income", label: "Income" }, { id: "transfer", label: "Transfer" }]} /></div>
-    </section>
-    <section className="toolbar"><TextInput className="search-field" aria-label={scope === "history" ? "Search all transactions" : "Search transactions on selected day"} leftSection={<MagnifyingGlass size={19} />} rightSection={query ? <button onClick={() => setQuery("")} aria-label="Clear search"><X size={17} /></button> : null} value={query} onChange={(event) => setQuery(event.target.value)} placeholder={scope === "history" ? "Search all transactions" : `Search ${format(selectedDay, "MMMM d")} transactions`} /></section>
-    <section className="advanced-filters" aria-label="Transaction filters">
-      <div className="filter-panel-heading"><span><FunnelSimple size={18} /><strong>Filters</strong></span><button className="text-button clear-filter-button" disabled={!hasActiveFilters} onClick={clearFilters}>Clear filters</button></div>
-      <Select label={kind === "all" || kind === "transfer" ? "Category" : `${kind === "expense" ? "Expense" : "Income"} category`} value={category} onChange={(value) => value && setCategory(value)} data={[{ value: "all", label: "All categories" }, ...filterCategories.map((item) => ({ value: item.id, label: item.label }))]} searchable allowDeselect={false} disabled={kind === "transfer"} />
-      <DatePickerInput label="From date" value={from || null} onChange={(value) => setFrom(value ?? "")} clearable valueFormat="MMM D, YYYY" firstDayOfWeek={0} />
-      <DatePickerInput label="To date" value={to || null} onChange={(value) => setTo(value ?? "")} clearable valueFormat="MMM D, YYYY" firstDayOfWeek={0} />
-      <NumberInput label="Min amount" aria-label={`Minimum amount in ${currency}`} leftSection={<span className="currency-prefix">{currency}</span>} leftSectionWidth={52} value={min} onChange={(value) => setMin(String(value))} min={0} thousandSeparator="," decimalScale={2} />
-      <NumberInput label="Max amount" aria-label={`Maximum amount in ${currency}`} leftSection={<span className="currency-prefix">{currency}</span>} leftSectionWidth={52} value={max} onChange={(value) => setMax(String(value))} min={0} thousandSeparator="," decimalScale={2} />
-      <Select label="Payment mode" value={paymentMode} onChange={(value) => value && setPaymentMode(value as PaymentMode | "all")} data={[{ value: "all", label: "All payment modes" }, { value: "cash", label: "Cash" }, { value: "cheque", label: "Cheque" }, { value: "online", label: "Online payment" }]} allowDeselect={false} disabled={kind === "transfer"} />
-    </section>
-    <section className="ledger-list"><div className="ledger-list-heading"><span>{sorted.length} {sorted.length === 1 ? "entry" : "entries"}{scope === "day" ? ` on ${formatLedgerDay(selectedDay, calendarSystem, "date")}` : ""}</span><span>Newest first</span></div>{visibleTransactions.map((entry) => entry.type === "transaction" ? <TransactionRow key={`transaction-${entry.transaction.id}`} transaction={entry.transaction} currency={currency} customCategories={customCategories} onDuplicate={onDuplicate} onEdit={onEdit} onDelete={(item) => void remove(item)} deletePending={deletingId === entry.transaction.id} /> : <TransferRow key={`transfer-${entry.transfer.id}`} transfer={entry.transfer} fromLabel={transferAccountLabel(paymentAccounts, entry.transfer.fromAccountId)} toLabel={transferAccountLabel(paymentAccounts, entry.transfer.toAccountId)} currency={currency} onDelete={() => void removeTransfer(entry.transfer.id)} deletePending={deletingId === `transfer:${entry.transfer.id}`} />)}{!sorted.length && <EmptyState title={scope === "history" ? "No matching entries" : `No ${kind === "all" ? "" : `${kind} `}entries on ${format(selectedDay, "MMMM d")}`} message={scope === "history" ? "Try changing your search or filters, or add a transaction." : "Try another day or filter, or add a new transaction."} action={kind === "transfer" ? undefined : <button className="primary-button small" onClick={() => onAdd(activeOccurredOn())}><Plus size={17} />Add transaction</button>} />}{visibleTransactions.length < sorted.length && <nav className="transaction-history-pagination" aria-label="More transactions"><span aria-live="polite">Showing {visibleTransactions.length} of {sorted.length}</span><button className="secondary-button small" onClick={() => setVisibleCount((count) => count + 50)}>Load 50 more</button></nav>}</section>
+
+    {importAsked && <section className="v2-card v2-import-ask" aria-labelledby="v2-import-ask-title">
+      <span className="v2-tile" style={{ "--tile-bg": "#fdf0c4", "--tile-ink": "#8a5a00", "--tile-size": "46px" } as CSSProperties} aria-hidden="true"><FileText size={24} weight="duotone" /></span>
+      <div><h2 id="v2-import-ask-title">Import a statement</h2><p>A bank or wallet statement (PDF, image, text) or a CSV. You review every row before anything is saved.</p></div>
+      <div className="v2-import-ask-actions"><button type="button" className="v2-button is-primary" disabled={analyzingImport} onClick={() => { setImportAsked(false); fileRef.current?.click(); }}>{analyzingImport ? <ButtonSpinner /> : <UploadSimple size={17} />}Choose a file</button><button type="button" className="v2-icon-btn is-quiet" onClick={() => setImportAsked(false)} aria-label="Dismiss"><X size={17} /></button></div>
+    </section>}
+    <label className="v2-search">
+      <MagnifyingGlass size={19} aria-hidden="true" />
+      <input type="search" aria-label="Search transactions" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search notes, places, amounts" />
+      {query && <button type="button" className="v2-icon-btn is-quiet" onClick={() => setQuery("")} aria-label="Clear search"><X size={17} /></button>}
+    </label>
+
+    <div className="v2-chip-row" role="group" aria-label="Account">
+      <button type="button" className={accountChip === "all" ? "v2-chip active" : "v2-chip"} aria-pressed={accountChip === "all"} onClick={() => setAccountChip("all")}>All accounts</button>
+      {accountChips.map((key) => {
+        const account = paymentAccounts.find((item) => item.id === key) ?? null;
+        const { tone } = accountLook(account, key);
+        const on = accountChip === key;
+        return <button key={key} type="button" className={on ? "v2-chip active" : "v2-chip"} aria-pressed={on} style={on ? { background: tone.ink, borderColor: tone.ink, color: "#fff" } : { background: tone.bg, borderColor: "transparent", color: tone.ink }} onClick={() => setAccountChip(on ? "all" : key)}>
+          <AccountTile account={account} bucket={key} size={22} />{chipLabel(key)}
+        </button>;
+      })}
+    </div>
+
+    <div className="v2-chip-row" role="group" aria-label="Filters">
+      {range === "month"
+        ? <span className="v2-chip is-stepper"><button type="button" onClick={() => stepMonth(-1)} aria-label="Previous month"><CaretLeft size={15} weight="bold" /></button><strong>{formatLedgerMonth(month, calendarSystem)}</strong><button type="button" onClick={() => stepMonth(1)} aria-label="Next month"><CaretRight size={15} weight="bold" /></button></span>
+        : <button type="button" className="v2-chip" onClick={() => setRange("month")}><CalendarBlank size={16} />One month</button>}
+      <button type="button" className={range === "all" ? "v2-chip active" : "v2-chip"} aria-pressed={range === "all"} onClick={() => setRange(range === "all" ? "month" : "all")}>All time</button>
+      <Menu position="bottom-start" shadow="md" width={240} withinPortal>
+        <Menu.Target><button type="button" className={category === "all" ? "v2-chip" : "v2-chip active"}><Tag size={16} />{categoryLabel}<CaretDown size={13} weight="bold" /></button></Menu.Target>
+        <Menu.Dropdown className="v2-category-menu">
+          <Menu.Item onClick={() => setCategory("all")}>Any category</Menu.Item>
+          {filterCategories.map((item) => <Menu.Item key={item.id} leftSection={<CategoryTile category={item.id} custom={customCategories} size={26} />} onClick={() => setCategory(item.id)}>{item.label}</Menu.Item>)}
+        </Menu.Dropdown>
+      </Menu>
+      <Popover position="bottom-start" shadow="md" width={320} withinPortal>
+        <Popover.Target><button type="button" className={extraFilterCount ? "v2-chip active" : "v2-chip"}><FunnelSimple size={16} />{extraFilterCount ? `${extraFilterCount} more filter${extraFilterCount === 1 ? "" : "s"}` : "More filters"}</button></Popover.Target>
+        <Popover.Dropdown className="v2-filter-pop">
+          <SlidingTabs<LedgerKindFilter> className="transaction-kind-tabs" label="Transaction type" value={kind} onChange={setKind} options={[{ id: "all", label: "All" }, { id: "expense", label: "Out" }, { id: "income", label: "In" }, { id: "transfer", label: "Transfer" }]} />
+          <div className="v2-filter-pair">
+            <DatePickerInput label="From" value={from || null} onChange={(value) => setFrom(value ?? "")} clearable valueFormat="MMM D, YYYY" firstDayOfWeek={0} />
+            <DatePickerInput label="To" value={to || null} onChange={(value) => setTo(value ?? "")} clearable valueFormat="MMM D, YYYY" firstDayOfWeek={0} />
+          </div>
+          <div className="v2-filter-pair">
+            <NumberInput label="Min amount" aria-label={`Minimum amount in ${currency}`} value={min} onChange={(value) => setMin(String(value))} min={0} thousandSeparator="," decimalScale={2} />
+            <NumberInput label="Max amount" aria-label={`Maximum amount in ${currency}`} value={max} onChange={(value) => setMax(String(value))} min={0} thousandSeparator="," decimalScale={2} />
+          </div>
+          <Select label="Paid by" value={paymentMode} onChange={(value) => value && setPaymentMode(value as PaymentMode | "all")} data={[{ value: "all", label: "Any way" }, { value: "cash", label: "Cash" }, { value: "cheque", label: "Cheque" }, { value: "online", label: "Online payment" }]} allowDeselect={false} disabled={kind === "transfer"} comboboxProps={{ withinPortal: false }} />
+          <button type="button" className="v2-button" disabled={!extraFilterCount} onClick={clearFilters}>Clear these filters</button>
+        </Popover.Dropdown>
+      </Popover>
+    </div>
+
+    <div className="v2-totals">
+      <div className="v2-total is-out"><span>Out</span><strong className="amount">{formatMoney(totals.outMinor, currency)}</strong></div>
+      <div className="v2-total is-in"><span>In</span><strong className="amount">{formatMoney(totals.inMinor, currency)}</strong></div>
+    </div>
+
+    <div className="v2-tx-layout">
+      <section className="v2-tx-list" aria-label={`${sorted.length} ${sorted.length === 1 ? "entry" : "entries"}`}>
+        {visibleDays.map((day) => {
+          const net = day.earnedMinor - day.spentMinor;
+          return <section key={day.dayKey} className="v2-card v2-tx-day" aria-label={formatLedgerDay(day.dayKey, calendarSystem)}>
+            <header className="v2-day-head"><span>{dayGroupLabel(day.dayKey, today)} · {formatLedgerDay(day.dayKey, calendarSystem, "date")}</span><span className="amount">{net > 0 ? "+" : net < 0 ? "−" : ""}{plainAmount(Math.abs(net))}{day.movedMinor > 0 ? ` · ${plainAmount(day.movedMinor)} moved` : ""}</span></header>
+            <ul className="v2-rows">{day.items.map((item) => {
+              const key = activityKey(item);
+              const pending = item.type === "transaction" ? deletingId === item.transaction.id : deletingId === `transfer:${item.transfer.id}`;
+              return <EntryRow key={key} item={item} accounts={paymentAccounts} customCategories={customCategories} selected={selectedKey === key && wide} deletePending={pending} onOpen={openItem} onEdit={onEdit} onDuplicate={onDuplicate} onDelete={(entry) => void remove(entry)} onDeleteTransfer={askDeleteTransfer} />;
+            })}</ul>
+          </section>;
+        })}
+        {!sorted.length && <div className="v2-card v2-tx-empty"><EmptyState title={query || category !== "all" || extraFilterCount || accountChip !== "all" ? "No matching entries" : range === "month" ? `Nothing logged in ${formatLedgerMonth(month, calendarSystem)}` : "Nothing logged yet"} message={query || category !== "all" || extraFilterCount || accountChip !== "all" ? "Try another search, account or filter." : "Tap + to add entries, or import a statement."} action={kind === "transfer" ? undefined : <button className="v2-button is-primary" onClick={() => onAdd(activeOccurredOn())}><Plus size={17} />Add entries</button>} /></div>}
+        {visibleCountShown < sorted.length && <nav className="v2-load-more" aria-label="More transactions"><span aria-live="polite">Showing {visibleCountShown} of {sorted.length}</span><button className="v2-button" onClick={() => setVisibleCount((count) => count + 50)}>Load 50 more</button></nav>}
+      </section>
+      {wide && <aside className="v2-tx-side" aria-label="Entry details">
+        {selectedItem
+          ? <EntryDetail item={selectedItem} accounts={paymentAccounts} customCategories={customCategories} currency={currency} deletePending={selectedItem.type === "transaction" ? deletingId === selectedItem.transaction.id : deletingId === `transfer:${selectedItem.transfer.id}`} onClose={() => setSelectedKey(null)} onEdit={onEdit} onDuplicate={onDuplicate} onDelete={(entry) => void remove(entry)} onDeleteTransfer={askDeleteTransfer} />
+          : <div className="v2-card v2-detail-empty"><span className="v2-tile" style={{ "--tile-bg": "#dcebe1", "--tile-ink": "#24503d", "--tile-size": "48px" } as CSSProperties} aria-hidden="true"><CursorClick size={24} weight="duotone" /></span><strong>Pick an entry</strong><p>Its details and actions show here.</p></div>}
+      </aside>}
+    </div>
     <AnimatedOverlay open={importDialogOpen} dismissOnBackdrop onClose={closeImportDialog} onExited={() => { if (!importDialogOpen) { setPreview(null); setImportErrors([]); setNewImportCategories([]); setNewImportSubcategories([]); } }}>
         {preview && <section className="import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-title" aria-busy={importing}>
         <header><div><span className="eyebrow">{importSource?.kind === "statement" ? "AI statement import" : "CSV import"}</span><h2 id="import-title">Review before importing</h2><small className="import-source-name"><FileText size={14} />{importSource?.name}</small></div><button className="icon-button" disabled={importing} onClick={closeImportDialog} aria-label="Close"><X size={20} /></button></header>

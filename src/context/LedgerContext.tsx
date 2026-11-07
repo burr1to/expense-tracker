@@ -6,12 +6,13 @@ import { todayInput } from "../lib/dates";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { majorToMinor } from "../lib/currency";
 import { ASYNC_IMPORT_THRESHOLD, IMPORT_POLL_INTERVAL_MS } from "../lib/import-job";
-import type { AccountReconciliation, AccountTransfer, AccountTransferDraft, Budget,CategoryIconName, CustomCategory, CustomSubcategory, DueDraft, DueItem, ImportJob, LearningState, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, ReceiptUpload, RecurringDraft, RecurringEntry, SavedPlace, SavedPlaceDraft, SavingsGoal, TransactionDraft, TransactionKind } from "../types";
+import type { AccountReconciliation, AccountTransfer, AccountTransferDraft, Budget,CategoryIconName, CustomCategory, CustomSubcategory, DueDraft, DueItem, ImportJob, LearningState, LedgerTransaction, PaymentAccount, PaymentAccountType, Profile, ReceiptUpload, RecurringDraft, RecurringEntry, SavedPlace, SavedPlaceDraft, SavingsGoal, TransactionDraft, TransactionGroup, TransactionGroupDraft, TransactionKind } from "../types";
 import type { CsvCategoryDraft, CsvSubcategoryDraft } from "../lib/csv";
 import type { SplitBillDraft } from "../lib/split-bill";
+import type { BulkChanges } from "../lib/bulk-edit";
 
-/** Where a repayment landed or left (null/omitted means cash), and an id generated per open form so a retried save records once. */
-export interface DueSettlementOptions { paymentAccountId?: string | null; clientRequestId?: string }
+/** Where a repayment landed or left (null/omitted means cash), and an id generated per open form so a retried save records once. `linkTransactionId` settles with an entry already in the ledger instead of writing one. */
+export interface DueSettlementOptions { paymentAccountId?: string | null; clientRequestId?: string; linkTransactionId?: string }
 import { useAuth } from "./AuthContext";
 import { useToasts, type ToastInput } from "./ToastContext";
 import { activityToast } from "../components/ActivityIcon";
@@ -28,7 +29,7 @@ interface GoalDraft { name: string; target: string; saved: string; targetDate: s
 interface CategoryDraft { name: string; kind: TransactionKind | "both"; color: string; icon: CategoryIconName }
 interface SubcategoryDraft { categoryId: string; name: string; icon: CategoryIconName }
 interface PaymentAccountDraft { type: PaymentAccountType; provider: string; label: string; balance: string; balanceAsOf: string; shared?: boolean; accountTail?: string | null }
-interface LedgerData { profile: Profile; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; goals: SavingsGoal[]; customCategories: CustomCategory[]; customSubcategories: CustomSubcategory[]; paymentAccounts: PaymentAccount[]; reconciliations: AccountReconciliation[]; savedPlaces: SavedPlace[]; transfers: AccountTransfer[]; dueItems: DueItem[] }
+interface LedgerData { profile: Profile; transactions: LedgerTransaction[]; budgets: Budget[]; recurringEntries: RecurringEntry[]; goals: SavingsGoal[]; customCategories: CustomCategory[]; customSubcategories: CustomSubcategory[]; paymentAccounts: PaymentAccount[]; reconciliations: AccountReconciliation[]; savedPlaces: SavedPlace[]; transfers: AccountTransfer[]; dueItems: DueItem[]; transactionGroups: TransactionGroup[] }
 export interface BackupRestoreResult { restoredAt: string; exportedAt: string; counts: Record<string, number> }
 /** Adjusts one recurring occurrence as it is recorded; anything left out comes from the schedule. */
 export interface RecurringConfirmation { dueOn?: string; amountMinor?: number; occurredOn?: string; paymentMode?: TransactionDraft["paymentMode"]; paymentAccountId?: string | null }
@@ -36,8 +37,12 @@ interface LedgerContextValue extends LedgerData {
   loading: boolean; error: string | null;
   /** Loads the ledger again with the full-page loader, as the Retry on the load-error screen does. */
   refresh: () => Promise<void>;
-  saveTransaction: (draft: TransactionDraft, id?: string) => Promise<string | undefined>; importTransactions: (drafts: TransactionDraft[], newCategories?: CsvCategoryDraft[], newSubcategories?: CsvSubcategoryDraft[]) => Promise<ImportJob | null>; importJobs: ImportJob[]; dismissImportJob: (id: string) => void; saveReceiptSplit: (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => Promise<number>; deleteTransaction: (id: string) => Promise<void>; restoreTransaction: (id: string) => Promise<void>;
+  saveTransaction: (draft: TransactionDraft, id?: string) => Promise<string | undefined>; importTransactions: (drafts: TransactionDraft[], newCategories?: CsvCategoryDraft[], newSubcategories?: CsvSubcategoryDraft[]) => Promise<ImportJob | null>; importJobs: ImportJob[]; dismissImportJob: (id: string) => void; saveReceiptSplit: (drafts: TransactionDraft[], receipt: ReceiptUpload, totalMinor: number) => Promise<number>; updateTransactions: (ids: string[], changes: BulkChanges) => Promise<void>; deleteTransaction: (id: string) => Promise<void>; restoreTransaction: (id: string) => Promise<void>;
   saveSavedPlace: (draft: SavedPlaceDraft, id?: string) => Promise<void>; deleteSavedPlace: (id: string) => Promise<void>;
+  /** Returns the group's id, new or edited. */
+  saveTransactionGroup: (draft: TransactionGroupDraft, id?: string) => Promise<string | undefined>; deleteTransactionGroup: (id: string) => Promise<void>;
+  /** Puts these entries into the group, or takes them out of theirs with null. */
+  setTransactionGroup: (groupId: string | null, ids: string[]) => Promise<void>;
   saveBudget: (draft: BudgetDraft, id?: string) => Promise<void>; deleteBudget: (id: string) => Promise<void>;
   /** Saves several budgets for one period at once (carry forward, Smart budgets, festival). One log entry. */
   saveBudgets: (monthKey: string, drafts: { category: string; amount: string; shared?: boolean }[]) => Promise<void>;
@@ -72,7 +77,7 @@ interface LedgerContextValue extends LedgerData {
 }
 
 const emptyProfile: Profile = { id: "", displayName: "Personal ledger", currency: "NPR", hideAmounts: false, autoLockMinutes: 0, calendarSystem: "AD", safeToSpendBufferMinor: 0, emailReminders: false, browserReminders: false, household: null, hasPin: false, learning: { enabled: false, suggestions: [], summary: [], lastTransactionId: null, lastRunAt: null } };
-const emptyData: LedgerData = { profile: emptyProfile, transactions: [], budgets: [], recurringEntries: [], goals: [], customCategories: [], customSubcategories: [], paymentAccounts: [], reconciliations: [], savedPlaces: [], transfers: [], dueItems: [] };
+const emptyData: LedgerData = { profile: emptyProfile, transactions: [], budgets: [], recurringEntries: [], goals: [], customCategories: [], customSubcategories: [], paymentAccounts: [], reconciliations: [], savedPlaces: [], transfers: [], dueItems: [], transactionGroups: [] };
 const LedgerContext = createContext<LedgerContextValue | null>(null);
 type WithActivity<T> = T & { activity?: ActivityEntry[] };
 const splitTags = (value: string) => [...new Set(value.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean))].slice(0, 8);
@@ -131,6 +136,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Every confirmation toast comes from a log entry the server wrote, so toasts and Logs always agree.
+  // Toast dates follow the user's calendar; a ref so a calendar change does not rebuild the announcer.
+  const calendarRef = useRef<Profile["calendarSystem"]>("AD");
+  useEffect(() => { calendarRef.current = data.profile.calendarSystem; }, [data.profile.calendarSystem]);
   const announceRef = useRef<(entries: ActivityEntry[] | undefined, fromUndo?: boolean) => void>(() => undefined);
   const announce = useCallback((entries: ActivityEntry[] | undefined, fromUndo = false) => announceRef.current(entries, fromUndo), []);
   useEffect(() => {
@@ -152,7 +160,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     };
     announceRef.current = (entries, fromUndo = false) => {
       if (!entries?.length) return;
-      for (const entry of entries) pushToast(activityToast(entry, fromUndo ? undefined : undoFor(entry)));
+      for (const entry of entries) pushToast(activityToast(entry, fromUndo ? undefined : undoFor(entry), calendarRef.current));
       setActivityRevision((revision) => revision + 1);
     };
   }, [pushToast, requestAction]);
@@ -210,7 +218,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   }, [announce, requestAction]);
 
   // clientRequestId (new entries only) lets the server return the first save when a retry follows a lost response.
-  const transactionPayload = (draft: TransactionDraft) => ({ kind: draft.kind, category: draft.category, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn, note: draft.note.trim(), subcategory: draft.subcategory.trim() || null, area: draft.area.trim() || null, paymentMode: draft.paymentMode, paymentAccountId: draft.paymentMode === "online" ? draft.paymentAccountId || null : null, shared: draft.shared ?? false, location: draft.location ?? null, receipt: draft.receipt, removeReceipt: draft.removeReceipt, clientRequestId: draft.clientRequestId || undefined });
+  const transactionPayload = (draft: TransactionDraft) => ({ kind: draft.kind, category: draft.category, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn, note: draft.note.trim(), subcategory: draft.subcategory.trim() || null, area: draft.area.trim() || null, paymentMode: draft.paymentMode, paymentAccountId: draft.paymentMode === "online" ? draft.paymentAccountId || null : null, shared: draft.shared ?? false, ...(draft.groupId === undefined ? {} : { groupId: draft.groupId || null }), location: draft.location ?? null, receipt: draft.receipt, removeReceipt: draft.removeReceipt, clientRequestId: draft.clientRequestId || undefined });
   const saveTransaction = useCallback(async (draft: TransactionDraft, id?: string) => {
     let savedId = id;
     const previousIds = new Set(data.transactions.map((transaction) => transaction.id));
@@ -234,10 +242,28 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
     await mutate("saveReceiptSplit", { transactions: drafts.map(transactionPayload), receipt, totalMinor });
     return drafts.length;
   }, [mutate]);
+  const updateTransactions = useCallback(async (ids: string[], changes: BulkChanges) => mutate("updateTransactions", {
+    ids,
+    changes: {
+      ...(changes.category ? { category: { ...changes.category, subcategory: changes.category.subcategory.trim() || null } } : {}),
+      ...(changes.occurredOn ? { occurredOn: changes.occurredOn } : {}),
+      ...(changes.payment ? { payment: { paymentMode: changes.payment.paymentMode, paymentAccountId: changes.payment.paymentMode === "online" ? changes.payment.paymentAccountId || null : null } } : {}),
+    },
+  }), [mutate]);
   const deleteTransaction = useCallback(async (id: string) => mutate("deleteTransaction", undefined, id), [mutate]);
   const restoreTransaction = useCallback(async (id: string) => mutate("restoreTransaction", undefined, id), [mutate]);
   const saveSavedPlace = useCallback(async (draft: SavedPlaceDraft, id?: string) => mutate("saveSavedPlace", draft, id), [mutate]);
   const deleteSavedPlace = useCallback(async (id: string) => mutate("deleteSavedPlace", undefined, id), [mutate]);
+  const saveTransactionGroup = useCallback(async (draft: TransactionGroupDraft, id?: string) => {
+    let savedId = id;
+    const previousIds = new Set(data.transactionGroups.map((group) => group.id));
+    await mutate("saveTransactionGroup", { name: draft.name.trim(), icon: draft.icon, startOn: draft.startOn || null, endOn: draft.endOn || null, note: draft.note.trim() }, id, (next) => {
+      savedId ??= next.transactionGroups.find((group) => !previousIds.has(group.id))?.id;
+    });
+    return savedId;
+  }, [data.transactionGroups, mutate]);
+  const deleteTransactionGroup = useCallback(async (id: string) => mutate("deleteTransactionGroup", undefined, id), [mutate]);
+  const setTransactionGroup = useCallback(async (groupId: string | null, ids: string[]) => mutate("setTransactionGroup", { groupId, ids }), [mutate]);
   const saveBudget = useCallback(async (draft: BudgetDraft, id?: string) => mutate("saveBudget", { monthKey: draft.monthKey, category: draft.category, amountMinor: majorToMinor(draft.amount), shared: draft.shared ?? false }, id), [mutate]);
   const saveBudgets = useCallback(async (monthKey: string, drafts: { category: string; amount: string; shared?: boolean }[]) => mutate("saveBudgets", { monthKey, budgets: drafts.map((draft) => ({ category: draft.category, amountMinor: majorToMinor(draft.amount), ...(draft.shared === undefined ? {} : { shared: draft.shared }) })) }), [mutate]);
   const deleteBudget = useCallback(async (id: string) => mutate("deleteBudget", undefined, id), [mutate]);
@@ -287,8 +313,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const saveDueItem = useCallback(async (draft: DueDraft, id?: string) => mutate("saveDueItem", { ...draft, amountMinor: majorToMinor(draft.amount), occurredOn: draft.occurredOn || null, remindOn: draft.remindOn || null, annualRatePercent: draft.annualRatePercent.trim() ? Number(draft.annualRatePercent) : null }, id), [mutate]);
   const deleteDueItem = useCallback(async (id: string) => mutate("deleteDueItem", undefined, id), [mutate]);
   const snoozeDueItem = useCallback(async (id: string) => mutate("snoozeDueItem", { until: format(addDays(new Date(), 1), "yyyy-MM-dd") }, id), [mutate]);
-  const recordDuePayment = useCallback(async (id: string, amount: string, occurredOn: string, note: string, addToLedger: boolean, options: DueSettlementOptions = {}) => mutate("recordDuePayment", { amountMinor: majorToMinor(amount), occurredOn, note: note.trim(), addToLedger, paymentAccountId: options.paymentAccountId || null, clientRequestId: options.clientRequestId }, id), [mutate]);
-  const completeDueItem = useCallback(async (id: string, addToLedger: boolean, options: DueSettlementOptions & { amount?: string; occurredOn?: string } = {}) => mutate("completeDueItem", { addToLedger, occurredOn: options.occurredOn || todayInput(), amountMinor: options.amount ? majorToMinor(options.amount) : undefined, paymentAccountId: options.paymentAccountId || null, clientRequestId: options.clientRequestId }, id), [mutate]);
+  const recordDuePayment = useCallback(async (id: string, amount: string, occurredOn: string, note: string, addToLedger: boolean, options: DueSettlementOptions = {}) => mutate("recordDuePayment", { amountMinor: majorToMinor(amount), occurredOn, note: note.trim(), addToLedger, paymentAccountId: options.paymentAccountId || null, clientRequestId: options.clientRequestId, linkTransactionId: options.linkTransactionId }, id), [mutate]);
+  const completeDueItem = useCallback(async (id: string, addToLedger: boolean, options: DueSettlementOptions & { amount?: string; occurredOn?: string } = {}) => mutate("completeDueItem", { addToLedger, occurredOn: options.occurredOn || todayInput(), amountMinor: options.amount ? majorToMinor(options.amount) : undefined, paymentAccountId: options.paymentAccountId || null, clientRequestId: options.clientRequestId, linkTransactionId: options.linkTransactionId }, id), [mutate]);
   const deleteDuePayment = useCallback(async (paymentId: string) => mutate("deleteDuePayment", undefined, paymentId), [mutate]);
   const saveSplitBill = useCallback(async (draft: SplitBillDraft) => mutate("saveSplitBill", { ...draft, note: draft.note.trim() }), [mutate]);
   const savePin = useCallback(async (pin: string, currentPin?: string) => mutate("savePin", { pin, currentPin }), [mutate]);
@@ -334,7 +360,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const resetDemo = useCallback(() => undefined, []);
   const reload = useCallback(() => refresh(true), [refresh]);
 
-  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, refresh: reload, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, saveBudgets, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, skipRecurring, setRecurringActive, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountTail, updatePaymentAccountBalance, setPaymentAccountShared, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, deleteDuePayment, saveSplitBill, savePin, removePin, verifyPin, restoreBackup, updateProfile, inviteHousehold, acceptHousehold, removeHouseholdMember, leaveHousehold, setLearningEnabled, runLearning, resetLearning, resetDemo, activityRevision }), [activityRevision, data, loading, error, reload, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveBudget, saveBudgets, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, skipRecurring, setRecurringActive, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountTail, updatePaymentAccountBalance, setPaymentAccountShared, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, deleteDuePayment, saveSplitBill, savePin, removePin, verifyPin, restoreBackup, updateProfile, inviteHousehold, acceptHousehold, removeHouseholdMember, leaveHousehold, setLearningEnabled, runLearning, resetLearning, resetDemo]);
+  const value = useMemo<LedgerContextValue>(() => ({ ...data, loading, error, refresh: reload, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, updateTransactions, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveTransactionGroup, deleteTransactionGroup, setTransactionGroup, saveBudget, saveBudgets, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, skipRecurring, setRecurringActive, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountTail, updatePaymentAccountBalance, setPaymentAccountShared, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, deleteDuePayment, saveSplitBill, savePin, removePin, verifyPin, restoreBackup, updateProfile, inviteHousehold, acceptHousehold, removeHouseholdMember, leaveHousehold, setLearningEnabled, runLearning, resetLearning, resetDemo, activityRevision }), [activityRevision, data, loading, error, reload, saveTransaction, importTransactions, importJobs, dismissImportJob, saveReceiptSplit, updateTransactions, deleteTransaction, restoreTransaction, saveSavedPlace, deleteSavedPlace, saveTransactionGroup, deleteTransactionGroup, setTransactionGroup, saveBudget, saveBudgets, deleteBudget, saveRecurring, deleteRecurring, confirmRecurring, skipRecurring, setRecurringActive, saveGoal, contributeToGoal, deleteGoal, saveCustomCategory, updateCustomCategoryIcon, deleteCustomCategory, saveCustomSubcategory, deleteCustomSubcategory, savePaymentAccount, updatePaymentAccountTail, updatePaymentAccountBalance, setPaymentAccountShared, approveAccountReconciliation, resetAccountReconciliation, deletePaymentAccount, saveTransfer, deleteTransfer, saveDueItem, deleteDueItem, snoozeDueItem, recordDuePayment, completeDueItem, deleteDuePayment, saveSplitBill, savePin, removePin, verifyPin, restoreBackup, updateProfile, inviteHousehold, acceptHousehold, removeHouseholdMember, leaveHousehold, setLearningEnabled, runLearning, resetLearning, resetDemo]);
   return <LedgerContext.Provider value={value}>{children}</LedgerContext.Provider>;
 }
 

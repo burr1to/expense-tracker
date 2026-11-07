@@ -2,6 +2,8 @@
 import { ArrowsLeftRight, Bank, Database, Flag, GearSix, HandCoins, PencilSimple, Receipt, ShieldCheck, SignIn, SignOut, Tag, Trash, UsersThree, WarningCircle } from "@phosphor-icons/react";
 import type { ActivityArea, ActivityChange, ActivityEntry } from "../lib/activity-log";
 import { formatMoney } from "../lib/currency";
+import { formatLedgerDate } from "../lib/dates";
+import type { CalendarSystem } from "../types";
 import type { ToastInput, ToastTone } from "../context/ToastContext";
 
 const areaIcons: Record<ActivityArea, typeof Bank> = {
@@ -46,18 +48,18 @@ export function activityAmountText(entry: Pick<ActivityEntry, "action" | "amount
   return `${entry.meta?.kind === "income" ? "+" : "−"}${money}`;
 }
 
-function changeText(change: ActivityChange) {
-  const plain = (value: ActivityChange["from"]) => value === null ? "none" : typeof value === "string" ? value : "date" in value ? value.date : null;
+function changeText(change: ActivityChange, calendarSystem: CalendarSystem) {
+  const plain = (value: ActivityChange["from"]) => value === null ? "none" : typeof value === "string" ? value : "date" in value ? formatLedgerDate(value.date, calendarSystem) : null;
   if ((change.from && typeof change.from === "object" && "money" in change.from) || (change.to && typeof change.to === "object" && "money" in change.to)) return `${change.field} changed`;
   return `${change.field}: ${plain(change.from)} → ${plain(change.to)}`;
 }
 
 /** Builds the confirmation toast for a log entry, so a toast never says more or less than Logs will. */
-export function activityToast(entry: ActivityEntry, action?: ToastInput["action"]): ToastInput {
+export function activityToast(entry: ActivityEntry, action?: ToastInput["action"], calendarSystem: CalendarSystem = "AD"): ToastInput {
   const changes = entry.changes.length;
   const body = entry.subject
-    ? changes > 1 ? `${entry.subject} · ${changes} changes` : changes === 1 ? `${entry.subject} · ${changeText(entry.changes[0])}` : entry.subject
-    : changes ? entry.changes.map(changeText).join(" · ") : null;
+    ? changes > 1 ? `${entry.subject} · ${changes} changes` : changes === 1 ? `${entry.subject} · ${changeText(entry.changes[0], calendarSystem)}` : entry.subject
+    : changes ? entry.changes.map((change) => changeText(change, calendarSystem)).join(" · ") : null;
   return {
     title: entry.title,
     body,

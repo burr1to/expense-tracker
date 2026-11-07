@@ -51,7 +51,7 @@ export function toUserMessage(error: unknown, response?: Pick<ParsedResponse, "s
 }
 
 // Repeating these after a lost response cannot record anything twice (the server dedupes them, or they set a value).
-const RETRY_SAFE_ACTIONS = new Set(["saveReceiptSplit", "saveBudgets", "updateProfile", "snoozeDueItem", "setPaymentAccountShared", "updatePaymentAccountTail", "listImportJobs", "processImportJob"]);
+const RETRY_SAFE_ACTIONS = new Set(["saveReceiptSplit", "updateTransactions", "setTransactionGroup", "saveBudgets", "updateProfile", "snoozeDueItem", "setPaymentAccountShared", "updatePaymentAccountTail", "listImportJobs", "processImportJob"]);
 // An id usually means "set this record", but these add to it on every call and are safe only with a request id.
 const ADDS_TO_RECORD = new Set(["contributeToGoal", "recordDuePayment"]);
 
