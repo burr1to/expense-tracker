@@ -35,6 +35,10 @@ interface SmsCaptureProps {
   onOpenChange?: (open: boolean) => void;
   /** Message text to prefill when the sheet opens, e.g. from the share target. */
   initialText?: string;
+  /** The day the message arrived, used when it names no date (a message sent for review yesterday is yesterday's). Defaults to today. */
+  referenceDate?: string;
+  /** Reads `initialText` with the on-device parser as soon as the sheet opens. Never sends it to Gemini without a tap. */
+  autoRead?: boolean;
   /** Render the "Paste bank SMS" trigger button. Defaults to true. */
   showTrigger?: boolean;
   /** Shows the Bikram Sambat date beside the date picker when the user reads dates in BS. */
@@ -51,7 +55,7 @@ type Stage = "ready" | "parsing" | "reviewing" | "saving" | "saved";
 type ReviewType = TransactionKind | "transfer";
 interface TransferRoute { fromAccountId: string; toAccountId: string }
 
-export function SmsCapture({ currency, transactions, customCategories, customSubcategories, paymentAccounts, learning, onSave, open: openProp, onOpenChange, initialText, showTrigger = true, calendarSystem = "AD", ownerId, onSaveTransfer, transfers = [] }: SmsCaptureProps) {
+export function SmsCapture({ currency, transactions, customCategories, customSubcategories, paymentAccounts, learning, onSave, open: openProp, onOpenChange, initialText, referenceDate, autoRead = false, showTrigger = true, calendarSystem = "AD", ownerId, onSaveTransfer, transfers = [] }: SmsCaptureProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = openProp ?? uncontrolledOpen;
   const setOpen = (next: boolean) => {
@@ -156,9 +160,10 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
     // The offline parser handles the common formats instantly and without
     // sending the message anywhere. Gemini is only asked about messages it
     // cannot read.
-    const offline = parseBankSms(text, todayInput());
+    const day = referenceDate ?? todayInput();
+    const offline = parseBankSms(text, day);
     if (offline) {
-      startReview(smsResultToDraft(offline, todayInput(), ownAccounts));
+      startReview(smsResultToDraft(offline, day, ownAccounts));
       requestRef.current = null;
       return;
     }
@@ -191,6 +196,16 @@ export function SmsCapture({ currency, transactions, customCategories, customSub
       if (requestRef.current === controller) requestRef.current = null;
     }
   };
+
+  // A message sent for review opens already read on the device, so the user starts at the review step.
+  const autoReadText = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open) { autoReadText.current = null; return; }
+    if (!autoRead || !initialText || autoReadText.current === initialText) return;
+    autoReadText.current = initialText;
+    // `read` is recreated each render; the ref makes this run once per opened message.
+    void read(initialText, false);
+  }, [open, autoRead, initialText]);
 
   const update = (changes: Partial<TransactionDraft>) => {
     setDraft((current) => current ? { ...current, ...changes } : current);

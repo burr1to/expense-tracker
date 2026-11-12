@@ -10,7 +10,8 @@ import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
 import { useToasts } from "../context/ToastContext";
 import { getCategory } from "../lib/categories";
 import { toDateInput, todayInput } from "../lib/dates";
-import { convertMonthKey, currentMonthKey, monthKeyOf, parseMonthKey, type PeriodKey } from "../lib/period";
+import { APP_TIME_ZONE, convertMonthKey, currentMonthKey, dateOnlyInTimeZone, monthKeyOf, parseMonthKey, type PeriodKey } from "../lib/period";
+import { useAgentDrafts, type AgentDraftItem } from "../lib/use-agent-drafts";
 import { buildReminderDigest } from "../lib/reminder-digest";
 import { BRAND_MARK_PATH } from "../lib/brand-mark";
 import { deliverNotification, readAddDeepLink, reminderNotificationText, reminderToastText, rolledOverMonth } from "../lib/app-shell";
@@ -93,6 +94,9 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [smsOpen, setSmsOpen] = useState(false);
   const [smsInitialText, setSmsInitialText] = useState<string | undefined>();
+  // Messages Muse (or another connected app) sent for review; the one open in the SMS sheet, if any.
+  const agentDrafts = useAgentDrafts(Boolean(user && !isDemo));
+  const [reviewingDraft, setReviewingDraft] = useState<AgentDraftItem | null>(null);
   const [receiptScanOpen, setReceiptScanOpen] = useState(false);
   // The day a receipt with no readable date lands on: the opener's day, or today when it was opened.
   const [receiptFallbackDate, setReceiptFallbackDate] = useState(todayInput);
@@ -340,7 +344,13 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     navigate,
     completeOnboardingStep,
     lock: () => { if (ledger.profile.hasPin) { setLocked(true); setBalancesUnlockedFor(null); setBalanceUnlockOpen(false); } },
-    openSms: (initialText?: string) => { setSmsInitialText(initialText); setSmsOpen(true); },
+    openSms: (initialText?: string) => { setReviewingDraft(null); setSmsInitialText(initialText); setSmsOpen(true); },
+    agentDrafts: agentDrafts.drafts,
+    reviewAgentDraft: (draft: AgentDraftItem) => { setReviewingDraft(draft); setSmsInitialText(draft.text); setSmsOpen(true); },
+    dismissAgentDraft: async (draft: AgentDraftItem) => {
+      try { await agentDrafts.resolve(draft.id, "dismissed"); }
+      catch (error) { pushToast({ title: "Couldn’t dismiss that message", body: error instanceof Error ? error.message : "Check your connection and try again.", tone: "danger" }); }
+    },
     openReceiptScan: (fallbackDate?: string) => { setReceiptFallbackDate(fallbackDate || todayInput()); setReceiptScanOpen(true); },
     openTransfer: (options: TransferRequest = {}) => setTransferRequest(options),
     openSplitBill: (options: SplitBillRequest = {}) => setSplitBillRequest(options),
@@ -453,8 +463,10 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
       />
       <SmsCapture
         open={smsOpen}
-        onOpenChange={(open) => { setSmsOpen(open); if (!open) setSmsInitialText(undefined); }}
+        onOpenChange={(open) => { setSmsOpen(open); if (!open) { setSmsInitialText(undefined); setReviewingDraft(null); } }}
         initialText={smsInitialText}
+        referenceDate={reviewingDraft ? dateOnlyInTimeZone(APP_TIME_ZONE, new Date(reviewingDraft.receivedAt)) : undefined}
+        autoRead={Boolean(reviewingDraft)}
         showTrigger={false}
         currency={ledger.profile.currency}
         transactions={ledger.transactions}
@@ -464,8 +476,18 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
         learning={ledger.profile.learning}
         calendarSystem={ledger.profile.calendarSystem}
         ownerId={ledger.profile.id}
-        onSave={async (draft) => { const savedId = await ledger.saveTransaction(draft); completeOnboardingStep("transaction"); return savedId; }}
-        onSaveTransfer={(draft) => ledger.saveTransfer(draft)}
+        onSave={async (draft) => {
+          const fromAgent = reviewingDraft;
+          const savedId = await ledger.saveTransaction(draft);
+          completeOnboardingStep("transaction");
+          if (fromAgent) { setReviewingDraft(null); void agentDrafts.resolve(fromAgent.id, "saved", savedId).catch(() => undefined); }
+          return savedId;
+        }}
+        onSaveTransfer={async (draft) => {
+          const fromAgent = reviewingDraft;
+          await ledger.saveTransfer(draft);
+          if (fromAgent) { setReviewingDraft(null); void agentDrafts.resolve(fromAgent.id, "saved").catch(() => undefined); }
+        }}
         transfers={ledger.transfers}
       />
       <ReceiptScanner

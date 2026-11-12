@@ -3014,6 +3014,16 @@ body[data-hide-amounts="true"] :is(.budget-carry-row, .smart-budget-row, .festiv
   .retry-card { padding: 20px 16px; }
   .retry-card .primary-button { width: 100%; justify-content: center; }
 }
+/* App connection consent (Muse and other agents). */
+.consent-card { width: min(100%, 400px); text-align: left; justify-items: stretch; }
+.consent-card .retry-icon, .consent-card > strong { justify-self: center; text-align: center; }
+.consent-scopes { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.consent-scopes li { display: grid; grid-template-columns: 16px 1fr; gap: 8px; align-items: start; color: var(--ink); font-size: var(--text-small); line-height: 1.45; }
+.consent-scopes svg { margin-top: 2px; color: var(--blue); }
+.retry-card p.consent-note { margin: 4px 0 0; }
+.retry-card p.consent-account { margin: 0; font-size: var(--text-meta); overflow-wrap: anywhere; }
+.consent-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
+.consent-actions .primary-button, .consent-actions .secondary-button { min-height: var(--control-size); border-radius: var(--control-radius); width: 100%; }
 /* shell: error screens, reminder settings note */
 .app-error-screen { min-height: 100svh; display: grid; place-items: center; padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
 .app-error-card { width: min(100%, 380px); display: grid; gap: 10px; padding: 24px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper-strong); box-shadow: 0 18px 48px rgba(36,51,43,.1); }
@@ -3332,3 +3342,11 @@ body[data-hide-amounts="true"] .group-money::after { content: "*****"; position:
 @media (prefers-reduced-motion: reduce) {
   .ledger-day, .ledger-day-toggle, .ledger-day-dots, .ledger-day-caret, .ledger-day-body, .ledger-day-rows > .transaction-row { transition: none; }
 }
+/* Connected apps (Profile → Security). */
+.connected-apps-empty { margin: 0; color: var(--muted); font-size: var(--text-small); }
+.connected-apps-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+.connected-apps-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 0; border-top: 1px solid var(--line); }
+.connected-apps-list li:first-child { border-top: 0; padding-top: 0; }
+.connected-apps-copy { min-width: 0; display: grid; gap: 2px; }
+.connected-apps-copy strong { color: var(--ink); }
+.connected-apps-copy span, .connected-apps-copy small { color: var(--muted); font-size: var(--text-small); }
