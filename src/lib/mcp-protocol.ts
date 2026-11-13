@@ -16,6 +16,7 @@ export const SERVER_INSTRUCTIONS = [
   "Call get_ledger_context first for ids, currency, calendar and today's date.",
   "For a monthly report use get_monthly_report (last month by default). For what needs attention now use get_month_overview, then get_budgets, get_dues, get_recurring and get_cash_forecast for detail.",
   "Use send_for_review when a bank or wallet notification, or something the user says, describes money moving. It never writes to the ledger: the user reviews each one in the app before it is saved.",
+  "With ledger:write you may instead save entries directly: add_transaction, edit_transaction, recategorize_transactions, delete_transaction, add_transfer and delete_transfer. Pass draft_id when saving a message from the review queue, so it leaves the queue. Every change is recorded in the user's Logs under your name.",
   "Never send one-time codes (OTP), passwords or promotional messages. Pass the notification's own id as external_id so a retry is not queued twice.",
 ].join(" ");
 
@@ -25,6 +26,8 @@ export interface ToolDefinition<Input = unknown> {
   description: string;
   scope: AgentScope;
   readOnly: boolean;
+  /** Removes data the user may not get back from this connection. */
+  destructive?: boolean;
   input: z.ZodType<Input>;
   run: (input: Input) => Promise<unknown>;
 }
@@ -62,7 +65,7 @@ function toolListing(tool: ToolDefinition) {
     title: tool.title,
     description: tool.description,
     inputSchema: inputSchemaFor(tool),
-    annotations: { title: tool.title, readOnlyHint: tool.readOnly, destructiveHint: false, idempotentHint: tool.readOnly, openWorldHint: false },
+    annotations: { title: tool.title, readOnlyHint: tool.readOnly, destructiveHint: Boolean(tool.destructive), idempotentHint: tool.readOnly, openWorldHint: false },
   };
 }
 

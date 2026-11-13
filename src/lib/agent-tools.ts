@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { PrismaClient } from "../generated/prisma/client";
 import type { AgentPrincipal } from "./agent-oauth-store";
 import { ledgerReadTools, moneyOf } from "./agent-read-tools";
+import { ledgerWriteTools } from "./agent-write-tools";
 import { ToolInputError, type ToolDefinition } from "./mcp-protocol";
 import { todayInAppZone } from "./period";
 import { mentionsOneTimeCode, parseBankSms, SMS_MAX_LENGTH } from "./sms-templates";
@@ -20,7 +21,7 @@ export function draftExternalId(input: { externalId?: string; sourceApp?: string
   return `hash:${createHash("sha256").update([input.sourceApp ?? "", input.receivedAt ?? "", input.text.trim()].join("\u0000")).digest("hex")}`;
 }
 
-export function ledgerTools(db: PrismaClient, principal: AgentPrincipal): ToolDefinition[] {
+export function ledgerTools(db: PrismaClient, principal: AgentPrincipal, origin: string): ToolDefinition[] {
   const userId = principal.userId;
 
   const listDrafts: ToolDefinition<{ status?: "pending" | "approved" | "dismissed" }> = {
@@ -99,5 +100,5 @@ export function ledgerTools(db: PrismaClient, principal: AgentPrincipal): ToolDe
     },
   };
 
-  return [...ledgerReadTools(db, principal), listDrafts, sendForReview] as ToolDefinition[];
+  return [...ledgerReadTools(db, principal), listDrafts, sendForReview, ...ledgerWriteTools(db, principal, origin)] as ToolDefinition[];
 }
