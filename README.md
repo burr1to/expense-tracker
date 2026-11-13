@@ -90,6 +90,49 @@ Prisma owns the complete schema in `prisma/schema.prisma`; the initial deployabl
 
 Every existing database must run `npm run db:deploy` before this version starts. Migration `20261007090000_add_request_ids_account_tails_and_ai_usage` adds the request ids that stop a retried save from being recorded twice, the account-number tails used to match bank SMS, and the `AiUsage` table behind the daily Gemini limits (20 receipt scans, 10 statement imports, 50 SMS reads and 5 personalization runs per person per Nepal day). Set the optional `GEMINI_DAILY_CAP` to also cap Gemini calls across all users per day.
 
+## Connect Muse (MCP)
+
+An agent such as Muse can read the ledger and send bank or wallet notifications for review through the MCP endpoint at `/api/mcp`. It never writes to the ledger: each message waits on Home under "messages from Muse", opens in the normal SMS review, and only saving there adds an entry. Users see and disconnect apps in Profile → Security → Connected apps.
+
+Access is OAuth 2.1: authorization code with S256 PKCE, a consent screen on every authorization, rotating refresh tokens (reuse revokes the connection), and only SHA-256 hashes of codes, tokens and client secrets stored. There is no open client registration; register each app once with the script:
+
+```bash
+npm run db:deploy
+DATABASE_URL=… node scripts/oauth-client.mjs create --name Muse --redirect-uri <Muse's OAuth callback URL>
+```
+
+It prints `client_id` and `client_secret` once. Give Muse:
+
+| Setting | Value |
+|---|---|
+| Authorize endpoint | `<BETTER_AUTH_URL>/oauth/authorize` |
+| Token endpoint | `<BETTER_AUTH_URL>/api/oauth/token` |
+| Resource / MCP URL | `<BETTER_AUTH_URL>/api/mcp` |
+| Scopes | `ledger:read ledger:draft` |
+| Client auth | `client_secret_basic` (or `client_secret_post`) |
+
+Discovery documents are at `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource/api/mcp`. `rotate-secret`, `add-redirect`, `disable` and `list` manage clients later.
+
+Read tools (`ledger:read`) see the whole ledger, computed by the same code as the app's screens and PDF report, so the numbers agree. Amounts are `{ minor, text }`; months are `YYYY-MM` or `BS:YYYY-MM`.
+
+| Tool | What it answers |
+|---|---|
+| `get_ledger_context` | Currency, calendar, today, category, account, group and place ids |
+| `list_transactions`, `list_transfers` | Entries and transfers with date, category, account, group, amount and text filters |
+| `get_monthly_report` | The PDF report as data, for a month, BS month or fiscal year (`FY:2082-83`) |
+| `get_month_overview` | What needs attention: spend vs budget or last month, projected net, safe-to-spend, budgets at risk, overdue dues, unconfirmed bills, insights |
+| `get_accounts` | Balances per account and total, last reconciliation |
+| `get_budgets` | Pacing, unbudgeted spending, last month's limits and actuals |
+| `get_dues` | Bills, loans and money owed, with a debt payoff plan |
+| `get_recurring` | Salary, rent and subscriptions, and what falls due soon |
+| `get_savings_goals` | Progress and the monthly amount needed |
+| `get_cash_forecast` | Projected balance and its lowest point (7–90 days) |
+| `get_place_trends` | Where spending changed most, place by place |
+| `list_groups` | Trips and events with their totals |
+| `get_milestones`, `get_activity_log` | Wins, and what changed recently |
+
+Draft tools (`ledger:draft`): `send_for_review` and `list_review_queue`. One-time-code messages are refused, a notification id is queued once, and unreviewed messages are dropped after 30 days. No tool can edit or delete an entry.
+
 ## Run
 
 ```bash
