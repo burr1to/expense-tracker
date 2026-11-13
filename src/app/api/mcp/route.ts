@@ -38,7 +38,7 @@ export async function POST(request: Request) {
   if (!parsed.ok) return NextResponse.json(parsed.response, { status: 400, headers: noStore });
 
   try {
-    const response = await handleMessage(parsed.message, ledgerTools(db, principal), principal.scopes);
+    const response = await handleMessage(parsed.message, ledgerTools(db, principal, origin), principal.scopes);
     if (!response) return new NextResponse(null, { status: 202, headers: noStore });
     return NextResponse.json(response, { headers: noStore });
   } catch (error) {

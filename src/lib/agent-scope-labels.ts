@@ -2,4 +2,5 @@
 export const AGENT_SCOPE_LABELS: Record<string, string> = {
   "ledger:read": "Reads your whole ledger",
   "ledger:draft": "Sends messages for review",
+  "ledger:write": "Adds, edits and deletes entries",
 };

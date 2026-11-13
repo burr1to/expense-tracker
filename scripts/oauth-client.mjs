@@ -5,6 +5,7 @@
 //   node scripts/oauth-client.mjs create --name Muse --redirect-uri https://muse.example/callback [--scopes ledger:read,ledger:draft]
 //   node scripts/oauth-client.mjs rotate-secret --client-id syr_client_…
 //   node scripts/oauth-client.mjs add-redirect --client-id syr_client_… --redirect-uri https://…
+//   node scripts/oauth-client.mjs set-scopes --client-id syr_client_… --scopes ledger:read,ledger:draft,ledger:write
 //   node scripts/oauth-client.mjs disable --client-id syr_client_…
 //   node scripts/oauth-client.mjs list
 //
@@ -14,7 +15,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import pg from "pg";
 
-const SCOPES = new Set(["ledger:read", "ledger:draft"]);
+const SCOPES = new Set(["ledger:read", "ledger:draft", "ledger:write"]);
 const [command, ...rest] = process.argv.slice(2);
 const { values } = parseArgs({ args: rest, options: { name: { type: "string" }, "redirect-uri": { type: "string" }, scopes: { type: "string" }, "client-id": { type: "string" } } });
 
@@ -58,6 +59,13 @@ try {
     if (!values["client-id"] || !values["redirect-uri"]) fail("add-redirect needs --client-id and --redirect-uri.");
     const { rowCount } = await db.query(`UPDATE "OAuthClient" SET "redirectUris" = array_append("redirectUris", $1), "updatedAt" = now() WHERE "clientId" = $2 AND NOT ($1 = ANY("redirectUris"))`, [checkRedirect(values["redirect-uri"]), values["client-id"]]);
     console.log(rowCount ? "Added." : "No change (unknown client or already listed).");
+  } else if (command === "set-scopes") {
+    // Takes effect at the next consent: tokens already issued keep the scopes the user approved.
+    if (!values["client-id"] || !values.scopes) fail("set-scopes needs --client-id and --scopes.");
+    const scopes = values.scopes.split(",").map((scope) => scope.trim()).filter(Boolean);
+    if (!scopes.length || scopes.some((scope) => !SCOPES.has(scope))) fail(`Scopes must be from: ${[...SCOPES].join(", ")}`);
+    const { rowCount } = await db.query(`UPDATE "OAuthClient" SET "scopes" = $1, "updatedAt" = now() WHERE "clientId" = $2`, [scopes, values["client-id"]]);
+    console.log(rowCount ? `Scopes set to ${scopes.join(", ")}. The user approves them the next time the app connects.` : "No such client.");
   } else if (command === "disable") {
     if (!values["client-id"]) fail("disable needs --client-id.");
     const { rowCount } = await db.query(`UPDATE "OAuthClient" SET "disabled" = true, "updatedAt" = now() WHERE "clientId" = $1`, [values["client-id"]]);
@@ -66,7 +74,7 @@ try {
     const { rows } = await db.query(`SELECT "clientId", "name", "redirectUris", "scopes", "disabled", "createdAt" FROM "OAuthClient" ORDER BY "createdAt"`);
     console.log(JSON.stringify(rows, null, 2));
   } else {
-    fail("Commands: create, rotate-secret, add-redirect, disable, list");
+    fail("Commands: create, rotate-secret, add-redirect, set-scopes, disable, list");
   }
 } finally {
   await db.end();

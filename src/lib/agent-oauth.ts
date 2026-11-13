@@ -11,6 +11,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 export const AGENT_SCOPES = {
   "ledger:read": "See your whole ledger: entries, balances, budgets, dues, goals and reports",
   "ledger:draft": "Send bank and wallet messages for you to review before anything is saved",
+  "ledger:write": "Add, edit and delete your entries and transfers directly, without asking you first",
 } as const;
 export type AgentScope = keyof typeof AGENT_SCOPES;
 
