@@ -1,107 +1,212 @@
+<div align="center">
+
 # SaveYoRupee
 
-A mobile-first personal income and expense tracker with monthly reporting, planning, dues and repayment tracking, reminders, optional Kathmandu transaction locations, receipt attachments, a financial milestone timeline, CSV import/export, privacy controls, and database-backed email/password authentication.
+**A money tracker made for life in Nepal.**
 
-It also speaks Nepali money: Bikram Sambat dates, Shrawan-to-Ashadh fiscal-year reporting, Dashain and Tihar spending comparison, and one-paste capture of bank and wallet SMS alerts.
+Log what you spend and earn, see where it goes, and keep your bank, eSewa and Khalti balances honest.
+Bikram Sambat dates, the Shrawan–Ashadh fiscal year and Dashain spending are built in, not bolted on.
 
-## Kathmandu transaction map
+[**Try it live**](https://expense-tracker-beige-iota.vercel.app) · [Run it yourself](#run-it-yourself) · [What's inside](#whats-inside)
 
-- Add an optional exact location to an income or expense by searching a Kathmandu area, using device location, or dropping a pin.
-- Save named places such as Home, Office, or a favorite shop and reuse them on later transactions.
-- Review mapped entries at `/maps`, filter income and expenses, and inspect clustered markers.
-- Exact coordinates are accepted only inside the configured Kathmandu map bounds. Free-text `area` remains available when no exact location is wanted.
-- MapLibre renders keyless OpenFreeMap vector tiles derived from OpenStreetMap. The app applies its own low-clutter Kathmandu theme, hides buildings and secondary map labels, and adds a high-visibility neighborhood overlay. Override the source with `NEXT_PUBLIC_MAP_STYLE_URL` if needed.
-- Live place suggestions use the authenticated server-side `PHOTON_SEARCH_URL` endpoint with input debouncing, caching, request pacing, and Kathmandu bounds. Use a hosted provider or self-hosted Photon as usage grows.
+<img src="docs/screenshots/hero.png" alt="SaveYoRupee on desktop showing November spending against October, with the phone app showing the month's report" width="100%">
 
-## Nepali calendar and fiscal year
+</div>
 
-- Switch the whole ledger between Gregorian (AD) and Bikram Sambat (BS) in Profile → Calendar.
-- BS mode shows Nepali dates alongside Gregorian ones on every transaction, and labels each month with the BS months it spans. Stored dates, CSV imports and exports stay Gregorian so receipts, statements and backups still reconcile.
-- BS conversion is delegated to a vetted table rather than hand-maintained, and the test suite pins it against published Nepali New Year dates for BS 2000–2090, so a bad upgrade fails the build instead of shifting dates silently. Dates outside that range fall back to Gregorian rather than throwing.
-- Reports include the Nepali fiscal year (Shrawan 1 to the end of Ashadh) with income, expenses, net and entry count, steppable year by year.
-- Festival spending is compared year over year. A festival period is the BS month it falls in — Dashain is Ashwin, Tihar is Kartik — which is exact and needs no almanac date table. A festival with no prior-year spending reports "nothing to compare against" rather than a misleading percentage.
+## Why it exists
 
-## Paste a bank SMS
+Most budgeting apps assume a US bank, a US calendar and a US salary. Here, money arrives as an SMS from Nabil Bank, moves through eSewa, goes out as cash for momo and microbus fares, and the year that matters ends in Ashadh. SaveYoRupee is built around that.
 
-- Paste a bank or wallet confirmation SMS on the Transactions page to capture a transaction in two taps.
-- Common formats are read **on your device** by a regex parser — instantly, offline, and without the message leaving the browser. Only a message the parser cannot read is sent to Gemini.
-- The parser reads amount, direction, date, merchant, masked account tail and balance, and matches the message to one of your tracked payment accounts when it can. It reports a confidence score and never guesses: anything unreadable stays blank.
-- Every draft goes through a review screen before saving. Duplicate and unusual-spend warnings run on the parsed draft (re-pasting the same SMS is the most likely mistake), and the learning profile fills the category and payment method that the message itself cannot state.
-- Provider-specific templates live in `src/lib/sms-templates.ts` and ship empty by design. Add one per sender you have real samples for; until then the generic parser handles the common grammar and reports lower confidence.
+It's a personal ledger, not a bank: nothing connects to your accounts. You add entries yourself (or paste a bank SMS and let the app read it), and the app does the adding up.
 
-## Planning and forecasting
+## What it does
 
-- **Safe to spend** shows a daily allowance, not just a monthly total. The horizon runs to your next scheduled income — payday — falling back to a repeated income date in your history, then to the end of the month.
-- It deliberately excludes income that has not arrived: money due on payday belongs to the next cycle. The figure is your tracked balance minus everything already committed before the horizon, minus an optional untouchable buffer set in Profile → Safe to spend.
-- **What if** on the Calculator page projects the effect of cutting or raising a category against your savings goals, from past average spending. It warns when a category has thin history and refuses to estimate a goal date when projected spending exceeds income.
-- **Payoff plan** on the Dues page orders borrowed money by snowball, avalanche or due date, rolls each cleared debt's payment into the next, and shows a projected debt-free date. Avalanche is hidden when every debt is interest-free, and a budget that cannot outrun the interest is reported plainly instead of producing a fake date.
+### See the month at a glance
 
-## Dues and reminders
+Home shows how much you've spent so far, how that compares to the same point last month, where each account stands, and which categories moved the most.
 
-- Track one-off payments and expected income separately from repeating entries.
-- Keep lent and borrowed money by person, due date, partial repayment, and remaining balance.
-- Reminder dates feed the always-visible bell on desktop and mobile.
-- Settling an item can optionally create the matching income or expense ledger entry.
-- JPG, PNG, WebP, and PDF receipts up to 3 MB can be kept privately with a transaction or due.
-- The experimental receipt scanner can photograph a JPG, PNG, or WebP receipt, ask Gemini 3.5 Flash-Lite for category splits, and require a complete review before atomically adding the transactions. Camera photos are resized and re-encoded before upload to remove EXIF/GPS metadata, and an in-progress upload or analysis can be cancelled. One private scan source is shared by all resulting splits.
-- Transaction entry includes optional browser voice capture plus non-blocking duplicate and unusual-spend warnings. Repeating history can be reviewed as suggested recurring schedules; nothing is scheduled or saved automatically.
-- Transaction imports accept the SaveYoRupee CSV format plus text, PDF, JPG, PNG, and WebP statements. Non-template statements are extracted with Gemini and always enter the same review screen before persistence.
-- Profile → Learning can optionally send aggregated place/category JSON to Gemini when the user presses Run personalization. Its checkpoint advances only after a valid run, and learned category/subcategory/payment-mode suggestions are applied only to exact typed-place matches for review.
+<img src="docs/screenshots/dashboard.png" alt="Home screen: spent so far this month, a line chart against last month, balances by account and biggest category changes" width="100%">
 
-## Account balances and transfers
+### Every entry, easy to find
 
-- Track a manually checked balance for each supported bank or digital wallet.
-- Account balances are snapshots: transactions and transfers recorded after the snapshot adjust the displayed current balance automatically.
-- Move money between tracked accounts with transfers; transfers do not count as income or expenses.
-- Reconcile each bank or wallet manually once per month by comparing the calculated closing balance with the provider's real balance.
-- Approved reconciliations update the account snapshot, preserve any explained difference in a locked audit record, and prevent later changes to already-audited activity.
-- The dashboard and Reports page show the total tracked balance and how it is distributed across accounts.
+Search by note, place or amount. Filter by account, category or month. Each day is grouped with its own total, so a busy Saturday is easy to spot.
 
-## Stack
+<img src="docs/screenshots/transactions.png" alt="Transactions list grouped by day with account filters and money in and out totals" width="100%">
 
-- Next.js 16 App Router + React 19 + TypeScript
-- Prisma ORM 7 + Supabase-hosted PostgreSQL
-- Better Auth with persisted users, credential accounts, sessions, and reset tokens
-- React Hook Form + Zod, Recharts, MapLibre GL JS, Phosphor Icons
-- Vitest + ESLint
+### Reports that answer "where did it go?"
 
-Supabase hosts PostgreSQL and the private receipt Storage bucket. The browser uploads receipt bytes directly to Storage only with a short-lived, server-issued upload token; all authorization and ownership checks still go through authenticated server routes and user-owned Prisma queries.
+How much you kept this month, your biggest category, a breakdown of spending and the last six months side by side. Download any month as a PDF.
 
-## Configure
+<img src="docs/screenshots/reports.png" alt="Reports page with money kept this month, spending by category and a six-month income and spending chart" width="100%">
 
-1. Create a Supabase project and copy its PostgreSQL pooler connection string.
-2. Copy `.env.example` to `.env.local`.
-3. Set `DATABASE_URL`, `BETTER_AUTH_SECRET`, and `BETTER_AUTH_URL`.
-4. Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and the server-only `SUPABASE_SECRET_KEY`. A legacy `SUPABASE_SERVICE_ROLE_KEY` is also accepted. `SUPABASE_RECEIPTS_BUCKET` defaults to `receipts`; the private bucket is created on the first upload with the app's 3 MB and MIME-type restrictions.
-5. To test receipt analysis, statement extraction, unrecognised bank SMS, or optional Learning, create a key at [Google AI Studio](https://aistudio.google.com/app/apikey) and set the server-only `GEMINI_API_KEY`. Never use a `NEXT_PUBLIC_` prefix or paste the key into client code. The Gemini free tier may use submitted images and data to improve Google products, so use synthetic/test data until the project is moved to an appropriate paid/private processing tier. Learning excludes receipts, GPS, addresses, payment-account details, exact amounts, email, and transaction IDs, but does send aggregated place/category strings after explicit user action. Bank SMS text is sent to Gemini **only** when no on-device template matches the message; recognised formats never leave the browser.
-6. For production password-reset mail, set `RESEND_API_KEY` and `AUTH_EMAIL_FROM`. In development, reset links are printed in the server terminal when Resend is not configured. Reminder emails use the same setup; also set `CRON_SECRET` to a long random string so the daily run in `vercel.json` (01:15 UTC, 07:00 in Nepal) can call `/api/cron/reminders`, which Vercel Cron authenticates with `Authorization: Bearer $CRON_SECRET`. Without it the endpoint answers 503 and reminder emails go out only the first time someone opens the app that day.
-7. Optionally set `NEXT_PUBLIC_MAP_STYLE_URL` and `PHOTON_SEARCH_URL` for alternative production map providers. Development defaults to OpenFreeMap Positron vector tiles and Photon search with visible attribution.
-8. Apply the checked-in schema and generate the client:
+### A map of your spending
+
+Tag an entry with a place in Kathmandu and it shows up on the map. Save places you return to (home, office, your usual shop) and see what each one costs you.
+
+<img src="docs/screenshots/map.png" alt="Map of Kathmandu with spending pins clustered around Thamel, Patan and Boudha, and a list of places with totals" width="100%">
+
+### Budgets, goals and bills that come back every month
+
+Set a limit per category and see what's left per day. Track savings goals, rent, salary and subscriptions in one place.
+
+<img src="docs/screenshots/plan.png" alt="Plan page with monthly budgets per category, progress bars and a suggested limit based on past spending" width="100%">
+
+### Money you're owed, and money you owe
+
+Keep track of who you lent to, who you borrowed from, and bills coming up. Get a reminder before they're due, record partial payments, and see a payoff plan for what you owe.
+
+<img src="docs/screenshots/dues.png" alt="Dues page showing money coming to you, money you owe, and upcoming items with reminders" width="100%">
+
+### Built for your phone
+
+Everything works on a phone, with the add button always under your thumb. Install it to your home screen like an app.
+
+<p align="center">
+  <img src="docs/screenshots/mobile-home.png" alt="Home on a phone" width="30%">
+  &nbsp;
+  <img src="docs/screenshots/mobile-transactions.png" alt="Transactions on a phone" width="30%">
+  &nbsp;
+  <img src="docs/screenshots/mobile-reports.png" alt="Reports on a phone" width="30%">
+</p>
+
+## What's inside
+
+**Made for Nepal**
+- **Paste a bank SMS** and the app fills in the amount, date, merchant and account for you. Common formats are read right in your browser, so the message never leaves your device.
+- **Bikram Sambat calendar.** Switch the whole app to BS dates in Settings. Your data is still stored in AD, so exports and bank statements line up.
+- **Fiscal year reports** from Shrawan 1 to the end of Ashadh.
+- **Festival spending.** See how this Dashain and Tihar compare with last year.
+- **Nepali banks and wallets.** eSewa, Khalti, IME Pay, connectIPS, cash, and every licensed commercial and development bank.
+
+**Day-to-day**
+- Add several entries at once, by voice, or from a receipt photo.
+- Group entries into trips and events, like "Pokhara over Dashain".
+- Move money between accounts without it counting as spending.
+- Check each account against its real balance once a month, so small mistakes don't pile up.
+- Gentle warnings for duplicates and unusually large amounts. Nothing is blocked.
+
+**Planning**
+- **Safe to spend:** how much you can spend each day until your next payday, after bills and a buffer you choose.
+- **What if:** see how cutting a category changes when you'll reach a savings goal.
+- **Payoff plan:** order your debts by smallest first, highest interest first or due date, and see when you'll be clear.
+
+**Your data stays yours**
+- Hide amounts with one tap, and lock the app with a PIN.
+- Import and export CSV, or download a full backup.
+- Delete your account and everything in it, whenever you like.
+
+## Privacy, in plain words
+
+- Your ledger lives in your own database. There are no ads and no trackers.
+- A few optional features use Google Gemini: reading a receipt photo, reading a bank statement, reading an SMS the app doesn't recognise, and learning your usual categories. They only run when you press the button, and you always review the result before anything is saved.
+- Bank SMS in a familiar format is read on your device and never sent anywhere.
+- Gemini's free tier may use what you send to improve Google's products. If you run your own copy, use test data or a paid Gemini plan for real receipts.
+
+## Run it yourself
+
+You'll need **Node 24**, a **PostgreSQL** database (a free [Supabase](https://supabase.com) project works well) and about ten minutes.
 
 ```bash
+git clone https://github.com/burr1to/expense-tracker.git
+cd expense-tracker
+cp .env.example .env.local   # then fill it in, see below
 npm install
-npm run db:deploy
-npm run db:generate
+npm run db:deploy            # creates the tables
+npm run dev
 ```
 
-Prisma owns the complete schema in `prisma/schema.prisma`; the initial deployable migration is in `prisma/migrations`.
+Open http://localhost:3000, sign up, and you're in.
 
-### Apply the latest migration
+**The minimum `.env.local`:**
 
-Every existing database must run `npm run db:deploy` before this version starts. Migration `20261007090000_add_request_ids_account_tails_and_ai_usage` adds the request ids that stop a retried save from being recorded twice, the account-number tails used to match bank SMS, and the `AiUsage` table behind the daily Gemini limits (20 receipt scans, 10 statement imports, 50 SMS reads and 5 personalization runs per person per Nepal day). Set the optional `GEMINI_DAILY_CAP` to also cap Gemini calls across all users per day.
+| Setting | What it's for |
+|---|---|
+| `DATABASE_URL` | Your PostgreSQL connection string |
+| `BETTER_AUTH_SECRET` | Any long random string, used to sign sessions |
+| `BETTER_AUTH_URL` | Where the app runs, e.g. `http://localhost:3000` |
 
-## Connect Muse (MCP)
+Everything else is optional and switches on a feature when you add it:
 
-An agent such as Muse can read the ledger and send bank or wallet notifications for review through the MCP endpoint at `/api/mcp`. It never writes to the ledger: each message waits on Home under "messages from Muse", opens in the normal SMS review, and only saving there adds an entry. Users see and disconnect apps in Profile → Security → Connected apps.
+| Setting | Turns on |
+|---|---|
+| `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY` | Attaching receipt photos and PDFs (kept in a private bucket, 3 MB max) |
+| `GEMINI_API_KEY` | Receipt scanning, statement import, unfamiliar SMS, personalization. Get a key at [Google AI Studio](https://aistudio.google.com/app/apikey). Keep it server-side, never `NEXT_PUBLIC_`. |
+| `GEMINI_DAILY_CAP` | A ceiling on Gemini calls across all users per day |
+| `RESEND_API_KEY`, `AUTH_EMAIL_FROM` | Password reset and reminder emails. Without them, reset links print in your terminal. |
+| `CRON_SECRET` | The daily reminder run in `vercel.json` (07:00 Nepal time) |
+| `NEXT_PUBLIC_MAP_STYLE_URL`, `PHOTON_SEARCH_URL` | A different map style or place search. The defaults are free and need no key. |
 
-Access is OAuth 2.1: authorization code with S256 PKCE, a consent screen on every authorization, rotating refresh tokens (reuse revokes the connection), and only SHA-256 hashes of codes, tokens and client secrets stored. There is no open client registration; register each app once with the script:
+Already running an older copy? Run `npm run db:deploy` before starting the new version.
+
+### Checks
+
+```bash
+npm run lint
+npm test
+npm run build
+```
+
+## Under the hood
+
+Next.js 16 and React 19 with TypeScript, Prisma 7 on PostgreSQL, Better Auth for accounts, MapLibre with OpenFreeMap tiles, Recharts, and Vitest.
+
+<details>
+<summary><strong>How some of it works</strong></summary>
+
+<br>
+
+**Sign-in and ownership.** Email and password through Better Auth, hashed with scrypt, with HTTP-only same-site session cookies stored in the database. Every read and write checks the session on the server and filters by the signed-in user. Changing your password signs out your other sessions. Deleting your account removes all of your data.
+
+**BS dates.** Conversion uses a vetted lookup table, and the tests pin it against published Nepali New Year dates from BS 2000 to 2090, so a bad upgrade fails the build rather than quietly shifting dates. Dates outside that range fall back to AD.
+
+**Festival comparison.** A festival is the BS month it falls in (Dashain is Ashwin, Tihar is Kartik), so no almanac table is needed. If there's nothing from last year, the app says so instead of showing a made-up percentage.
+
+**SMS reading.** A regex parser reads amount, direction, date, merchant, the last digits of the account and the balance, and gives a confidence score. It never guesses: anything it can't read stays blank. Templates for specific banks live in `src/lib/sms-templates.ts`. It ships empty on purpose, so add one when you have real samples from that sender.
+
+**Safe to spend.** Your tracked balance, minus everything due before your next payday, minus your buffer, spread over the days left. Income that hasn't arrived yet isn't counted.
+
+**Account balances.** Each account has a balance you checked by hand on a date. Entries and transfers after that date adjust it. A monthly reconciliation compares the app's number with the real one, records any difference with a note, and locks that month.
+
+**Map.** Exact locations must fall inside the Kathmandu valley. Place search goes through the server with debouncing, caching and rate limiting. Use a hosted or self-hosted Photon as usage grows.
+
+**AI limits.** Per person per Nepal day: 20 receipt scans, 10 statement imports, 50 SMS reads and 5 personalization runs. Personalization sends only place and category names, never amounts, receipts, locations, account details or your email.
+
+</details>
+
+<details>
+<summary><strong>CSV import format</strong></summary>
+
+<br>
+
+Required columns: `date`, `type`, `category`, `amount`. Optional: `subcategory`, `area`, `note`, `payment mode` (`cash`, `cheque` or `online`, default `cash`) and `payment account id` (needed for online rows).
+
+```csv
+date,type,category,subcategory,area,note,amount,payment mode,payment account id
+2026-07-15,expense,Food & Dining,Lunch,Thamel,"Lunch, team",1250,cash,
+2026-07-15,income,Salary,Salary,,Monthly salary,85000,cash,
+```
+
+You can also import text, PDF or image statements. Those go through Gemini and always land on a review screen first.
+
+Amounts show in NPR, USD or AUD, with no currency conversion.
+
+</details>
+
+<details>
+<summary><strong>Connect an AI assistant (MCP)</strong></summary>
+
+<br>
+
+An assistant such as Muse can read your ledger and send bank or wallet notifications for you to review, through the MCP endpoint at `/api/mcp`. It can't add, edit or delete entries: each message waits on Home under "messages from Muse" and only becomes an entry when you save it. You can see and disconnect apps in Settings → Security → Connected apps.
+
+Access uses OAuth 2.1: authorization code with S256 PKCE, a consent screen every time, rotating refresh tokens (reusing one revokes the connection), and only SHA-256 hashes of codes, tokens and secrets are stored. There's no open registration. Register each app once:
 
 ```bash
 npm run db:deploy
-DATABASE_URL=… node scripts/oauth-client.mjs create --name Muse --redirect-uri <Muse's OAuth callback URL>
+DATABASE_URL=… node scripts/oauth-client.mjs create --name Muse --redirect-uri <the app's OAuth callback URL>
 ```
 
-It prints `client_id` and `client_secret` once. Give Muse:
+It prints `client_id` and `client_secret` once. Give the app:
 
 | Setting | Value |
 |---|---|
@@ -111,63 +216,30 @@ It prints `client_id` and `client_secret` once. Give Muse:
 | Scopes | `ledger:read ledger:draft` |
 | Client auth | `client_secret_basic` (or `client_secret_post`) |
 
-Discovery documents are at `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource/api/mcp`. `rotate-secret`, `add-redirect`, `disable` and `list` manage clients later.
+Discovery documents are at `/.well-known/oauth-authorization-server` and `/.well-known/oauth-protected-resource/api/mcp`. Use `rotate-secret`, `add-redirect`, `disable` and `list` to manage clients later.
 
-Read tools (`ledger:read`) see the whole ledger, computed by the same code as the app's screens and PDF report, so the numbers agree. Amounts are `{ minor, text }`; months are `YYYY-MM` or `BS:YYYY-MM`.
+Read tools (`ledger:read`) use the same code as the app's screens and PDF report, so the numbers always agree. Amounts come as `{ minor, text }`; months as `YYYY-MM` or `BS:YYYY-MM`.
 
 | Tool | What it answers |
 |---|---|
-| `get_ledger_context` | Currency, calendar, today, category, account, group and place ids |
-| `list_transactions`, `list_transfers` | Entries and transfers with date, category, account, group, amount and text filters |
+| `get_ledger_context` | Currency, calendar, today, and the ids for categories, accounts, groups and places |
+| `list_transactions`, `list_transfers` | Entries and transfers, filtered by date, category, account, group, amount or text |
 | `get_monthly_report` | The PDF report as data, for a month, BS month or fiscal year (`FY:2082-83`) |
-| `get_month_overview` | What needs attention: spend vs budget or last month, projected net, safe-to-spend, budgets at risk, overdue dues, unconfirmed bills, insights |
-| `get_accounts` | Balances per account and total, last reconciliation |
-| `get_budgets` | Pacing, unbudgeted spending, last month's limits and actuals |
-| `get_dues` | Bills, loans and money owed, with a debt payoff plan |
-| `get_recurring` | Salary, rent and subscriptions, and what falls due soon |
+| `get_month_overview` | What needs attention: spending vs budget, projected net, safe to spend, budgets at risk, overdue dues, unconfirmed bills |
+| `get_accounts` | Balance per account, the total, and the last reconciliation |
+| `get_budgets` | Pacing, unbudgeted spending, and last month's limits and actuals |
+| `get_dues` | Bills, loans and money owed, with a payoff plan |
+| `get_recurring` | Salary, rent and subscriptions, and what's due soon |
 | `get_savings_goals` | Progress and the monthly amount needed |
 | `get_cash_forecast` | Projected balance and its lowest point (7–90 days) |
 | `get_place_trends` | Where spending changed most, place by place |
 | `list_groups` | Trips and events with their totals |
 | `get_milestones`, `get_activity_log` | Wins, and what changed recently |
 
-Draft tools (`ledger:draft`): `send_for_review` and `list_review_queue`. One-time-code messages are refused, a notification id is queued once, and unreviewed messages are dropped after 30 days. No tool can edit or delete an entry.
+Draft tools (`ledger:draft`): `send_for_review` and `list_review_queue`. One-time-code messages are refused, each notification is queued only once, and unreviewed messages are dropped after 30 days.
 
-## Run
+</details>
 
-```bash
-npm run dev
-```
+---
 
-The app requires a working PostgreSQL connection. Sign-up creates the user, credential account, and database session; the first ledger request starts with empty persisted collections.
-
-## Auth behavior
-
-- Email/password sign-up and sign-in
-- Scrypt password hashing through Better Auth
-- HTTP-only, same-site session cookies backed by the `Session` table
-- Forgot-password request and token-based password completion
-- Password change with other-session revocation
-- Password verification for the privacy lock
-- Password-confirmed account deletion, cascading through all ledger data
-- Server-side session validation plus `userId` ownership filtering on every ledger mutation
-
-## CSV import format
-
-Required columns are `date`, `type`, `category`, and `amount`. Optional columns are `subcategory`, `area`, `note`, `payment mode`, and `payment account id`. Payment mode accepts `cash`, `cheque`, or `online` and defaults to cash when left blank. Online rows must use an account ID from the user's configured payment accounts.
-
-```csv
-date,type,category,subcategory,area,note,amount,payment mode,payment account id
-2026-07-15,expense,Food & Dining,Lunch,Thamel,"Lunch, team",1250,cash,
-2026-07-15,income,Salary,Salary,,Monthly salary,85000,cash,
-```
-
-## Quality checks
-
-```bash
-npm run lint
-npm test
-npm run build
-```
-
-The ledger supports NPR, USD, and AUD as display currencies without exchange conversion. “Net saved” is monthly income minus monthly expenses; savings goals are planning records rather than bank balances.
+<sub>Screenshots use made-up data for a made-up person. The map uses © OpenStreetMap contributors via OpenFreeMap.</sub>
