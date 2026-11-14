@@ -13,3 +13,4 @@ supabase/.temp/
 *.md 
 design-qa.md
 artifacts/
+.codex/
