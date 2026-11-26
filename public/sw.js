@@ -1,9 +1,20 @@
-/* SaveYoRupee service worker: an offline page, fast repeat loads, and notifications on Android.
- * Never touches /api/* or anything that is not a GET, so ledger data always comes from the server. */
+/* SaveYoRupee service worker: an offline page, fast repeat loads, notifications on Android, and
+ * the Share-sheet inbox. Never touches /api/* or any other non-GET, so ledger data always comes
+ * from the server. The one POST it answers is a share, which it keeps on this device. */
 const VERSION = "syr-v1";
 const STATIC_CACHE = `${VERSION}-static`;
 const OFFLINE_URL = "/offline.html";
 const STATIC_LIMIT = 240;
+
+// Must match src/lib/shared-inbox.ts. Not "syr-" prefixed, so a version bump never wipes a share in flight.
+const SHARE_PATH = "/share-target";
+const SHARE_CACHE = "saveyorupee-share";
+const SHARE_META_KEY = "/__share/meta";
+const SHARE_FILE_KEY = "/__share/file";
+const SHARE_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+// A full-size phone photo; the receipt scanner shrinks it before anything is uploaded.
+const SHARE_MAX_FILE_BYTES = 25 * 1024 * 1024;
+const SHARE_MAX_TEXT = 4000;
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
@@ -56,10 +67,40 @@ async function networkFirstPage(request) {
   }
 }
 
+/** Parks a shared photo or text in the share inbox and opens the app, which picks it up from there. */
+async function receiveShare(request) {
+  const back = (state) => Response.redirect(new URL(`/?share=${state}`, self.location.origin).href, 303);
+  try {
+    const form = await request.formData();
+    const field = (name) => {
+      const value = form.get(name);
+      return typeof value === "string" ? value.slice(0, SHARE_MAX_TEXT) : "";
+    };
+    const file = form.getAll("receipt").find((value) => typeof value !== "string"
+      && SHARE_IMAGE_TYPES.includes(value.type) && value.size > 0 && value.size <= SHARE_MAX_FILE_BYTES);
+    await caches.delete(SHARE_CACHE);
+    const cache = await caches.open(SHARE_CACHE);
+    if (file) {
+      await cache.put(SHARE_FILE_KEY, new Response(file, {
+        headers: { "Content-Type": file.type, "X-File-Name": encodeURIComponent(file.name || "shared-receipt") },
+      }));
+    }
+    const meta = { receivedAt: Date.now(), text: field("text"), title: field("title"), hasFile: Boolean(file) };
+    await cache.put(SHARE_META_KEY, new Response(JSON.stringify(meta), { headers: { "Content-Type": "application/json" } }));
+    return back("1");
+  } catch {
+    return back("failed");
+  }
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
-  if (request.method !== "GET") return;
   const url = new URL(request.url);
+  if (request.method === "POST" && url.origin === self.location.origin && url.pathname === SHARE_PATH) {
+    event.respondWith(receiveShare(request));
+    return;
+  }
+  if (request.method !== "GET") return;
   if (url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return;
   if (request.mode === "navigate") {
     event.respondWith(networkFirstPage(request));

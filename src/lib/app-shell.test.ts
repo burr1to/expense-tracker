@@ -18,6 +18,12 @@ describe("readAddDeepLink", () => {
     expect(readAddDeepLink(params("sms=" + "9".repeat(SHARED_TEXT_LIMIT + 50))).link).toEqual({ type: "sms", text: "9".repeat(SHARED_TEXT_LIMIT) });
   });
 
+  it("reads the share target's landing link and strips it from the address", () => {
+    expect(readAddDeepLink(params("share=1"))).toEqual({ link: { type: "shared" }, rest: "" });
+    expect(readAddDeepLink(params("share=failed&q=rent"))).toEqual({ link: { type: "share-failed" }, rest: "q=rent" });
+    expect(readAddDeepLink(params("share=other"))).toEqual({ link: null, rest: "" });
+  });
+
   it("ignores unknown values but still strips the keys it owns", () => {
     expect(readAddDeepLink(params("add=transfer&due=d1"))).toEqual({ link: null, rest: "due=d1" });
     expect(readAddDeepLink(params("due=d1&action=repay"))).toEqual({ link: null, rest: "due=d1&action=repay" });

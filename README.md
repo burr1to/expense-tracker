@@ -27,6 +27,7 @@ It also speaks Nepali money: Bikram Sambat dates, Shrawan-to-Ashadh fiscal-year 
 - Common formats are read **on your device** by a regex parser — instantly, offline, and without the message leaving the browser. Only a message the parser cannot read is sent to Gemini.
 - The parser reads amount, direction, date, merchant, masked account tail and balance, and matches the message to one of your tracked payment accounts when it can. It reports a confidence score and never guesses: anything unreadable stays blank.
 - Every draft goes through a review screen before saving. Duplicate and unusual-spend warnings run on the parsed draft (re-pasting the same SMS is the most likely mistake), and the learning profile fills the category and payment method that the message itself cannot state.
+- On Android, once SaveYoRupee is installed to the home screen, long-press a bank SMS or open a receipt photo, tap **Share** and pick SaveYoRupee. Text opens the SMS sheet and a JPG, PNG or WebP photo opens the receipt scanner, both already filled in for review. The service worker receives the share on the device and hands it to the app, so the shared content is not sent to the server just to arrive there. iPhones do not support sharing into web apps.
 - Provider-specific templates live in `src/lib/sms-templates.ts` and ship empty by design. Add one per sender you have real samples for; until then the generic parser handles the common grammar and reports lower confidence.
 
 ## Planning and forecasting
