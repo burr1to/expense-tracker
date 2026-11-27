@@ -1,6 +1,6 @@
 import { ArrowDownRight, ArrowUpRight, CaretLeft, CaretRight, ClipboardText, Plus } from "@phosphor-icons/react";
 import Link from "next/link";
-import { useMemo, type CSSProperties } from "react";
+import { useMemo, type CSSProperties, type ReactNode } from "react";
 import { AccountTile, CategoryTile } from "../components/ToneIcon";
 import { accountLook } from "../lib/tones";
 import { getCategory } from "../lib/categories";
@@ -23,6 +23,8 @@ interface HomePageProps {
   onPeriodChange: (period: PeriodKey) => void;
   onAdd: () => void;
   onOpenEntry: (transaction: LedgerTransaction) => void;
+  /** Messages a connected app sent for review, shown above everything else while any wait. */
+  reviewQueue?: ReactNode;
 }
 
 const monthName = (key: PeriodKey) => monthLabel(key).split(" ")[0];
@@ -68,7 +70,7 @@ function SpendChart({ comparison, label, previousLabel }: { comparison: MonthCom
   );
 }
 
-export function HomePage({ period, calendarSystem, currency, transactions, paymentAccounts, customCategories, onPeriodChange, onAdd, onOpenEntry }: HomePageProps) {
+export function HomePage({ period, calendarSystem, currency, transactions, paymentAccounts, customCategories, onPeriodChange, onAdd, onOpenEntry, reviewQueue }: HomePageProps) {
   const today = useToday();
   const comparison = useMemo(() => compareMonthSpend(transactions, paymentAccounts, period, today), [transactions, paymentAccounts, period, today]);
   const idleDays = useMemo(() => daysSinceLastLogged(transactions, today, (instant) => dateOnlyInTimeZone(APP_TIME_ZONE, new Date(instant))), [transactions, today]);
@@ -208,6 +210,7 @@ export function HomePage({ period, calendarSystem, currency, transactions, payme
           <button type="button" className="v2-icon-btn" onClick={() => step(1)} aria-label="Next month" disabled={isCurrent}><CaretRight size={18} weight="bold" /></button>
         </div>
       </header>
+      {reviewQueue}
       <div className="v2-home-grid">
         <div className="v2-home-col is-main"><div className="v2-slot is-hero">{hero}</div><div className="v2-slot is-recent">{recentCard}</div></div>
         <div className="v2-home-col is-side">{nudge && <div className="v2-slot is-nudge">{nudge}</div>}<div className="v2-slot is-accounts">{byAccount}</div><div className="v2-slot is-changes">{biggest}</div></div>

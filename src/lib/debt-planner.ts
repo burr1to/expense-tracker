@@ -121,3 +121,10 @@ export function buildDebtPlan(dueItems: readonly DueItem[], monthlyBudgetMinor: 
     impossible: false,
   };
 }
+
+/** The payoff budget a plan starts from: a tenth of what is owed each month, or enough to beat the interest, rounded up to 100. */
+export function suggestedPayoffBudgetMinor(debts: readonly DueItem[]) {
+  const remaining = debts.reduce((sum, item) => sum + dueRemaining(item), 0);
+  const interest = debts.reduce((sum, item) => sum + Math.round(dueRemaining(item) * Math.max(0, item.annualRatePercent ?? 0) / 1200), 0);
+  return Math.max(100, Math.ceil(Math.max(remaining / 10, interest * 1.25) / 100) * 100);
+}

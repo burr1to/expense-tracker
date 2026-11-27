@@ -8,7 +8,7 @@ import { plainAmount } from "../lib/entry-labels";
 import { LedgerDatePickerInput as DatePickerInput } from "../components/LedgerDatePickerInput";
 import { getCategory, LOAN_CATEGORY_ID, spendingCategoriesFor } from "../lib/categories";
 import { formatMoney, majorToMinor } from "../lib/currency";
-import { buildDebtPlan, isPlannableDebt, type PayoffStrategy } from "../lib/debt-planner";
+import { buildDebtPlan, isPlannableDebt, suggestedPayoffBudgetMinor, type PayoffStrategy } from "../lib/debt-planner";
 import { buildDueReminderMessage, reminderShareLinks, type ReminderLanguage } from "../lib/due-reminder-message";
 import { dueCategoryForKind, dueDateLabel, dueDirection, dueKindForTab, dueOpeningMovementsByDue, duePaid, duePaymentHistory, dueRemaining, isDebtKind, latestDuePayment, shortDueDate } from "../lib/dues";
 import { onlinePaymentAccounts, paymentAccountLabel } from "../lib/payment-accounts";
@@ -172,18 +172,12 @@ export function DuesPage({ currency, items, customCategories, transactions, paym
 }
 
 /** A starting budget that always produces a real plan: a tenth of the balance, never less than the interest it has to outrun. */
-function suggestedBudgetMinor(debts: readonly DueItem[]) {
-  const remaining = debts.reduce((sum, item) => sum + dueRemaining(item), 0);
-  const interest = debts.reduce((sum, item) => sum + Math.round(dueRemaining(item) * Math.max(0, item.annualRatePercent ?? 0) / 1200), 0);
-  return Math.max(100, Math.ceil(Math.max(remaining / 10, interest * 1.25) / 100) * 100);
-}
-
 function DebtPayoffPlan({ items, currency, calendarSystem }: { items: DueItem[]; currency: CurrencyCode; calendarSystem: CalendarSystem }) {
   const debts = useMemo(() => items.filter(isPlannableDebt), [items]);
   const monthLabel = (date: string) => calendarSystem === "BS" ? formatLedgerMonth(parseISO(date), "BS") : format(parseISO(date), "MMM yyyy");
   const hasInterest = debts.some((item) => (item.annualRatePercent ?? 0) > 0);
   const [strategy, setStrategy] = useState<PayoffStrategy>("snowball");
-  const [budget, setBudget] = useState<string | number>(() => suggestedBudgetMinor(debts) / 100);
+  const [budget, setBudget] = useState<string | number>(() => suggestedPayoffBudgetMinor(debts) / 100);
   // With every rate blank, avalanche is a meaningless tie — it is hidden, so never plan with it either.
   const activeStrategy = strategy === "avalanche" && !hasInterest ? "snowball" : strategy;
   const budgetMinor = Math.max(0, Math.round(Number(budget || 0) * 100));

@@ -49,6 +49,8 @@ model User {
   activityLogs      ActivityLog[]
   aiUsage           AiUsage[]
   transactionGroups TransactionGroup[]
+  oauthGrants       OAuthGrant[]
+  agentDrafts       AgentDraft[]
 }
 
 model Household {
@@ -532,4 +534,97 @@ model AiUsage {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, day, feature])
+}
+
+/// A third-party app allowed to ask for access to a user's ledger, such as Muse. Clients are
+/// registered by an operator script, never by an open registration endpoint.
+model OAuthClient {
+  id               String       @id @default(cuid())
+  clientId         String       @unique
+  name             String
+  clientSecretHash String
+  redirectUris     String[]
+  scopes           String[]
+  disabled         Boolean      @default(false)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  grants           OAuthGrant[]
+}
+
+/// One user's approval of one client: the "connected app" they can revoke from Settings.
+model OAuthGrant {
+  id         String        @id @default(cuid())
+  userId     String
+  clientId   String
+  scopes     String[]
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client     OAuthClient   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  codes      OAuthCode[]
+  tokens     OAuthToken[]
+  drafts     AgentDraft[]
+
+  @@unique([userId, clientId])
+}
+
+/// A single-use authorization code. Only its SHA-256 hash is stored.
+model OAuthCode {
+  id            String     @id @default(cuid())
+  codeHash      String     @unique
+  grantId       String
+  redirectUri   String
+  codeChallenge String
+  scopes        String[]
+  resource      String
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime   @default(now())
+  grant         OAuthGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+
+  @@index([grantId])
+}
+
+/// An access and refresh token pair. Only hashes are stored; a refresh rotates the pair, and
+/// presenting an already-rotated refresh token revokes the whole grant.
+model OAuthToken {
+  id               String     @id @default(cuid())
+  grantId          String
+  accessTokenHash  String     @unique
+  refreshTokenHash String     @unique
+  scopes           String[]
+  resource         String
+  accessExpiresAt  DateTime
+  refreshExpiresAt DateTime
+  rotatedAt        DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime   @default(now())
+  grant            OAuthGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+
+  @@index([grantId])
+}
+
+/// A message an agent (Muse) sent for the user to review. It never touches the ledger itself:
+/// reviewing it opens the normal message review, and only that save writes a transaction.
+model AgentDraft {
+  id            String      @id @default(cuid())
+  userId        String
+  grantId       String?
+  status        String      @default("pending")
+  source        String
+  text          String
+  sourceApp     String?
+  externalId    String
+  receivedAt    DateTime
+  transactionId String?
+  resolvedAt    DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  grant         OAuthGrant? @relation(fields: [grantId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, externalId])
+  @@index([userId, status, createdAt])
 }

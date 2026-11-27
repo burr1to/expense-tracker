@@ -3,6 +3,7 @@
 import { createContext, useContext, type Dispatch, type SetStateAction } from "react";
 import type { OnboardingStepId } from "../lib/onboarding";
 import type { PeriodKey } from "../lib/period";
+import type { AgentDraftItem } from "../lib/use-agent-drafts";
 import type { LedgerTransaction, SavedPlace } from "../types";
 import { useLedger } from "./LedgerContext";
 
@@ -30,6 +31,11 @@ interface LedgerWorkspaceContextValue {
   lock: () => void;
   /** Opens the bank-SMS capture sheet from anywhere, optionally prefilled (share target). */
   openSms: (initialText?: string) => void;
+  /** Messages a connected app (Muse) sent for review. None of them is in the ledger yet. */
+  agentDrafts: AgentDraftItem[];
+  /** Opens a sent message in the SMS review sheet; saving it there is what adds the entry. */
+  reviewAgentDraft: (draft: AgentDraftItem) => void;
+  dismissAgentDraft: (draft: AgentDraftItem) => Promise<void>;
   /** Opens the AI receipt scanner from anywhere; `fallbackDate` dates a receipt with no readable date (default today). */
   openReceiptScan: (fallbackDate?: string) => void;
   /** Opens the move-money sheet; `fromAccountId` preselects the source account, `transferId` edits that transfer. */
