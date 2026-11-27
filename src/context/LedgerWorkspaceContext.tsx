@@ -59,15 +59,3 @@ export function useLedgerWorkspace() {
   if (!context) throw new Error("useLedgerWorkspace must be used within LedgerAppLayout");
   return context;
 }
-
-/**
- * The one balance-privacy session every page reads. Outside LedgerAppLayout
- * there is no session to unlock, so balances show only when there is no PIN.
- */
-export function useBalancePrivacy(hasPin: boolean) {
-  const context = useContext(LedgerWorkspaceContext);
-  return {
-    visible: context ? context.balancesVisible : !hasPin,
-    requestUnlock: () => context?.requestBalanceUnlock(),
-  };
-}

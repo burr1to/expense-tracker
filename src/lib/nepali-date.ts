@@ -71,15 +71,6 @@ export function bsDaysInMonth(year: number, month: number): number {
   return Math.round((Date.parse(`${next}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86_400_000);
 }
 
-export function isSupportedAdDate(iso: string): boolean {
-  try {
-    adToBs(iso);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** The BS months a Gregorian date range covers, such as `Bhadra–Ashwin 2083`. */
 export function formatBsMonthSpan(startIso: string, endIso: string): string | null {
   try {

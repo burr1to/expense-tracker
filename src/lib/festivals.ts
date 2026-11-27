@@ -123,21 +123,6 @@ export function festivalMonthLabel(festival: Festival): string {
   return months.length > 1 ? `${months[0]}–${months[months.length - 1]}` : months[0];
 }
 
-/** The festival season containing this Gregorian date, if any. */
-export function festivalOn(iso: string): { festival: Festival; bsYear: number } | null {
-  const bs = adToBs(iso);
-  for (const bsYear of [bs.year, bs.year - 1]) {
-    if (bsYear < BS_MIN_YEAR) continue;
-    for (const festival of FESTIVALS) {
-      try {
-        const bounds = festivalBounds(festival, bsYear);
-        if (iso >= bounds.start && iso < bounds.endExclusive) return { festival, bsYear };
-      } catch { continue; }
-    }
-  }
-  return null;
-}
-
 export interface UpcomingFestival {
   festival: Festival;
   bsYear: number;
@@ -165,33 +150,9 @@ export function festivalSeasonsFrom(today: string): UpcomingFestival[] {
   return seasons.sort((a, b) => a.bounds.start.localeCompare(b.bounds.start));
 }
 
-/**
- * The season running today, or the next one starting within `withinDays`.
- * Used to prompt planning before the spending starts rather than after.
- */
-export function upcomingFestival(today: string, withinDays = 60): UpcomingFestival | null {
-  return festivalSeasonsFrom(today).find((season) => season.daysAway <= withinDays) ?? null;
-}
-
 export interface FestivalHeadsUp extends UpcomingFestival {
   /** Days from `today` to the first main day (e.g. Ghatasthapana) while it is still ahead; null when unknown or already here. */
   daysToMainDay: number | null;
-}
-
-/**
- * The season worth a dashboard heads-up on `today`: one opening within
- * `withinDays`, or one already running whose main days are not over yet. A
- * season whose main days have passed has nothing left to plan, so the next
- * one is considered instead.
- */
-export function festivalHeadsUp(today: string, withinDays = 30): FestivalHeadsUp | null {
-  for (const season of festivalSeasonsFrom(today)) {
-    if (season.daysAway > withinDays) return null;
-    const main = festivalMainDays(season.festival, season.bsYear);
-    if (season.daysAway === 0 && main && main.end < today) continue;
-    return { ...season, daysToMainDay: main && main.start > today ? dayGap(today, main.start) : null };
-  }
-  return null;
 }
 
 export type FestivalStatus = "upcoming" | "running" | "done";

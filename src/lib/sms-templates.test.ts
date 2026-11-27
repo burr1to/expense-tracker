@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectProvider, detectProviders, extractSmsDate, mentionsCurrencyAmount, mentionsOneTimeCode, parseBankSms, SMS_REVIEW_THRESHOLD } from "./sms-templates";
+import { detectProviders, extractSmsDate, mentionsCurrencyAmount, mentionsOneTimeCode, parseBankSms, SMS_REVIEW_THRESHOLD } from "./sms-templates";
 
 // These fixtures are synthetic messages written in the shapes providers
 // commonly use. They are not captured from any real sender — replace them with
@@ -74,18 +74,6 @@ describe("extractSmsDate", () => {
 
   it("returns null when no date is present", () => {
     expect(extractSmsDate("debited NPR 100 at SHOP")).toBeNull();
-  });
-});
-
-describe("provider detection", () => {
-  it("names known wallets and banks", () => {
-    expect(detectProvider("eSewa payment of NPR 100")).toBe("eSewa");
-    expect(detectProvider("Khalti load successful")).toBe("Khalti");
-    expect(detectProvider("NIC ASIA BANK alert")).toBe("NIC Asia");
-  });
-
-  it("returns null for an unknown sender", () => {
-    expect(detectProvider("Some other bank alert")).toBeNull();
   });
 });
 

@@ -1,6 +1,7 @@
 import { ArrowSquareOut, Bell, Brain, Database, DownloadSimple, EyeSlash, ListChecks, LockKey, PiggyBank, Plus, Sparkle, Swatches, Trash, UploadSimple, UserCircle, UsersThree } from "@phosphor-icons/react";
 import { Modal, NumberInput, PasswordInput, SegmentedControl, Select, Switch, TextInput } from "@mantine/core";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useSearchParams } from "next/navigation";
 import { ButtonSpinner } from "../components/ButtonSpinner";
 import { CategoryIconPicker } from "../components/CategoryIconPicker";
 import { LedgerIcon } from "../components/LedgerIcon";
@@ -20,6 +21,7 @@ import type { CalendarSystem, CategoryIconName, CurrencyCode, TransactionKind } 
 import { FormError } from "../components/FormError";
 import { Info } from "@phosphor-icons/react";
 import { notificationBlockerHere } from "../lib/app-shell";
+import { HOUSEHOLD_INVITE_PARAM } from "../lib/household";
 
 const currencies: { code: CurrencyCode; label: string }[] = [
   { code: "NPR", label: "Nepalese rupee" }, { code: "USD", label: "US dollar" }, { code: "AUD", label: "Australian dollar" },
@@ -45,6 +47,14 @@ export function SettingsPage({ onLock }: { onLock: () => void }) {
   const [householdMessage, setHouseholdMessage] = useState<string | null>(null);
   const [householdError, setHouseholdError] = useState<string | null>(null);
   const [householdAction, setHouseholdAction] = useState<string | null>(null);
+  const inviteToken = useSearchParams().get(HOUSEHOLD_INVITE_PARAM);
+  // The token is single-purpose: once used, it leaves the address so a reload or a shared screenshot does not carry it.
+  const acceptInvite = async (token: string) => {
+    await acceptHousehold(token);
+    const url = new URL(window.location.href);
+    url.searchParams.delete(HOUSEHOLD_INVITE_PARAM);
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  };
   const [calendarSaving, setCalendarSaving] = useState(false); const [categoryAction, setCategoryAction] = useState<string | null>(null); const [securityAction, setSecurityAction] = useState<"password" | "delete" | null>(null);
   const backupFileRef = useRef<HTMLInputElement>(null);
   const [backupSelection, setBackupSelection] = useState<{ file: File; exportedAt: string; counts: Record<string, number> } | null>(null);
@@ -220,11 +230,11 @@ export function SettingsPage({ onLock }: { onLock: () => void }) {
       </div>
     </article>
     <article className="settings-panel"><div className="settings-title"><span className="settings-icon"><UsersThree size={23} /></span><div><h2>Shared ledger</h2><p>Two people. Entries stay private until you mark them Ours.</p></div></div>
-      {!household && <form className="settings-form" onSubmit={(event) => { event.preventDefault(); void runHousehold("invite", () => inviteHousehold(inviteEmail), "Invite saved. They should sign in with that email and accept here."); }}><TextInput label="Their email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.currentTarget.value)} required disabled={Boolean(householdAction) || isDemo} /><button className="v2-button is-primary" disabled={Boolean(householdAction) || isDemo}>{householdAction === "invite" ? <><ButtonSpinner />Inviting…</> : "Invite"}</button></form>}
-      {household?.status === "invited" && <div className="settings-form"><p>{household.invitedBy} invited you to {household.name}.</p><button type="button" className="v2-button is-primary" disabled={Boolean(householdAction) || isDemo} onClick={() => void runHousehold("accept", acceptHousehold, "You joined the shared ledger.")}>{householdAction === "accept" ? <><ButtonSpinner />Joining…</> : "Accept"}</button></div>}
+      {!household && <form className="settings-form" onSubmit={(event) => { event.preventDefault(); void runHousehold("invite", () => inviteHousehold(inviteEmail), "Invite sent. They accept from the link in that email, signed in with that address."); }}><TextInput label="Their email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.currentTarget.value)} required disabled={Boolean(householdAction) || isDemo} /><button className="v2-button is-primary" disabled={Boolean(householdAction) || isDemo}>{householdAction === "invite" ? <><ButtonSpinner />Inviting…</> : "Invite"}</button></form>}
+      {household?.status === "invited" && <div className="settings-form"><p>{household.invitedBy} invited you to {household.name}.{!inviteToken && " Open the invite link from your email to accept."}</p><button type="button" className="v2-button is-primary" disabled={Boolean(householdAction) || isDemo || !inviteToken} onClick={() => void runHousehold("accept", () => acceptInvite(inviteToken!), "You joined the shared ledger.")}>{householdAction === "accept" ? <><ButtonSpinner />Joining…</> : "Accept"}</button></div>}
       {household?.status === "active" && <div className="settings-form">
         <ul className="household-members">{household.members.map((member) => <li key={member.email}><span><strong>{member.name || member.email}</strong><small>{member.email} · {member.status}</small></span>{household.role === "owner" && member.role !== "owner" && <button type="button" className="text-button danger-text" disabled={Boolean(householdAction)} onClick={() => void runHousehold(member.email, () => removeHouseholdMember(member.email), "Removed from the household.")}>Remove</button>}</li>)}</ul>
-        {household.role === "owner" && household.members.length < 2 && <form className="settings-form" onSubmit={(event) => { event.preventDefault(); void runHousehold("invite", () => inviteHousehold(inviteEmail), "Invite saved. They should sign in with that email and accept here."); }}><TextInput label="Their email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.currentTarget.value)} required disabled={Boolean(householdAction) || isDemo} /><button className="v2-button is-primary" disabled={Boolean(householdAction) || isDemo}>{householdAction === "invite" ? <><ButtonSpinner />Inviting…</> : "Invite"}</button></form>}
+        {household.role === "owner" && household.members.length < 2 && <form className="settings-form" onSubmit={(event) => { event.preventDefault(); void runHousehold("invite", () => inviteHousehold(inviteEmail), "Invite sent. They accept from the link in that email, signed in with that address."); }}><TextInput label="Their email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.currentTarget.value)} required disabled={Boolean(householdAction) || isDemo} /><button className="v2-button is-primary" disabled={Boolean(householdAction) || isDemo}>{householdAction === "invite" ? <><ButtonSpinner />Inviting…</> : "Invite"}</button></form>}
         <button type="button" className="v2-button is-danger" disabled={Boolean(householdAction) || isDemo} onClick={() => void runHousehold("leave", leaveHousehold, household.role === "owner" ? "Household closed." : "You left the household.")}>{householdAction === "leave" ? <><ButtonSpinner />Updating…</> : household.role === "owner" ? "Close household" : "Leave household"}</button>
       </div>}
       {householdMessage && <div className="form-success" role="status">{householdMessage}</div>}

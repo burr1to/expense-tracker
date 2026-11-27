@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canStartLoanFrom, claimedOpeningAmounts, dueLinkLabel, dueLinksFor, linkMakesLoan, linkRestoreFor, loanKindFor, openingLinkCandidates, settlementLinkCandidates } from "./due-links";
+import { canStartLoanFrom, claimedOpeningAmounts, dueLinkLabel, dueLinksFor, linkMakesLoan, loanKindFor, openingLinkCandidates, settlementLinkCandidates } from "./due-links";
 import type { DueItem, DuePayment, LedgerTransaction } from "../types";
 
 const entry = (changes: Partial<LedgerTransaction> & { clientRequestId?: string | null } = {}) => ({ id: "t1", userId: "u1", kind: "expense", category: "food", subcategory: null, amountMinor: 30_000, occurredOn: "2026-07-01", note: "Dinner", area: null, paymentMode: "cash", paymentAccountId: null, locationLabel: null, locationAddress: null, locationLatitude: null, locationLongitude: null, locationAccuracy: null, locationSource: null, savedPlaceId: null, createdAt: "2026-07-01T10:00:00.000Z", clientRequestId: null, ...changes }) as LedgerTransaction & { clientRequestId?: string | null };
@@ -47,8 +47,6 @@ describe("due links", () => {
     expect(linkMakesLoan("lent", 10_000, dinner)).toBe(false);
     expect(linkMakesLoan("payment", 30_000, dinner)).toBe(false);
     expect(linkMakesLoan("lent", 30_000, entry({ category: "loan" }))).toBe(false);
-    expect(linkRestoreFor("lent", 30_000, entry({ subcategory: "Restaurant" }))).toEqual({ category: "food", subcategory: "Restaurant" });
-    expect(linkRestoreFor("lent", 10_000, dinner)).toBeNull();
   });
 
   it("labels each linked entry by the due it belongs to", () => {

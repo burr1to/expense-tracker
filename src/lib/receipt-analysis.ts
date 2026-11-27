@@ -42,19 +42,6 @@ const receiptSchema = z.object({
   storagePath: z.string().min(1).max(300),
 });
 
-const categorySchema = z.object({
-  id: z.string().trim().min(1).max(80),
-  label: z.string().trim().min(1).max(80),
-  subcategories: z.array(z.string().trim().min(1).max(80)).max(30),
-});
-
-export const receiptAnalysisRequestSchema = z.object({
-  receipt: receiptSchema,
-  currency: z.enum(["NPR", "USD", "AUD"]),
-  fallbackOccurredOn: z.string().date(),
-  categories: z.array(categorySchema).min(1).max(40),
-});
-
 export const receiptAnalysisApiRequestSchema = z.object({
   receipt: receiptSchema,
   fallbackOccurredOn: z.string().date(),

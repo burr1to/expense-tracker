@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adToBs, bsDaysInMonth, bsToAd, BS_MAX_YEAR, BS_MIN_YEAR, formatBs, formatBsMonthSpan, isSupportedAdDate } from "./nepali-date";
+import { adToBs, bsDaysInMonth, bsToAd, BS_MAX_YEAR, BS_MIN_YEAR, formatBs, formatBsMonthSpan } from "./nepali-date";
 import { formatLedgerDay, formatLedgerMonth } from "./dates";
 import { addMonthsToKey, daysInPeriod, monthBounds, monthKeyOf, monthLabel } from "./period";
 
@@ -77,11 +77,6 @@ describe("range guards", () => {
     expect(() => bsToAd({ year: BS_MIN_YEAR - 1, month: 1, day: 1 })).toThrow(/supported range/);
     expect(() => bsToAd({ year: BS_MAX_YEAR + 1, month: 1, day: 1 })).toThrow(/supported range/);
     expect(() => bsToAd({ year: 2083, month: 13, day: 1 })).toThrow(/Invalid Bikram Sambat month/);
-  });
-
-  it("reports whether a Gregorian date is convertible", () => {
-    expect(isSupportedAdDate("2026-08-12")).toBe(true);
-    expect(isSupportedAdDate("1850-01-01")).toBe(false);
   });
 });
 

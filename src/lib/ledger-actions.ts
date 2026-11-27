@@ -21,7 +21,9 @@ import { MAX_SPLIT_PEOPLE, samePerson, splitDueDate, splitDueTitle } from "./spl
 import { CATEGORY_ICON_NAMES } from "./category-icons";
 import { IMPORT_BATCH_SIZE } from "./import-job";
 import { todayInput } from "./dates";
-import { canPostOnAccount } from "./household";
+import { canPostOnAccount, HOUSEHOLD_INVITE_PARAM } from "./household";
+import { householdInviteToken, isHouseholdInviteToken } from "./household-invite";
+import { pinPausedMessage, pinRetryAfterSeconds, recordPinFailure } from "./pin-attempts";
 import { BULK_EDIT_LIMIT } from "./bulk-edit";
 import { GROUP_ASSIGN_LIMIT, groupIconLabel, TRANSACTION_GROUP_ICON_NAMES } from "./transaction-groups";
 import { escapeHtml, sendLedgerEmail } from "./outbound-mail";
@@ -219,6 +221,15 @@ const receiptData = async (receipt: z.infer<typeof receiptSchema>, id: string) =
   return { name: receipt.name, mimeType: receipt.mimeType, size: receipt.size, storagePath: receipt.storagePath, data: null };
 };
 
+
+/** Changing or removing the PIN counts wrong guesses against the same limit as the lock screen. Returns the refusal, or null. */
+async function checkCurrentPin(userId: string, currentPin: string | undefined, pinHash: string, failureTitle: string) {
+  const retryAfter = await pinRetryAfterSeconds(userId);
+  if (retryAfter) return NextResponse.json({ error: pinPausedMessage(retryAfter) }, { status: 429, headers: { "Retry-After": String(retryAfter) } });
+  if (currentPin && await verifyPin(currentPin, pinHash)) return null;
+  await recordPinFailure(userId, failureTitle, null);
+  return NextResponse.json({ error: "Current PIN did not match." }, { status: 401 });
+}
 
 async function assertHouseholdAccount(actorId: string, paymentAccountId: string | null, shared: boolean) {
   if (!paymentAccountId) return;
@@ -1547,7 +1558,10 @@ export async function runLedgerAction(id: string, body: unknown, options: { orig
       case "savePin": {
         const value = z.object({ pin: pinSchema, currentPin: z.string().optional() }).parse(input.payload);
         const user = await db.user.findUniqueOrThrow({ where: { id }, select: { pinHash: true } });
-        if (user.pinHash && (!value.currentPin || !await verifyPin(value.currentPin, user.pinHash))) return NextResponse.json({ error: "Current PIN did not match." }, { status: 401 });
+        if (user.pinHash) {
+          const rejected = await checkCurrentPin(id, value.currentPin, user.pinHash, "Wrong current PIN entered while changing it");
+          if (rejected) return rejected;
+        }
         await db.user.update({ where: { id }, data: { pinHash: await hashPin(value.pin) } });
         log(async () => ({ action: user.pinHash ? "pin.changed" : "pin.set", area: "security", title: user.pinHash ? "Changed your ledger PIN" : "Set a ledger PIN" }));
         break;
@@ -1555,7 +1569,9 @@ export async function runLedgerAction(id: string, body: unknown, options: { orig
       case "removePin": {
         const value = z.object({ currentPin: pinSchema }).parse(input.payload);
         const user = await db.user.findUniqueOrThrow({ where: { id }, select: { pinHash: true } });
-        if (!user.pinHash || !await verifyPin(value.currentPin, user.pinHash)) return NextResponse.json({ error: "Current PIN did not match." }, { status: 401 });
+        if (!user.pinHash) return NextResponse.json({ error: "Current PIN did not match." }, { status: 401 });
+        const rejected = await checkCurrentPin(id, value.currentPin, user.pinHash, "Wrong current PIN entered while removing it");
+        if (rejected) return rejected;
         await db.user.update({ where: { id }, data: { pinHash: null, autoLockMinutes: 0 } });
         log(async () => ({ action: "pin.removed", area: "security", title: "Removed your ledger PIN" }));
         break;
@@ -1583,20 +1599,26 @@ export async function runLedgerAction(id: string, body: unknown, options: { orig
           const created = await db.household.create({ data: { name: "Shared ledger", members: { create: { userId: id, email: me.email.toLowerCase(), name: me.name, role: "owner", status: "active" } } } });
           householdId = created.id;
         }
-        await db.householdMember.create({ data: { householdId: householdId!, email, name: "", role: "member", status: "invited" } });
-        const origin = options.origin;
-        try {
-          await sendLedgerEmail(email, "Join a SaveYoRupee household", `<p>${escapeHtml(me.name)} invited you to a shared ledger.</p><p><a href="${origin}/profile">Open SaveYoRupee</a> and accept while signed in as ${escapeHtml(email)}.</p>`);
-        } catch (error) {
-          console.warn("Household invite email failed.", error);
+        const invite = await db.householdMember.create({ data: { householdId: householdId!, email, name: "", role: "member", status: "invited" } });
+        // The emailed link is the only way to accept, so an invite that could not be sent is withdrawn rather than left unusable.
+        const link = `${options.origin}/profile?${HOUSEHOLD_INVITE_PARAM}=${householdInviteToken(invite.id, email)}`;
+        const sent = await sendLedgerEmail(email, "Join a SaveYoRupee household", `<p>${escapeHtml(me.name)} invited you to a shared ledger.</p><p><a href="${escapeHtml(link)}">Open the invite</a> and accept while signed in as ${escapeHtml(email)}.</p>`)
+          .catch((error: unknown) => { console.warn("Household invite email failed.", error); return "failed" as const; });
+        if (sent === "logged") console.info(`[SaveYoRupee] Household invite link for ${email}: ${link}`);
+        if (sent === "failed" || sent === "unconfigured") {
+          await db.householdMember.delete({ where: { id: invite.id } });
+          throw new Error("Could not send the invite email. Try again later.");
         }
         log(async () => ({ action: "household.invited", area: "household", title: "Invited someone to your household", subject: email }));
         break;
       }
       case "acceptHousehold": {
+        const { token } = z.object({ token: z.string().max(100).optional() }).parse(input.payload ?? {});
         const me = await db.user.findUniqueOrThrow({ where: { id }, select: { email: true, name: true } });
         const invite = await db.householdMember.findFirst({ where: { email: me.email.toLowerCase(), status: "invited" } });
         if (!invite) throw new Error("There is no household invite for this email.");
+        // Sign-up does not verify addresses: the emailed link proves this person can read the invited inbox.
+        if (!token || !isHouseholdInviteToken(token, invite.id, invite.email)) throw new Error("Open the invite link from your email to accept.");
         const already = await db.householdMember.findFirst({ where: { userId: id, status: "active" } });
         if (already) throw new Error("You already belong to a household.");
         await db.householdMember.update({ where: { id: invite.id }, data: { userId: id, status: "active", name: me.name } });

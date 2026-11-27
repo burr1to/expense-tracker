@@ -10,10 +10,12 @@
 //   node scripts/oauth-client.mjs list
 //
 // The client secret is printed once and only its SHA-256 hash is stored.
-import "dotenv/config";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import pg from "pg";
+
+// Reads .env when present, without a dotenv dependency (Node 24).
+try { process.loadEnvFile(); } catch { /* no .env: rely on the environment */ }
 
 const SCOPES = new Set(["ledger:read", "ledger:draft", "ledger:write"]);
 const [command, ...rest] = process.argv.slice(2);

@@ -10,8 +10,6 @@ export const PAYMENT_ACCOUNT_TYPES: readonly { value: PaymentAccountType; label:
   { value: "other", label: "Other (co-op, finance, card)" },
 ];
 
-/** Wallet types store the type id as their provider. */
-export const WALLET_ACCOUNT_TYPES: readonly PaymentAccountType[] = ["esewa", "khalti", "connect_ips", "ime_pay"];
 export const CASH_PROVIDER = "Cash";
 export const ACCOUNT_TAIL_PATTERN = /^\d{3,4}$/;
 

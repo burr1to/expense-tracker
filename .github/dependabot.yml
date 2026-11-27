@@ -1,0 +1,34 @@
+# Weekly dependency update PRs. Minor and patch bumps arrive as one grouped PR per ecosystem;
+# majors get their own PRs. Safe ones merge themselves once CI passes (see workflows/dependabot-auto-merge.yml).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kathmandu
+    open-pull-requests-limit: 5
+    groups:
+      # Framework, sign-in and database packages: their own PR, always reviewed by a person (first matching group wins).
+      core-runtime:
+        patterns: [next, better-auth, "@better-auth/*", prisma, "@prisma/*", pg]
+        update-types: [minor, patch]
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: deps
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kathmandu
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci

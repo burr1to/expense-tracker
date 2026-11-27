@@ -15,3 +15,6 @@ export function canPostOnAccount(
   if (account.userId === actorId) return true;
   return transactionShared && account.shared === true && peerIds.includes(account.userId);
 }
+
+/** The query parameter carrying a household invite token, from the invite email to Settings. */
+export const HOUSEHOLD_INVITE_PARAM = "invite";

@@ -39,10 +39,6 @@ export interface MonthlyBreathingRoom {
   projectedNetMinor: number;
 }
 
-export function calculateSafeToSpend(currentBalanceMinor: number, breathingRoom: MonthlyBreathingRoom) {
-  return currentBalanceMinor + breathingRoom.upcomingIncomeMinor - breathingRoom.upcomingExpensesMinor;
-}
-
 export type SpendingHorizonSource = "payday" | "incomePattern" | "periodEnd";
 
 export interface SpendingHorizon {

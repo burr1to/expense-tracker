@@ -4,16 +4,13 @@ import {
   expensesBetween,
   festivalBounds,
   festivalById,
-  festivalHeadsUp,
   festivalLabel,
   festivalMainDays,
   festivalMonthLabel,
-  festivalOn,
   festivalPeriodKey,
   festivalSeasonsFrom,
   FESTIVALS,
   parseFestivalPeriodKey,
-  upcomingFestival,
 } from "./festivals";
 import { adToBs, bsToAd } from "./nepali-date";
 import { periodBounds, STORAGE_PERIOD_KEY } from "./period";
@@ -129,50 +126,10 @@ describe("festival seasons", () => {
   });
 });
 
-describe("festivalOn", () => {
-  it("identifies the season containing a date", () => {
-    expect(festivalOn("2026-10-20")).toMatchObject({ bsYear: 2083, festival: { id: "dashain-tihar" } });
-    expect(festivalOn("2027-03-22")).toMatchObject({ bsYear: 2083, festival: { id: "holi" } });
-  });
-
-  it("returns null outside every season", () => {
-    // Shrawan (month 4) carries no festival in this list.
-    expect(festivalOn(bsToAd({ year: 2083, month: 4, day: 10 }))).toBeNull();
-  });
-});
-
-describe("upcomingFestival", () => {
-  it("finds the next season within the window", () => {
-    // Shrawan 1, 2083 — Teej (Bhadra) is the next month.
-    const result = upcomingFestival(bsToAd({ year: 2083, month: 4, day: 1 }), 60);
-
-    expect(result?.festival.id).toBe("teej");
-    expect(result?.bsYear).toBe(2083);
-    expect(result!.daysAway).toBeGreaterThan(0);
-  });
-
-  it("reports zero days away while a season runs, with the main day still ahead (2026-10-07)", () => {
-    const result = upcomingFestival("2026-10-07", 60);
-
-    expect(result).toMatchObject({ festival: { id: "dashain-tihar" }, bsYear: 2083, daysAway: 0, mainDay: "2026-10-11", periodKey: "FEST:dashain-tihar-2083" });
-  });
-
+describe("festivalSeasonsFrom", () => {
   it("counts the days until a season opens", () => {
-    // Bhadra 2084: Teej is running and Dashain–Tihar opens on Ashwin 1 (2027-09-18).
-    expect(upcomingFestival("2027-09-08", 30)).toMatchObject({ festival: { id: "teej" }, daysAway: 0 });
+    // Bhadra 2084: Dashain–Tihar opens on Ashwin 1 (2027-09-18).
     expect(festivalSeasonsFrom("2027-09-08").find((season) => season.festival.id === "dashain-tihar")).toMatchObject({ bsYear: 2084, daysAway: 10 });
-  });
-
-  it("returns null when nothing falls inside the window", () => {
-    // Poush (month 9) — the next season opens in Falgun, well beyond 10 days.
-    expect(upcomingFestival(bsToAd({ year: 2083, month: 9, day: 1 }), 10)).toBeNull();
-  });
-
-  it("rolls into the next Bikram Sambat year once Holi is over", () => {
-    const result = upcomingFestival(bsToAd({ year: 2084, month: 1, day: 1 }), 200);
-
-    expect(result?.bsYear).toBe(2084);
-    expect(result?.festival.id).toBe("teej");
   });
 
   it("lists every open or coming season in start order", () => {
@@ -180,35 +137,6 @@ describe("upcomingFestival", () => {
 
     expect(seasons.map((season) => season.periodKey)).toEqual(["FEST:holi-2083", "FEST:teej-2084", "FEST:dashain-tihar-2084", "FEST:holi-2084"]);
     expect(seasons[0].daysAway).toBe(0);
-  });
-});
-
-describe("festivalHeadsUp", () => {
-  it("prompts for Dashain–Tihar 2083 while its season runs and Ghatasthapana is 4 days away (2026-10-07)", () => {
-    expect(festivalHeadsUp("2026-10-07")).toMatchObject({ periodKey: "FEST:dashain-tihar-2083", daysAway: 0, mainDay: "2026-10-11", daysToMainDay: 4 });
-  });
-
-  it("counts down to a season that has not opened yet", () => {
-    // Teej 2083's main day (2026-09-14) is over; Dashain–Tihar opens on Ashwin 1 (2026-09-17).
-    expect(festivalHeadsUp("2026-09-15")).toMatchObject({ periodKey: "FEST:dashain-tihar-2083", daysAway: 2, daysToMainDay: 26 });
-  });
-
-  it("keeps prompting through the main days, then lets the season go", () => {
-    expect(festivalHeadsUp("2026-10-15")).toMatchObject({ periodKey: "FEST:dashain-tihar-2083", daysToMainDay: null });
-    expect(festivalHeadsUp("2026-11-11")?.periodKey).toBe("FEST:dashain-tihar-2083");
-    // After Bhai Tika the season still runs to Kartik's end, but there is nothing left to plan; Holi is months away.
-    expect(festivalHeadsUp("2026-11-12")).toBeNull();
-    expect(festivalHeadsUp("2026-11-12", 120)?.periodKey).toBe("FEST:holi-2083");
-  });
-
-  it("stays quiet when the next season is beyond the window", () => {
-    expect(festivalHeadsUp("2026-08-01", 10)).toBeNull();
-    expect(festivalHeadsUp("2026-08-01", 30)).toMatchObject({ periodKey: "FEST:teej-2083", daysAway: 16 });
-  });
-
-  it("keeps a running season without verified main days for its whole window", () => {
-    // Teej 2084 is outside the main-day table.
-    expect(festivalHeadsUp("2027-09-08")).toMatchObject({ periodKey: "FEST:teej-2084", daysAway: 0, mainDay: null, daysToMainDay: null });
   });
 });
 

@@ -115,9 +115,16 @@ export async function refreshTokens(db: Db, clientId: string, input: { refreshTo
 /** RFC 7009: revokes the token's whole grant chain for refresh tokens, or just the access token. Unknown tokens succeed silently. */
 export async function revokeToken(db: Db, clientId: string, value: string) {
   const hash = hashSecret(value);
-  const token = await db.oAuthToken.findFirst({ where: { OR: [{ accessTokenHash: hash }, { refreshTokenHash: hash }] }, select: { id: true, refreshTokenHash: true, grant: { select: { clientId: true } } } });
+  const token = await db.oAuthToken.findFirst({ where: { OR: [{ accessTokenHash: hash }, { refreshTokenHash: hash }] }, select: { id: true, grantId: true, refreshTokenHash: true, grant: { select: { clientId: true } } } });
   if (!token || token.grant.clientId !== clientId) return;
-  await db.oAuthToken.update({ where: { id: token.id }, data: { revokedAt: new Date() } });
+  const now = new Date();
+  if (token.refreshTokenHash !== hash) {
+    await db.oAuthToken.update({ where: { id: token.id }, data: { revokedAt: now } });
+    return;
+  }
+  // An app disconnecting itself ends the whole grant, so Settings no longer lists it as connected.
+  await db.oAuthGrant.updateMany({ where: { id: token.grantId, revokedAt: null }, data: { revokedAt: now } });
+  await db.oAuthToken.updateMany({ where: { grantId: token.grantId, revokedAt: null }, data: { revokedAt: now } });
 }
 
 export interface AgentPrincipal {
