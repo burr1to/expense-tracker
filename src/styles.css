@@ -2541,13 +2541,15 @@ body { font-size: var(--text-body); line-height: 1.5; }
 @media (max-width: 640px) {
   :root { --control-size: 44px; --text-title: 28px; --text-amount: 24px; }
   .page-header > .primary-button, .header-actions > .primary-button, .header-actions > .secondary-button { width: var(--control-size); }
-  .onboarding-guide-shell { width: min(360px, calc(100% - 28px)); padding-top: 60px; }
+  .onboarding-guide-shell { width: min(360px, calc(100% - 28px)); padding-top: 76px; } /* clears the floating "…" (top 20 + 44) */
   .onboarding-guide-summary strong, .onboarding-step-copy strong { font-size: var(--text-small); }
   .onboarding-guide-heading { padding: var(--space-2); }
   .onboarding-guide-body { padding: var(--space-3); }
   .onboarding-steps li { gap: var(--space-3); padding-block: var(--space-3); }
   .onboarding-steps li > button, .onboarding-guide-actions .text-button { min-height: var(--control-size); }
   .mantine-Input-input { min-height: var(--control-size); font-size: 16px; }
+  /* Under 16px, iOS zooms the page when a field is focused; these compact fields set their own smaller size. */
+  .selected-location .mantine-Input-input, .category-icon-select input, .spending-period-control select { font-size: 16px; }
   .savings-copy h1 { font-size: 36px; }
   .month-picker .month-label.is-bs { font-size: 20px; }
 }
@@ -2613,10 +2615,15 @@ body { font-size: var(--text-body); line-height: 1.5; }
 .floating-actions { position: fixed; top: 18px; right: 18px; z-index: 36; display: flex; align-items: center; gap: 10px; }
 .floating-actions-items { display: flex; align-items: center; gap: 10px; }
 .floating-actions-toggle { display: none; }
+/* Icons swapped in place (… ↔ ×) sit dead centre: an inline wrapper would add a text line box and push the glyph up. */
+.t-icon-swap .t-icon { display: grid; place-items: center; }
 @media (max-width: 640px) {
-  .floating-actions { top: 8px; right: 8px; gap: 8px; }
+  /* Lines up with the page header's own buttons: same top edge, size, corners and an 8px gap. */
+  .floating-actions { top: 20px; right: var(--v2-gutter); gap: 8px; }
   .floating-actions-items { gap: 8px; }
-  .floating-actions-toggle { position: relative; width: var(--control-size); height: var(--control-size); display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: var(--control-radius); background: rgba(250,248,243,.92); backdrop-filter: blur(10px); color: var(--ink); cursor: pointer; transition: background .18s ease, border-color .18s ease, transform .16s ease; }
+  .floating-actions-toggle { position: relative; width: var(--control-size); height: var(--control-size); display: grid; place-items: center; padding: 0; border: 1px solid var(--v2-control-line); border-radius: var(--v2-radius-control); background: rgba(255,255,255,.94); backdrop-filter: blur(10px); color: var(--v2-ink); cursor: pointer; transition: background .18s ease, border-color .18s ease, transform .16s ease; }
+  .floating-actions :is(.privacy-toggle, .reminder-trigger, .ledger-search) { border-color: var(--v2-control-line); border-radius: var(--v2-radius-control); background: rgba(255,255,255,.94); color: var(--v2-ink); }
+  .reminder-panel { top: 72px; right: 12px; left: 12px; }
   .floating-actions-toggle:active { transform: scale(.94); }
   .floating-actions[data-open="true"] .floating-actions-toggle { border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); background: var(--paper-strong); }
   /* Pending reminders stay visible as a dot while the actions are folded away. */

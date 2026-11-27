@@ -1,4 +1,4 @@
-import { CalendarBlank, Camera, CaretDown, CaretLeft, CaretRight, ChatText, CheckCircle, CheckSquare, CursorClick, DotsThree, DownloadSimple, FileText, Folders, FunnelSimple, ListPlus, MagnifyingGlass, Plus, Tag, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
+import { CalendarBlank, Camera, CaretDown, CaretLeft, CaretRight, ChatText, CheckCircle, CheckSquare, CursorClick, DownloadSimple, FileText, Folders, FunnelSimple, ListPlus, MagnifyingGlass, Plus, Tag, UploadSimple, WarningCircle, X } from "@phosphor-icons/react";
 import { Menu, NumberInput, Popover, Select, TextInput } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import Link from "next/link";
@@ -187,7 +187,7 @@ export function TransactionsPage({ period: month, currency, transactions, transf
       <div className="v2-head-actions">
         <Link className="v2-button is-compact" href="/transactions/edit" aria-label="Select entries to edit together"><CheckSquare size={18} /><span>Select</span></Link>
         <Menu position="bottom-end" shadow="md" width={260} withinPortal>
-          <Menu.Target><button type="button" id="csv-import-trigger" className="v2-icon-btn" aria-label="More ways to add" disabled={analyzingImport}>{analyzingImport ? <ButtonSpinner /> : <DotsThree size={22} weight="bold" />}</button></Menu.Target>
+          <Menu.Target><button type="button" id="csv-import-trigger" className="v2-icon-btn" aria-label="More ways to add" disabled={analyzingImport}>{analyzingImport ? <ButtonSpinner /> : <ListPlus size={21} />}</button></Menu.Target>
           <Menu.Dropdown>
             <Menu.Item leftSection={<Plus size={17} />} onClick={() => onAdd(activeOccurredOn())}>Add one entry</Menu.Item>
             <Menu.Item leftSection={<ListPlus size={17} />} component={Link} href="/transactions/multiple">Add several at once</Menu.Item>

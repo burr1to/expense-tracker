@@ -144,7 +144,7 @@ button.v2-row:hover, a.v2-row:hover { background: #f7f8f3; box-shadow: -8px 0 0 
 
 /* ---------- Page frame ---------- */
 .v2-page { width: 100%; max-width: 1184px; margin: 0 auto; padding: 20px var(--v2-gutter) 24px; display: flex; flex-direction: column; gap: var(--v2-gap); }
-.v2-page-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-right: 48px; /* room for the floating search / reminders / privacy toggle */ }
+.v2-page-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-right: 52px; /* room for the floating "…" toggle (44px) plus the 8px gap between header buttons */ }
 .v2-page-head > div:first-child { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .v2-eyebrow { color: #52645a; font-size: 13px; font-weight: 600; }
 .v2-page-head h1 { margin: 0; font-size: 24px; overflow-wrap: anywhere; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; }
@@ -229,7 +229,7 @@ button.v2-row:hover, a.v2-row:hover { background: #f7f8f3; box-shadow: -8px 0 0 
 
 .v2-search { height: 50px; display: flex; align-items: center; gap: 10px; padding: 0 6px 0 16px; border: 1px solid var(--v2-control-line); border-radius: 16px; background: var(--v2-card); color: var(--v2-muted); }
 .v2-search:focus-within { border-color: #6f9b84; box-shadow: 0 0 0 3px rgba(47,107,79,.14); }
-.v2-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--v2-ink); font: inherit; font-size: 15px; }
+.v2-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--v2-ink); font: inherit; font-size: 16px; /* under 16px, iOS zooms the page on focus */ }
 .v2-search input::-webkit-search-cancel-button { display: none; }
 
 .v2-chip-row { display: flex; gap: 8px; margin: 0 calc(var(--v2-gutter) * -1); padding: 2px var(--v2-gutter); overflow-x: auto; scrollbar-width: none; }
@@ -507,7 +507,8 @@ button.v2-row:hover, a.v2-row:hover { background: #f7f8f3; box-shadow: -8px 0 0 
 .syr-form { gap: 16px; margin-top: 24px; }
 .syr-form .mantine-Input-input { --input-height: 52px; min-height: 52px; border: 1.5px solid #d6dccf; border-radius: 15px; background: #fff; }
 .syr-form .mantine-Input-input:focus, .syr-form .mantine-Input-input:focus-within { border-color: #2f6b4f; box-shadow: 0 0 0 3px rgba(47,107,79,.15); }
-.syr-forgot { margin-top: 6px; font-weight: 600; }
+.syr-form .mantine-Input-input, .syr-form .entry-password-input { font-size: 16px; } /* under 16px, iOS zooms the page on focus */
+.syr-forgot { font-weight: 600; }
 .syr-forgot span { color: var(--v2-muted); font-weight: 500; }
 .syr-submit { min-height: 56px !important; border-radius: 17px; background: #24503d; font-size: 16px; font-weight: 700; box-shadow: 0 12px 24px rgba(36,80,61,.3); }
 .syr-submit:hover:not(:disabled) { background: #1d4634; }
@@ -540,7 +541,29 @@ button.v2-row:hover, a.v2-row:hover { background: #f7f8f3; box-shadow: -8px 0 0 
 @media (prefers-reduced-motion: reduce) {
   .syr-ticker > span, .syr-sticker, .syr-note, .syr-note .syr-wing { animation: none !important; }
 }
-@media (max-width: 599px) { .syr-forgot span { display: none; } }
+@media (max-width: 599px) {
+  .syr-forgot span { display: none; }
+  /* Phones: a shorter wall so the form starts higher, and a headline that scales instead of wrapping onto two lines. */
+  .syr-wall { min-height: 0; padding: 20px 20px 84px; }
+  .syr-panel { display: flex; flex-direction: column; }
+  .syr-card { flex: 1; } /* reaches the bottom edge even when the form is shorter than the screen */
+  .syr-headline { margin-top: 20px; }
+  .syr-deva { font-size: clamp(40px, 13.4vw, 60px); white-space: nowrap; }
+  .syr-latin { font-size: clamp(21px, 6.4vw, 26px); }
+  .syr-note.is-big { width: 80px; right: -4px; top: 12px; }
+  /* Only stickers that fit whole stay on the row; the rest wrap onto a clipped second line instead of being cut mid-word. */
+  .syr-stickers.is-resting { left: 0; right: 0; padding: 6px 16px 10px 20px; flex-wrap: wrap; gap: 60px 10px; max-height: 58px; }
+  .syr-card { padding-top: 24px; }
+  .syr-card .entry-tabs { margin-bottom: 20px; }
+  .syr-copy h1 { font-size: 27px; }
+  .syr-form { gap: 14px; margin-top: 18px; }
+  .syr-footnote { margin-top: 16px; }
+}
+/* Short phones (iPhone SE and similar): drop the ticker and stickers so the whole form fits. */
+@media (max-width: 599px) and (max-height: 700px) {
+  .syr-ticker, .syr-stickers.is-resting { display: none; }
+  .syr-wall { padding-bottom: 44px; }
+}
 
 /* ---------- Plan ---------- */
 .v2-seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; padding: 4px; border: 1px solid var(--v2-line); border-radius: 18px; background: var(--v2-card); }
@@ -720,6 +743,10 @@ button.v2-row:hover, a.v2-row:hover { background: #f7f8f3; box-shadow: -8px 0 0 
 
 /* Narrow phones: smaller page title so it fits beside the month stepper */
 @media (max-width: 380px) { .v2-page-head h1 { font-size: 21px; } }
+/* Phones: header buttons hug the top so they share a row with the floating "…" even when the title wraps. */
+@media (max-width: 640px) { .v2-page-head { align-items: flex-start; } }
+/* 641–767px (phones in landscape): the quick actions are already a full row, so leave room for all of them. */
+@media (min-width: 641px) and (max-width: 767px) { .v2-page-head { padding-right: 150px; } }
 
 /* ---- Type toggle: a larger, clearer Expense / Income switch ---- */
 .kind-toggle { display: inline-grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border: 1px solid var(--v2-line); border-radius: 999px; background: #ebeee3; width: fit-content; }
