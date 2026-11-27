@@ -3,7 +3,7 @@
 import { PasswordInput } from "@mantine/core";
 import { ArrowClockwise, Eye, EyeSlash, LockKey, MagnifyingGlass, WifiSlash } from "@phosphor-icons/react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useLedger } from "../context/LedgerContext";
 import { LedgerWorkspaceContext } from "../context/LedgerWorkspaceContext";
@@ -13,8 +13,8 @@ import { toDateInput, todayInput } from "../lib/dates";
 import { APP_TIME_ZONE, convertMonthKey, currentMonthKey, dateOnlyInTimeZone, monthKeyOf, parseMonthKey, type PeriodKey } from "../lib/period";
 import { useAgentDrafts, type AgentDraftItem } from "../lib/use-agent-drafts";
 import { buildReminderDigest } from "../lib/reminder-digest";
-import { BRAND_MARK_PATH } from "../lib/brand-mark";
 import { deliverNotification, readAddDeepLink, reminderNotificationText, reminderToastText, rolledOverMonth } from "../lib/app-shell";
+import { shareCacheStorage, takeSharedItem } from "../lib/shared-inbox";
 import { monthlyReportNotice } from "../lib/monthly-report";
 import { urgentReminderCount } from "../lib/reminder-badge";
 import { useToday } from "../lib/use-today";
@@ -100,6 +100,8 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   const [receiptScanOpen, setReceiptScanOpen] = useState(false);
   // The day a receipt with no readable date lands on: the opener's day, or today when it was opened.
   const [receiptFallbackDate, setReceiptFallbackDate] = useState(todayInput);
+  // A receipt photo shared in from another app, handed to the scanner once it opens.
+  const [sharedReceiptFile, setSharedReceiptFile] = useState<File | null>(null);
   // Mounted by the transfer and split-bill sheets; null means closed.
   const [transferRequest, setTransferRequest] = useState<TransferRequest | null>(null);
   const [splitBillRequest, setSplitBillRequest] = useState<SplitBillRequest | null>(null);
@@ -218,8 +220,23 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
     } else if (link?.type === "sms") {
       setSmsInitialText(link.text);
       setSmsOpen(true);
+    } else if (link?.type === "shared") {
+      void takeSharedItem(shareCacheStorage()).then((item) => {
+        if (item?.type === "receipt") {
+          setReceiptFallbackDate(todayInput());
+          setSharedReceiptFile(item.file);
+          setReceiptScanOpen(true);
+        } else if (item?.type === "text") {
+          setSmsInitialText(item.text);
+          setSmsOpen(true);
+        } else {
+          pushToast({ title: "Nothing to add from that share", body: "Share a bank SMS or a JPG, PNG or WebP receipt photo.", tone: "neutral" });
+        }
+      }).catch(() => pushToast({ title: "Couldn’t open that share", body: "Share it to SaveYoRupee again.", tone: "danger" }));
+    } else if (link?.type === "share-failed") {
+      pushToast({ title: "That share didn’t come through", body: "SaveYoRupee was still setting up. Share it again and it will open here.", tone: "neutral" });
     }
-  }, [deepLinkQuery, isDemo, ledger.error, ledger.loading, locked, pathname, user]);
+  }, [deepLinkQuery, isDemo, ledger.error, ledger.loading, locked, pathname, pushToast, user]);
   useEffect(() => {
     if (process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) return;
     const { protocol, hostname } = window.location;
@@ -492,7 +509,9 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
       />
       <ReceiptScanner
         open={receiptScanOpen}
-        onOpenChange={setReceiptScanOpen}
+        onOpenChange={(open) => { setReceiptScanOpen(open); if (!open) setSharedReceiptFile(null); }}
+        sharedFile={sharedReceiptFile}
+        onSharedFileTaken={() => setSharedReceiptFile(null)}
         showTrigger={false}
         currency={ledger.profile.currency}
         fallbackOccurredOn={receiptFallbackDate}
@@ -532,125 +551,28 @@ export function LedgerAppLayout({ children }: { children: ReactNode }) {
   );
 }
 
-const NOTE_STRIPS = 24;
-const NOTE_STRIP_WIDTH = 240 / NOTE_STRIPS;
-const NOTE_HEIGHT = 102;
-
 function AppLoader({ className, message }: { className: "boot-screen" | "page-loading"; message: string }) {
-  const uid = useId().replace(/:/g, "");
-  const id = (name: string) => `${name}-${uid}`;
-  return <div className={className} role="status" aria-live="polite">
-    <div className="app-loader-card">
-      <div className="loader-brand">
-        <BrandIcon size={42} />
-        <span><strong>SaveYoRupee</strong><small>Your money, clearly.</small></span>
+  if (className === "boot-screen") {
+    return <div className="boot-screen" role="status" aria-live="polite">
+      <div className="v2-boot">
+        <span className="v2-boot-mark" aria-hidden="true"><i className="v2-boot-coin">₹</i><BrandIcon size={64} /></span>
+        <strong>SaveYoRupee</strong>
+        <span className="t-shimmer" data-text={message}>{message}</span>
       </div>
-      <div className="loader-bill-stage" aria-hidden="true">
-        <span className="loader-bill-shadow" />
-        <div className="loader-bill">
-          <svg className="loader-bill-art" viewBox={`0 0 240 ${NOTE_HEIGHT}`} focusable="false">
-            <defs>
-              <linearGradient id={id("paper")} x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stopColor="#dfebc7" />
-                <stop offset=".45" stopColor="#bad0a2" />
-                <stop offset="1" stopColor="#94b17f" />
-              </linearGradient>
-              <clipPath id={id("shape")}>
-                <rect x="4" y="4" width="232" height="94" rx="3" />
-              </clipPath>
-              <clipPath id={id("oval")}>
-                <ellipse cx="120" cy="54" rx="24" ry="24" />
-              </clipPath>
-              {Array.from({ length: NOTE_STRIPS }, (_, i) => (
-                <clipPath key={i} id={id(`strip${i}`)}>
-                  <rect x={i * NOTE_STRIP_WIDTH - 0.06} y="-14" width={NOTE_STRIP_WIDTH + 0.12} height="130" />
-                </clipPath>
-              ))}
-              <g id={id("note")}>
-                <rect x="4" y="4" width="232" height="94" rx="3" fill={`url(#${id("paper")})`} stroke="#3f6b4d99" strokeWidth=".9" />
-                <g clipPath={`url(#${id("shape")})`}>
-                  {/* engraved guilloche wash */}
-                  <g fill="none" stroke="#3f6b4d" strokeWidth=".45" opacity=".17">
-                    <path d="M4 22c40-14 80 14 120 0s80-14 116 0" />
-                    <path d="M4 44c40-14 80 14 120 0s80-14 116 0" />
-                    <path d="M4 66c40-14 80 14 120 0s80-14 116 0" />
-                    <path d="M4 86c40-14 80 14 120 0s80-14 116 0" />
-                  </g>
-                  {/* lathework rosettes behind the seals */}
-                  <g fill="none" stroke="#3f6b4d" strokeWidth=".4" opacity=".22">
-                    <circle cx="54" cy="54" r="18" /><circle cx="54" cy="54" r="14" /><circle cx="54" cy="54" r="10" />
-                    <circle cx="186" cy="54" r="18" /><circle cx="186" cy="54" r="14" /><circle cx="186" cy="54" r="10" />
-                  </g>
-                  {/* centre medallion: a Himalayan ridge over rhododendron (lali gurans), in line work */}
-                  <ellipse cx="120" cy="54" rx="24" ry="24" fill="#dbe8c9" stroke="#2b4a35" strokeWidth=".8" />
-                  <ellipse cx="120" cy="54" rx="21" ry="21" fill="none" stroke="#2b4a35" strokeWidth=".4" opacity=".5" />
-                  <g clipPath={`url(#${id("oval")})`}>
-                    <circle cx="133.5" cy="41.5" r="3.2" fill="none" stroke="#2b4a35" strokeWidth=".6" opacity=".7" />
-                    <path d="M94 66 104.5 53.5l4.5 4.2 9.8-15.2 7.6 10.4 4.4-4.6L146 66Z" fill="#2b4a35" opacity=".86" />
-                    <path d="M115.6 47.6 118.8 42.5l3.4 4.7-1.9-.8-1.5 1.6-1.4-1.3Z M128.6 50.1l2.3-1.8 2.2 2.3-1.3-.2-1 .8Z" fill="#dbe8c9" />
-                    <path d="M95 69.5c8.5-3.6 16.5-3.8 25-.8s16.5 3 25 .2" fill="none" stroke="#2b4a35" strokeWidth=".7" opacity=".75" />
-                    <path d="M104.5 75c2.4-3.4 5.6-4.6 9.4-3.6-2.2 2.4-5.4 3.6-9.4 3.6ZM134 74.6c-2.3-3.3-5.4-4.4-9-3.4 2.1 2.3 5.2 3.4 9 3.4Z" fill="#2b4a35" opacity=".8" />
-                    {[{ x: 112, y: 69.4, s: 1 }, { x: 127.4, y: 70.2, s: .78 }].map((flower) => (
-                      <g key={flower.x} transform={`translate(${flower.x} ${flower.y}) scale(${flower.s})`}>
-                        {[0, 72, 144, 216, 288].map((angle) => <ellipse key={angle} cx="0" cy="-2.5" rx="1.65" ry="2.6" transform={`rotate(${angle})`} fill="#a8504a" stroke="#6e2f2b" strokeWidth=".25" />)}
-                        <circle r=".95" fill="#f1d9a0" />
-                      </g>
-                    ))}
-                  </g>
-                  {/* seals: the SaveYoRupee mark */}
-                  <g fill="none" stroke="#2f4a3a" opacity=".8">
-                    <circle cx="54" cy="54" r="12.5" strokeWidth=".9" />
-                    <circle cx="54" cy="54" r="10" strokeWidth=".45" strokeDasharray="1.5 1.4" />
-                  </g>
-                  <path d={BRAND_MARK_PATH} transform="translate(54 54) scale(.068) translate(-128 -128)" fill="#2f4a3a" opacity=".82" />
-                  <g fill="none" stroke="#3f7a52" opacity=".9">
-                    <circle cx="186" cy="54" r="12.5" strokeWidth=".9" />
-                    <circle cx="186" cy="54" r="10" strokeWidth=".45" strokeDasharray="1.5 1.4" />
-                  </g>
-                  <path d={BRAND_MARK_PATH} transform="translate(186 54) scale(.068) translate(-128 -128)" fill="#3f7a52" opacity=".9" />
-                  {/* corner scrollwork */}
-                  <g fill="none" stroke="#33573f" strokeWidth=".5" opacity=".4">
-                    <path d="M12 12h14M12 12v10M228 12h-14M228 12v10M12 90h14M12 90v-10M228 90h-14M228 90v-10" />
-                  </g>
-                </g>
-                <rect x="9" y="9" width="222" height="84" rx="1.5" fill="none" stroke="#33573f" strokeWidth=".7" opacity=".65" />
-                <rect x="11.5" y="11.5" width="217" height="79" rx="1" fill="none" stroke="#33573f" strokeWidth=".4" strokeDasharray="2 1.6" opacity=".45" />
-                <text x="120" y="19" fill="#245239" fontSize="4.2" fontWeight="700" letterSpacing="1.1" textAnchor="middle">LEDGER NOTE · NOT LEGAL TENDER</text>
-                <text x="120" y="28" fill="#1e3d2b" fontSize="7.4" fontWeight="800" letterSpacing="1.6" textAnchor="middle">SAVEYO RUPEE</text>
-                <text x="19" y="30" fill="#1e3d2b" fontSize="10.5" fontWeight="700">रु</text>
-                <text x="221" y="30" fill="#1e3d2b" fontSize="10.5" fontWeight="700" textAnchor="end">रु</text>
-                <text x="19" y="88" fill="#1e3d2b" fontSize="10.5" fontWeight="700">रु</text>
-                <text x="221" y="88" fill="#1e3d2b" fontSize="10.5" fontWeight="700" textAnchor="end">रु</text>
-                <text x="214" y="40" fill="#3f7a52" fontSize="4.6" fontWeight="700" letterSpacing=".7" textAnchor="end">SYR 0207 2083</text>
-                <text x="32" y="80" fill="#3f7a52" fontSize="4.2" fontWeight="700" letterSpacing="1">SERIES 2083</text>
-                <text x="208" y="80" fill="#3f7a52" fontSize="4.2" fontWeight="700" letterSpacing="1" textAnchor="end">NO. 000001</text>
-                <text x="120" y="83" fill="#245239" fontSize="4" fontWeight="700" letterSpacing=".9" textAnchor="middle">SAVE A LITTLE, EVERY DAY</text>
-                <text x="120" y="91" fill="#1e3d2b" fontSize="7.4" fontWeight="800" letterSpacing="1.5" textAnchor="middle">ONE RUPEE</text>
-              </g>
-            </defs>
-            {Array.from({ length: NOTE_STRIPS }, (_, i) => (
-              <g
-                key={i}
-                className="loader-note-strip"
-                style={{
-                  "--i": i,
-                  // the left edge is the "pole": barely moves, while the free edge flaps hardest
-                  "--a": (0.16 + 0.84 * (i / (NOTE_STRIPS - 1)) ** 1.35).toFixed(3),
-                  transformOrigin: `${(i + 0.5) * NOTE_STRIP_WIDTH}px ${NOTE_HEIGHT / 2}px`,
-                } as React.CSSProperties}
-              >
-                <g clipPath={`url(#${id(`strip${i}`)})`}>
-                  <use href={`#${id("note")}`} />
-                  <rect className="loader-note-shade" x="0" y="0" width="240" height={NOTE_HEIGHT} clipPath={`url(#${id("shape")})`} />
-                  <rect className="loader-note-glow" x="0" y="0" width="240" height={NOTE_HEIGHT} clipPath={`url(#${id("shape")})`} />
-                </g>
-              </g>
-            ))}
-          </svg>
+    </div>;
+  }
+  // Inside the app shell: a small card where entries write themselves in, one by one.
+  return <div className="page-loading" role="status" aria-live="polite">
+    <div className="v2-write" aria-hidden="true">
+      {[0, 1, 2].map((i) => (
+        <div className={`v2-write-row r${i}`} key={i}>
+          <span className="v2-write-tile" />
+          <span className="v2-write-lines"><i /><i /></span>
+          <span className="v2-write-amount" />
         </div>
-      </div>
-      <div className="loader-status"><i aria-hidden="true" /><span className="t-shimmer" data-text={message}>{message}</span></div>
+      ))}
     </div>
+    <span className="t-shimmer" data-text={message}>{message}</span>
   </div>;
 }
 

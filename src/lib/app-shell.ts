@@ -5,23 +5,33 @@ import type { ReminderNotice } from "./reminder-digest";
 import type { TransactionKind } from "../types";
 
 /** What a home-screen shortcut or a share into the app asked for. */
-export type AddDeepLink = { type: "add"; kind: TransactionKind } | { type: "sms"; text?: string };
+export type AddDeepLink =
+  | { type: "add"; kind: TransactionKind }
+  | { type: "sms"; text?: string }
+  /** Something arrived from the Share sheet and waits in the share inbox (see shared-inbox.ts). */
+  | { type: "shared" }
+  /** A share reached the server instead of the service worker, so its content is gone. */
+  | { type: "share-failed" };
 
 /** Longest shared text handed to the SMS sheet; a bank alert is far shorter. */
 export const SHARED_TEXT_LIMIT = 2000;
-const DEEP_LINK_KEYS = ["add", "sms", "title"];
+const DEEP_LINK_KEYS = ["add", "sms", "title", "share"];
 
 /**
- * Reads `?add=expense|income|sms` (manifest shortcuts) and `?sms=<text>&title=<text>` (the share
- * target) and returns what is left of the query once they are handled.
+ * Reads `?add=expense|income|sms` (manifest shortcuts), `?share=1|failed` (the share target) and
+ * the older `?sms=<text>&title=<text>` share links that installs made before the share target
+ * moved to POST, and returns what is left of the query once they are handled.
  */
 export function readAddDeepLink(params: URLSearchParams): { link: AddDeepLink | null; rest: string } {
   const rest = new URLSearchParams(params);
   for (const key of DEEP_LINK_KEYS) rest.delete(key);
   const add = params.get("add");
+  const share = params.get("share");
   const shared = params.has("sms") || params.has("title");
   let link: AddDeepLink | null = null;
-  if (add === "expense" || add === "income") link = { type: "add", kind: add };
+  if (share === "1") link = { type: "shared" };
+  else if (share === "failed") link = { type: "share-failed" };
+  else if (add === "expense" || add === "income") link = { type: "add", kind: add };
   else if (add === "sms" || shared) {
     const text = (params.get("sms")?.trim() || params.get("title")?.trim() || "").slice(0, SHARED_TEXT_LIMIT);
     link = text ? { type: "sms", text } : { type: "sms" };

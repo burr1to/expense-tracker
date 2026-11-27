@@ -73,6 +73,7 @@ Everything works on a phone, with the add button always under your thumb. Instal
 
 **Made for Nepal**
 - **Paste a bank SMS** and the app fills in the amount, date, merchant and account for you. Common formats are read right in your browser, so the message never leaves your device.
+- **Share straight into the app** on Android: once it's installed to your home screen, long-press a bank SMS or open a receipt photo, tap Share and pick SaveYoRupee. The SMS sheet or receipt scanner opens already filled in, and what you shared stays on your phone. (iPhones don't allow sharing into web apps.)
 - **Bikram Sambat calendar.** Switch the whole app to BS dates in Settings. Your data is still stored in AD, so exports and bank statements line up.
 - **Fiscal year reports** from Shrawan 1 to the end of Ashadh.
 - **Festival spending.** See how this Dashain and Tihar compare with last year.

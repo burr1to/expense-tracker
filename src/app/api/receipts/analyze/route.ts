@@ -37,13 +37,17 @@ function checkRateLimit(userId: string) {
   attempts.set(userId, recent);
 }
 
-function interactionRequest(prompt: string, image: Buffer, mimeType: string, categoryIds: string[]) {
+type ReceiptSource = { text: string } | { image: Buffer; mimeType: string };
+
+function interactionRequest(prompt: string, source: ReceiptSource, categoryIds: string[]) {
   return {
     model: GEMINI_RECEIPT_MODEL,
     store: false,
     input: [
       { type: "text", text: prompt },
-      { type: "image", data: image.toString("base64"), mime_type: mimeType },
+      "text" in source
+        ? { type: "text", text: `<receipt_text>\n${source.text.replaceAll("</receipt_text>", "")}\n</receipt_text>` }
+        : { type: "image", data: source.image.toString("base64"), mime_type: source.mimeType },
     ],
     response_format: {
       type: "text",
@@ -92,12 +96,13 @@ export async function POST(request: Request) {
       currency: user.currency as CurrencyCode,
       categories,
     };
-    const image = await receiptBytes(input.receipt.storagePath);
+    // Phone-read text replaces the photo: the image is not even downloaded.
+    const source: ReceiptSource = input.text ? { text: input.text } : { image: await receiptBytes(input.receipt.storagePath), mimeType: input.receipt.mimeType };
     await consumeAiQuota(db, session.user.id, "receipt");
     const response = await fetch(GEMINI_INTERACTIONS_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify(interactionRequest(receiptAnalysisPrompt(internalInput), image, input.receipt.mimeType, categories.map((category) => category.id))),
+      body: JSON.stringify(interactionRequest(receiptAnalysisPrompt(internalInput, input.text ? "text" : "image"), source, categories.map((category) => category.id))),
       signal: AbortSignal.timeout(35_000),
     });
     if (response.status === 429) throw new AnalysisError("Gemini’s free limit is busy. Wait a moment and try again.", 429);

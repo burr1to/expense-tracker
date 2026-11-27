@@ -26,7 +26,17 @@ export default function manifest(): MetadataRoute.Manifest {
       { name: "Add income", short_name: "Income", url: "/?add=income", icons: shortcutIcon },
       { name: "Paste bank SMS", short_name: "Bank SMS", url: "/?add=sms", icons: shortcutIcon },
     ],
-    // Sharing a bank SMS into the app opens the SMS sheet with the text filled in.
-    share_target: { action: "/", method: "GET", params: { text: "sms", title: "title" } },
+    // Sharing a bank SMS opens the SMS sheet; sharing a receipt photo opens the receipt scanner.
+    // public/sw.js answers this POST on the device, so the shared content never reaches the server.
+    share_target: {
+      action: "/share-target",
+      method: "POST",
+      enctype: "multipart/form-data",
+      params: {
+        title: "title",
+        text: "text",
+        files: [{ name: "receipt", accept: ["image/jpeg", "image/png", "image/webp", ".jpg", ".jpeg", ".png", ".webp"] }],
+      },
+    },
   };
 }
