@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAuthenticatedSession } from "../../../../lib/auth";
 import { getPrisma } from "../../../../lib/prisma";
-import { ensureReceiptsBucket, getStoragePublicConfig, getSupabaseStorageAdmin, isOwnedReceiptPath, newReceiptPath, RECEIPTS_BUCKET, removeStoredReceipts } from "../../../../lib/receipt-storage";
+import { ensureReceiptsBucket, getStoragePublicConfig, getSupabaseStorageAdmin, isOwnedReceiptPath, newReceiptPath, ReceiptStorageError, RECEIPTS_BUCKET, removeStoredReceipts } from "../../../../lib/receipt-storage";
 import { RECEIPT_MAX_BYTES } from "../../../../lib/receipts";
 
 export const dynamic = "force-dynamic";
@@ -25,11 +25,12 @@ export async function POST(request: Request) {
     await ensureReceiptsBucket();
     const path = newReceiptPath(session.user.id, input.mimeType);
     const { data, error } = await getSupabaseStorageAdmin().storage.from(RECEIPTS_BUCKET).createSignedUploadUrl(path);
-    if (error || !data) throw new Error(error?.message ?? "Could not create an upload URL.");
+    if (error || !data) throw new ReceiptStorageError(error?.message ?? "Could not create an upload URL.");
     return NextResponse.json({ path, signedUrl: data.signedUrl, ...getStoragePublicConfig() });
   } catch (error) {
-    const message = error instanceof z.ZodError ? error.issues[0]?.message : error instanceof Error ? error.message : "Could not prepare this upload.";
-    return NextResponse.json({ error: message }, { status: 400 });
+    if (error instanceof z.ZodError) return NextResponse.json({ error: error.issues[0]?.message }, { status: 400 });
+    console.error("Receipt upload storage failed.", error);
+    return NextResponse.json({ error: "Could not prepare this upload. Try again." }, { status: 500 });
   }
 }
 
@@ -52,7 +53,8 @@ export async function DELETE(request: Request) {
     await removeStoredReceipts([storagePath]);
     return new NextResponse(null, { status: 204 });
   } catch (error) {
-    const message = error instanceof z.ZodError ? error.issues[0]?.message : error instanceof Error ? error.message : "Could not discard this upload.";
-    return NextResponse.json({ error: message }, { status: 400 });
+    if (error instanceof z.ZodError) return NextResponse.json({ error: error.issues[0]?.message }, { status: 400 });
+    console.error("Receipt upload storage failed.", error);
+    return NextResponse.json({ error: "Could not discard this upload. Try again." }, { status: 500 });
   }
 }

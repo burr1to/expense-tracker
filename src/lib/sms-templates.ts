@@ -141,10 +141,6 @@ function bankName(name: string) {
 /** Payment rails carry money between accounts but never hold it, so they never name the user's account. */
 const RAIL_PROVIDERS = new Set(["Fonepay"]);
 
-export function detectProvider(text: string): string | null {
-  return detectProviders(text)[0] ?? null;
-}
-
 /** Every known bank or wallet named in the text, in the order they appear. */
 export function detectProviders(text: string): string[] {
   return PROVIDER_KEYWORDS

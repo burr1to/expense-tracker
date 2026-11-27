@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateBudgetPacing, calculateMonthlyBreathingRoom, calculateSafeToSpend, calculateSafeToSpendV2, committedBeforeHorizon, detectSpendingHorizon, recurringAwaitingConfirmation } from "./planning-insights";
+import { calculateBudgetPacing, calculateMonthlyBreathingRoom, calculateSafeToSpendV2, committedBeforeHorizon, detectSpendingHorizon, recurringAwaitingConfirmation } from "./planning-insights";
 import type { Budget, DueItem, LedgerTransaction, RecurringEntry } from "../types";
 import { calculatePeriodBudgetPacing, calculateUnbudgetedSpending } from "./planning-insights";
 
@@ -210,18 +210,6 @@ describe("all-spending, festival and unbudgeted pacing", () => {
 });
 
 describe("monthly breathing room", () => {
-  it("calculates a safe-to-spend estimate from current balance and known commitments", () => {
-    expect(calculateSafeToSpend(1000000, {
-      loggedIncomeMinor: 0,
-      loggedExpensesMinor: 0,
-      upcomingIncomeMinor: 250000,
-      upcomingExpensesMinor: 400000,
-      projectedIncomeMinor: 250000,
-      projectedExpensesMinor: 400000,
-      projectedNetMinor: -150000,
-    })).toBe(850000);
-  });
-
   it("projects logged and upcoming income and expenses without mixing their states", () => {
     const result = calculateMonthlyBreathingRoom(
       [

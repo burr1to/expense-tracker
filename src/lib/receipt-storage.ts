@@ -51,17 +51,17 @@ export async function ensureReceiptsBucket() {
           fileSizeLimit: RECEIPT_MAX_BYTES,
           allowedMimeTypes: RECEIPT_TYPES,
         });
-        if (updated.error) throw new Error(`Could not secure the receipt bucket: ${updated.error.message}`);
+        if (updated.error) throw new ReceiptStorageError(`Could not secure the receipt bucket: ${updated.error.message}`);
         return;
       }
       const status = error && "status" in error ? error.status : undefined;
-      if (status !== 400 && status !== 404) throw new Error(`Could not inspect the receipt bucket: ${error.message}`);
+      if (status !== 400 && status !== 404) throw new ReceiptStorageError(`Could not inspect the receipt bucket: ${error.message}`);
       const created = await storage.createBucket(RECEIPTS_BUCKET, {
         public: false,
         fileSizeLimit: RECEIPT_MAX_BYTES,
         allowedMimeTypes: RECEIPT_TYPES,
       });
-      if (created.error) throw new Error(`Could not create the receipt bucket: ${created.error.message}`);
+      if (created.error) throw new ReceiptStorageError(`Could not create the receipt bucket: ${created.error.message}`);
     })().catch((error) => {
       bucketPromise = null;
       throw error;
@@ -69,6 +69,9 @@ export async function ensureReceiptsBucket() {
   }
   return bucketPromise;
 }
+
+/** A storage outage, not something the user can fix: logged in full, reported to the user as a generic failure. */
+export class ReceiptStorageError extends Error {}
 
 const extensionByMimeType: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -101,5 +104,5 @@ export async function removeStoredReceipts(paths: Array<string | null | undefine
   if (!present.length) return;
   await ensureReceiptsBucket();
   const { error } = await getSupabaseStorageAdmin().storage.from(RECEIPTS_BUCKET).remove(present);
-  if (error) throw new Error(`Could not remove receipt storage: ${error.message}`);
+  if (error) throw new ReceiptStorageError(`Could not remove receipt storage: ${error.message}`);
 }

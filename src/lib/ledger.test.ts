@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LedgerTransaction } from "../types";
-import { dailyExpenseSeries, summarizeLedger } from "./ledger";
+import { summarizeLedger } from "./ledger";
 
 const transaction = (overrides: Partial<LedgerTransaction>): LedgerTransaction => ({
   id: crypto.randomUUID(),
@@ -42,17 +42,5 @@ describe("summarizeLedger", () => {
 
   it("does not divide by zero when no income has been logged", () => {
     expect(summarizeLedger([transaction({})]).savedPercentage).toBe(0);
-  });
-});
-
-describe("dailyExpenseSeries", () => {
-  it("groups expenses by day and ignores income", () => {
-    const result = dailyExpenseSeries([
-      transaction({ amountMinor: 1000 }),
-      transaction({ amountMinor: 2500 }),
-      transaction({ kind: "income", category: "salary", amountMinor: 9000 }),
-    ]);
-    expect(result).toHaveLength(1);
-    expect(result[0].amount).toBe(3500);
   });
 });

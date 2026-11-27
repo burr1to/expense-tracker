@@ -83,10 +83,6 @@ export function linkedLoanSubcategory(dueKind: DueKind | string, role: "opening"
 /** What a reclassified entry goes back to when its link ends, or null when the link never changed it. */
 export interface LinkRestore { category: string; subcategory: string | null }
 
-export function linkRestoreFor(dueKind: DueKind | string, dueAmountMinor: number, transaction: Pick<LedgerTransaction, "category" | "subcategory" | "amountMinor">): LinkRestore | null {
-  return linkMakesLoan(dueKind, dueAmountMinor, transaction) ? { category: transaction.category, subcategory: transaction.subcategory } : null;
-}
-
 /** An entry's dues, so the ledger can say "Lent to Mina" and open the due. A loan's own recorded opening counts too. */
 export interface TransactionDueLink { due: DueItem; role: "opening" | "settlement" }
 

@@ -35,11 +35,6 @@ export function BalancePinHint() {
   return <Link className="balance-pin-hint" href={PIN_SETUP_HREF}><LockKey size={14} />Hide balances with a PIN</Link>;
 }
 
-/** Every "Set up PIN" action goes straight to the PIN form in Profile → Security. */
-export function SetUpPinLink({ className = "secondary-button" }: { className?: string }) {
-  return <Link className={className} href={PIN_SETUP_HREF}><LockKey size={17} />Set up PIN</Link>;
-}
-
 /** The shared PIN prompt, mounted once by LedgerAppLayout. */
 export function BalanceUnlockDialog({ opened, onClose, onUnlock }: { opened: boolean; onClose: () => void; onUnlock: (pin: string) => Promise<void> }) {
   const [pin, setPin] = useState("");

@@ -1,0 +1,30 @@
+name: Dependabot auto-merge
+
+# Turns on auto-merge for Dependabot's minor and patch PRs. GitHub merges them only after the required
+# CI check passes, so a bump that breaks the typecheck, tests or build waits for a person.
+# Majors, and packages that guard sign-in, the database or the framework, always wait for review.
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.repository == 'burr1to/expense-tracker'
+    runs-on: ubuntu-latest
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@v3
+      - name: Enable auto-merge for safe updates
+        if: >-
+          steps.meta.outputs.update-type != 'version-update:semver-major' &&
+          !contains(steps.meta.outputs.dependency-names, 'better-auth') &&
+          !contains(steps.meta.outputs.dependency-names, 'next') &&
+          !contains(steps.meta.outputs.dependency-names, 'prisma') &&
+          !contains(steps.meta.outputs.dependency-names, '@prisma/') &&
+          !contains(steps.meta.outputs.dependency-names, 'pg')
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

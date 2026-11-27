@@ -16,11 +16,6 @@ export function dueOpeningRequestId(dueId: string) {
   return `due-open:${dueId}`;
 }
 
-export function findDueOpeningMovement<T extends Pick<LedgerTransaction, "id">>(transactions: readonly T[], dueId: string): T | undefined {
-  const requestId = dueOpeningRequestId(dueId);
-  return transactions.find((transaction) => (transaction as T & { clientRequestId?: string | null }).clientRequestId === requestId);
-}
-
 /** Every loan's opening movement keyed by due id, found in one pass over the ledger. */
 export function dueOpeningMovementsByDue<T extends Pick<LedgerTransaction, "id">>(transactions: readonly T[]): Map<string, T> {
   const prefix = dueOpeningRequestId("");

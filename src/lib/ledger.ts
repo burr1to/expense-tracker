@@ -58,18 +58,6 @@ export function summarizeLedger(transactions: readonly LedgerTransaction[], cust
   };
 }
 
-export function dailyExpenseSeries(transactions: readonly LedgerTransaction[]) {
-  const totals = new Map<string, number>();
-  for (const transaction of transactions) {
-    if (transaction.kind === "expense" && countsAsIncomeOrSpending(transaction)) {
-      totals.set(transaction.occurredOn, (totals.get(transaction.occurredOn) ?? 0) + transaction.amountMinor);
-    }
-  }
-  return [...totals.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, amount]) => ({ date, label: format(parseISO(date), "MMM d"), amount }));
-}
-
 /** The last six months with activity, bucketed by the user's calendar (BS months in BS mode). */
 export function monthlySeries(transactions: readonly LedgerTransaction[], system: CalendarSystem = "AD") {
   const months = new Map<string, { income: number; expenses: number }>();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { calculateCurrentAccountBalance } from "./account-balances";
-import { actionableDues, dueDateLabel, dueOpeningMovement, dueOpeningRequestId, duePaid, duePaymentHistory, dueRemaining, dueRepaymentMovement, dueCategoryForKind, dueDirection, dueKindForTab, dueOpeningMovementsByDue, findDueOpeningMovement, groupActionableDues, isDebtKind, latestDuePayment, urgentDueCount } from "./dues";
+import { actionableDues, dueDateLabel, dueOpeningMovement, dueOpeningRequestId, duePaid, duePaymentHistory, dueRemaining, dueRepaymentMovement, dueCategoryForKind, dueDirection, dueKindForTab, dueOpeningMovementsByDue, groupActionableDues, isDebtKind, latestDuePayment, urgentDueCount } from "./dues";
 import { monthlySeries, summarizeLedger } from "./ledger";
 import { buildMonthlyReport } from "./monthly-report";
 import { adToBs, formatBs } from "./nepali-date";
@@ -109,12 +109,6 @@ describe("loan movements", () => {
     expect(report.summary).toMatchObject({ incomeMinor: 0, expenseMinor: 40_000, netMinor: -40_000 });
     expect(report.categories.map((category) => category.label)).toEqual(["food"]);
     expect(report.accounts[0]).toMatchObject({ incomeMinor: 300_000, expenseMinor: 340_000 });
-  });
-
-  it("finds the movement recorded when a loan was added", () => {
-    const rows = [{ id: "a", clientRequestId: "other" }, { id: "b", clientRequestId: dueOpeningRequestId("d1") }] as unknown as LedgerTransaction[];
-    expect(findDueOpeningMovement(rows, "d1")?.id).toBe("b");
-    expect(findDueOpeningMovement(rows, "d2")).toBeUndefined();
   });
 
   it("maps every loan's opening movement to its due in one pass", () => {

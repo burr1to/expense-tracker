@@ -69,7 +69,7 @@ interface LedgerContextValue extends LedgerData {
   savePin: (pin: string, currentPin?: string) => Promise<void>; removePin: (currentPin: string) => Promise<void>; verifyPin: (pin: string) => Promise<void>;
   restoreBackup: (file: File, password: string) => Promise<BackupRestoreResult>;
   updateProfile: (changes: Partial<Pick<Profile, "displayName" | "currency" | "hideAmounts" | "autoLockMinutes" | "calendarSystem" | "safeToSpendBufferMinor" | "emailReminders" | "browserReminders">>) => Promise<void>;
-  inviteHousehold: (email: string) => Promise<void>; acceptHousehold: () => Promise<void>; removeHouseholdMember: (email: string) => Promise<void>; leaveHousehold: () => Promise<void>;
+  inviteHousehold: (email: string) => Promise<void>; acceptHousehold: (token: string) => Promise<void>; removeHouseholdMember: (email: string) => Promise<void>; leaveHousehold: () => Promise<void>;
   setLearningEnabled: (enabled: boolean) => Promise<void>; runLearning: () => Promise<number>; resetLearning: () => Promise<void>;
   resetDemo: () => void;
   /** Increases whenever the server reports new activity, so Logs can refresh. */
@@ -301,7 +301,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const updatePaymentAccountTail = useCallback(async (id: string, accountTail: string | null) => mutate("updatePaymentAccountTail", { accountTail: accountTail?.trim() || null }, id), [mutate]);
   const setPaymentAccountShared = useCallback(async (id: string, shared: boolean) => mutate("setPaymentAccountShared", { shared }, id), [mutate]);
   const inviteHousehold = useCallback(async (email: string) => mutate("inviteHousehold", { email }), [mutate]);
-  const acceptHousehold = useCallback(async () => mutate("acceptHousehold"), [mutate]);
+  const acceptHousehold = useCallback(async (token: string) => mutate("acceptHousehold", { token }), [mutate]);
   const removeHouseholdMember = useCallback(async (email: string) => mutate("removeHouseholdMember", { email }), [mutate]);
   const leaveHousehold = useCallback(async () => mutate("leaveHousehold"), [mutate]);
   const updatePaymentAccountBalance = useCallback(async (id: string, balance: string, balanceAsOf: string) => mutate("updatePaymentAccountBalance", { balanceMinor: majorToMinor(balance), balanceAsOf }, id), [mutate]);

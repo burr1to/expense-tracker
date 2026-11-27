@@ -10,6 +10,12 @@ coverage/
 .supabase/
 supabase/.temp/
 *.tsbuildinfo
-*.md 
+*.md
 design-qa.md
 artifacts/
+# Local agent and tool state
+.codex/
+.claude/
+.agents/
+.impeccable/
+outputs/

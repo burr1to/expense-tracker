@@ -5,13 +5,6 @@ import type { LedgerTransaction, SavedPlace, SavedPlaceIconName } from "../types
 export type PlaceTrendPeriodMonths = 1 | 3 | 6 | 12;
 export type PlaceTrendDriver = "frequency" | "average" | "both" | "steady";
 
-export const placeTrendPeriodOptions: { value: PlaceTrendPeriodMonths; shortLabel: string; label: string }[] = [
-  { value: 1, shortLabel: "1M", label: "1 month" },
-  { value: 3, shortLabel: "3M", label: "3 months" },
-  { value: 6, shortLabel: "6M", label: "6 months" },
-  { value: 12, shortLabel: "12M", label: "12 months" },
-];
-
 export interface PlaceSpendingTrend {
   key: string;
   label: string;

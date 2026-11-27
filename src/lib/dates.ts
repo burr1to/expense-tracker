@@ -66,12 +66,6 @@ export function todayInput(now = new Date()): string {
   return todayInAppZone(now);
 }
 
-/** A month marker for the current month in Kathmandu. */
-export function currentMonthMarker(now = new Date()): Date {
-  const [year, month, day] = todayInAppZone(now).split("-").map(Number);
-  return new Date(year, month - 1, day);
-}
-
 /**
  * A transaction date in the user's chosen calendar. Bikram Sambat is shown
  * alongside the Gregorian date rather than replacing it, because receipts,
@@ -105,13 +99,6 @@ export function formatLedgerMonth(month: MonthRef, system: CalendarSystem = "AD"
   const gregorian = format(month, "MMMM yyyy");
   if (system !== "BS") return gregorian;
   return formatBsMonthSpan(toDateInput(startOfMonth(month)), toDateInput(endOfMonth(month))) ?? gregorian;
-}
-
-/** "Sep 17 – Oct 17, 2026": the Gregorian days a period covers, for a BS month's subtitle. */
-export function formatGregorianSpan(month: MonthRef): string {
-  const { start, end } = periodRange(month);
-  const [first, last] = [parseISO(start), parseISO(end)];
-  return `${format(first, first.getFullYear() === last.getFullYear() ? "MMM d" : "MMM d, yyyy")} – ${format(last, "MMM d, yyyy")}`;
 }
 
 /** A local-midnight `Date` for a `YYYY-MM-DD`, for date pickers and date-fns. */
